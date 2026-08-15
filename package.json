@@ -1,0 +1,28 @@
+{
+  "name": "tab-forge",
+  "version": "1.0.0",
+  "description": "扒谱工具 - Guitar Tablature Transcriber (吉他六线谱转录器)",
+  "main": "src/popup.ts",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "tsc && vite build",
+    "dev:web": "vite dev --config vite.web.config.ts",
+    "build:web": "tsc && vite build --config vite.web.config.ts"
+  },
+  "keywords": [
+    "guitar",
+    "tab",
+    "tablature",
+    "music",
+    "transcriber"
+  ],
+  "author": "Sean Xie",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/chrome": "^0.2.6",
+    "typescript": "~5.8.3",
+    "vite": "^4.3.9",
+    "vite-plugin-static-copy": "^0.17.1"
+  }
+}
