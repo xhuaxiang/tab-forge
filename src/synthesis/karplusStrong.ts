@@ -1,5 +1,5 @@
 /**
- * Karplus-Strong 琴弦合成算法
+ * Karplus-Strong 琴弦合成算法（纯计算层）
  *
  * 物理原理：
  *   拨弦 → 噪声激励 → 延迟线(长度=采样率/频率) → 低通 → 反馈
@@ -7,7 +7,9 @@
  * 每次迭代:
  *   data[n] = (data[n-L]*0.5 + data[n-L-1]*0.3 + data[n-L-2]*0.2) * decay
  *
- * 该文件仅负责"生成琴弦振动缓冲区"，不关心 AudioContext 的连接。
+ * 本文件只做"纯计算"：输入参数，输出裸 Float32Array 采样数据。
+ * 不创建 AudioContext、无副作用，可在 Node 中单测，也便于直接导出 WAV。
+ * 包装为 AudioBuffer 由 toAudioBuffer() 负责（浏览器环境）。
  */
 
 export interface KSParams {
@@ -22,28 +24,30 @@ export interface KSParams {
     sustain?: number;
 }
 
-export interface KSBuffer {
-    buffer: AudioBuffer;
+/** 纯计算输出：裸采样数据 + 元信息 */
+export interface KSBufferData {
+    data: Float32Array;
+    sampleRate: number;
+    /** 实际有效时长（秒） */
     duration: number;
 }
 
 /**
- * 使用 Karplus-Strong 算法生成琴弦振动 AudioBuffer
+ * 使用 Karplus-Strong 算法生成琴弦振动采样数据。
+ * 不依赖 Web Audio API，返回裸 Float32Array。
  */
-export function generateStringBuffer(params: KSParams): AudioBuffer {
+export function generateStringData(params: KSParams): KSBufferData {
     const { frequency, duration, sampleRate, string: stringNum, mute, sustain } = params;
 
+    // 频率无效时返回 1 采样的静音数据（调用方也可自行短路）
     if (frequency <= 0) {
-        const empty = new AudioContext().createBuffer(1, 1, sampleRate);
-        return empty;
+        return { data: new Float32Array(1), sampleRate, duration: 0 };
     }
 
     const delaySamples = Math.max(2, Math.round(sampleRate / frequency));
     const totalSamples = Math.max(delaySamples + 1, Math.round(sampleRate * (duration + 0.05)));
 
-    const ctx = new OfflineAudioContext(1, totalSamples, sampleRate);
-    const buffer = ctx.createBuffer(1, totalSamples, sampleRate);
-    const data = buffer.getChannelData(0);
+    const data = new Float32Array(totalSamples);
 
     const str = stringNum ?? 3;
     const isLow = str >= 4;
@@ -61,8 +65,7 @@ export function generateStringBuffer(params: KSParams): AudioBuffer {
 
     // ---- 第2步：反馈循环（延迟线 + 低通 + 衰减） ----
     // 衰减按音符"记谱时值"缩放：到槽位结束时衰减到约 10%。
-    // 旧实现是固定 0.985~0.995/周期，低音弦实际要响 9 秒+，音符互相叠成"糊/黏"。
-    // 现在短音快速收干、长音自然延音，音符之间能分得开。
+    // 短音快速收干、长音自然延音，音符之间能分得开。
     const ringDuration = Math.max(0.06, sustain ?? duration); // 至少保留 60ms 琴身主体
     const sustainFactor = isLow ? 1.15 : (isHigh ? 0.9 : 1.0); // 低音弦稍长、高音弦稍短
     const decay = mute
@@ -78,7 +81,6 @@ export function generateStringBuffer(params: KSParams): AudioBuffer {
         }
     } else {
         // 正常琴弦：不同弦用不同低通量——低音弦多低通（更暖更原声），高音弦少低通（更亮）。
-        // 低音弦若用两点平均，周期长、高频泛音几乎不被衰减，就会发"电吉他味"。
         const [w1, w2, w3] = isLow
             ? [0.55, 0.25, 0.2]   // 低音：三点低通，圆润原声
             : isHigh
@@ -94,6 +96,16 @@ export function generateStringBuffer(params: KSParams): AudioBuffer {
         }
     }
 
+    return { data, sampleRate, duration };
+}
+
+/**
+ * 将纯采样数据包装为 AudioBuffer（浏览器环境）。
+ * 应用层唯一需要接触 AudioContext 的地方。
+ */
+export function toAudioBuffer(ctx: BaseAudioContext, ks: KSBufferData): AudioBuffer {
+    const buffer = ctx.createBuffer(1, ks.data.length, ks.sampleRate);
+    buffer.getChannelData(0).set(ks.data);
     return buffer;
 }
 

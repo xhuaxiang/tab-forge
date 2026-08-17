@@ -11,6 +11,8 @@
  *   sampler.ts       — 采样播放器
  */
 
-export { generateStringBuffer, getBodyFilterPreset } from './karplusStrong.ts';
-export type { KSParams, KSBuffer } from './karplusStrong.ts';
+export { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
+export type { KSParams, KSBufferData } from './karplusStrong.ts';
 export { GuitarEngine } from './guitarEngine.ts';
+export { buildSchedule, beatDurationSec, DURATION_TO_BEATS } from './scheduling.ts';
+export type { ScheduledEvent, PlaybackSchedule } from './scheduling.ts';

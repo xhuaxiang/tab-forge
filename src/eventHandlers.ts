@@ -449,7 +449,7 @@ export function initEventListeners(): void {
     $('recordBtn')?.addEventListener('click', async () => {
         const btn = $('recordBtn')!;
         const st = $('audioStatus')!;
-        const { currentAudioRecorder } = await import('./audioEngine.ts');
+        const { currentAudioRecorder } = await import('./recorder.ts');
         if (currentAudioRecorder.getIsRecording()) {
             const blob = currentAudioRecorder.stopRecording();
             btn.textContent = '⏺ 录音';

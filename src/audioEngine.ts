@@ -2,13 +2,13 @@
  * AudioEngine - 音频引擎
  * 负责:
  * 1. 播放六线谱 (Web Audio API 合成)
- * 2. 录音/音频输入 (用于未来扒谱分析)
+ * 2. 录音已拆到 recorder.ts
  */
 
 import type { TabScore, Note, Tuning, Measure } from './types/index.ts';
 import { getNoteFromFret, getNoteFrequency } from './types/index.ts';
 import { GuitarEngine } from './synthesis/guitarEngine.ts';
-import { forEachSlot } from './utils/measureUtils.ts';
+import { buildSchedule } from './synthesis/scheduling.ts';
 
 /** 播放状态 */
 export type PlaybackState = 'idle' | 'playing' | 'paused' | 'stopped';
@@ -141,103 +141,11 @@ export class AudioEngine {
         // 清空弦记录
         this.stringNoteMap.clear();
 
-        // 计算时值
-        const beatDuration = 60 / this.bpm;  // 一拍的时间（秒）
-
-        // 各音符时值对应的秒数
-        const durationMap: Record<number, number> = {
-            1: beatDuration * 4,      // 全音符 = 4拍
-            0.5: beatDuration * 2,    // 二分音符 = 2拍
-            0.25: beatDuration,       // 四分音符 = 1拍
-            0.125: beatDuration / 2,  // 八分音符 = 1/2拍
-            0.0625: beatDuration / 4, // 十六分音符 = 1/4拍
-            0.03125: beatDuration / 8,// 三十二分音符 = 1/8拍
-        };
-
-        // 构建完整播放队列（按时间顺序），使用 setTimeout 调度
-        interface ScheduledNote {
-            note: Note;
-            delayMs: number;
-            duration: number;
-            volume?: number;
-        }
-
-        const schedule: ScheduledNote[] = [];
-        let cursorMs = 100; // 延迟100ms开始
-
-        for (let m = 0; m < this.measures.length; m++) {
-            const measure = this.measures[m];
-            let measureStartMs = cursorMs;
-
-            forEachSlot(measure, (notes) => {
-                const durSec = durationMap[notes[0].duration] || beatDuration;
-                const durMs = durSec * 1000;
-
-                // 和弦音量补偿：多个音符同时播放时适当降低避免削波
-                // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
-                const chordVolume = 0.5 / (1 + (notes.length - 1) * 0.25);
-
-                const arpeggio = notes.length > 1 ? notes[0].arpeggio : undefined;
-                const strum = notes.length > 1 ? notes[0].strum : undefined;
-
-                if (strum) {
-                    // ---- 扫弦：极短时间内依次拨弦（快速扫过，每弦间隔 10-15ms）----
-                    const strumIntervalMs = 12; // 扫弦间隔（毫秒）
-                    // down=从6弦到1弦（低→高），up=从1弦到6弦（高→低）
-                    const sorted = [...notes].sort((a, b) => {
-                        const sa = a.string ?? 6;
-                        const sb = b.string ?? 6;
-                        return strum === 'down' ? sb - sa : sa - sb;
-                    });
-                    for (let i = 0; i < sorted.length; i++) {
-                        const note = sorted[i];
-                        if (note.isRest) continue;
-                        schedule.push({
-                            note,
-                            delayMs: cursorMs + i * strumIntervalMs,
-                            duration: durSec,
-                            volume: chordVolume,
-                        });
-                    }
-                } else if (arpeggio) {
-                    // ---- 琶音：依次拨弦，每根弦间隔 40ms ----
-                    const arpIntervalMs = 40;
-                    const sorted = [...notes].sort((a, b) => {
-                        const sa = a.string ?? 6;
-                        const sb = b.string ?? 6;
-                        return arpeggio === 'up' ? sb - sa : sa - sb;
-                    });
-                    for (let i = 0; i < sorted.length; i++) {
-                        const note = sorted[i];
-                        if (note.isRest) continue;
-                        schedule.push({
-                            note,
-                            delayMs: cursorMs + i * arpIntervalMs,
-                            duration: durSec,
-                            volume: chordVolume,
-                        });
-                    }
-                } else {
-                    // ---- 普通和弦或单音：同时播放 ----
-                    for (const note of notes) {
-                        if (note.isRest || (note.tieToNext && !note.technique)) continue;
-                        schedule.push({ note, delayMs: cursorMs, duration: durSec, volume: chordVolume });
-                    }
-                }
-
-                cursorMs += durMs;
-            });
-
-            // 如果小节空，默认占4拍
-            if (cursorMs - measureStartMs < beatDuration * 4 * 1000 - 1) {
-                cursorMs = measureStartMs + beatDuration * 4 * 1000;
-            }
-        }
-
-        const totalDurationMs = cursorMs;
+        // 构建播放调度（纯函数层：时值→秒、扫弦/琶音、音量补偿、空小节兜底）
+        const { events, totalDurationMs } = buildSchedule(this.measures, this.bpm);
 
         // 调度播放所有音符
-        for (const item of schedule) {
+        for (const item of events) {
             setTimeout(() => {
                 if (this.state !== 'playing') return;
                 this.playNote(item.note, item.duration, item.volume);
@@ -306,66 +214,5 @@ export class AudioEngine {
     }
 }
 
-/**
- * 录音管理器 (用于未来扒谱功能)
- */
-export class AudioRecorder {
-    private mediaRecorder: MediaRecorder | null = null;
-    private audioChunks: Blob[] = [];
-    private stream: MediaStream | null = null;
-    private isRecording: boolean = false;
-
-    /** 开始录音 */
-    async startRecording(): Promise<boolean> {
-        try {
-            this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-            this.mediaRecorder = new MediaRecorder(this.stream, {
-                mimeType: MediaRecorder.isTypeSupported('audio/webm')
-                    ? 'audio/webm'
-                    : 'audio/mp4',
-            });
-
-            this.audioChunks = [];
-
-            this.mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    this.audioChunks.push(event.data);
-                }
-            };
-
-            this.mediaRecorder.start();
-            this.isRecording = true;
-            return true;
-        } catch (error) {
-            console.error('录音启动失败:', error);
-            return false;
-        }
-    }
-
-    /** 停止录音 */
-    stopRecording(): Blob | null {
-        if (this.mediaRecorder && this.isRecording) {
-            this.mediaRecorder.stop();
-            this.isRecording = false;
-
-            if (this.stream) {
-                this.stream.getTracks().forEach(track => track.stop());
-                this.stream = null;
-            }
-
-            if (this.audioChunks.length > 0) {
-                return new Blob(this.audioChunks, { type: 'audio/webm' });
-            }
-        }
-        return null;
-    }
-
-    /** 获取录音状态 */
-    getIsRecording(): boolean {
-        return this.isRecording;
-    }
-}
-
 /** 全局单例 */
 export const currentAudioEngine = new AudioEngine();
-export const currentAudioRecorder = new AudioRecorder();

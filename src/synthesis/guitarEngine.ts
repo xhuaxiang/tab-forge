@@ -13,7 +13,7 @@
  *   - 乐谱调度（由 audioEngine.ts 负责）
  */
 
-import { generateStringBuffer, getBodyFilterPreset } from './karplusStrong.ts';
+import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 
 export interface NoteOptions {
     frequency?: number;
@@ -82,7 +82,8 @@ export class GuitarEngine {
         const soundDur = Math.max(duration, 0.05) + 0.2;
 
         // ---- 1) 调用 Karplus-Strong 生成琴弦振动 ----
-        const buffer = generateStringBuffer({
+        // 算法层输出裸采样数据，这里包装为 AudioBuffer
+        const ks = generateStringData({
             frequency,
             duration: soundDur,
             sampleRate: ctx.sampleRate,
@@ -91,6 +92,7 @@ export class GuitarEngine {
             // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音
             sustain: duration,
         });
+        const buffer = toAudioBuffer(ctx, ks);
 
         // ---- 2) 构建音频信号链 ----
         const mixGain = ctx.createGain();
