@@ -77,6 +77,12 @@ describe('getBodyFilterPreset', () => {
         const high = getBodyFilterPreset(1);
         expect(low.lowpassFreq).toBeLessThan(high.lowpassFreq);
     });
+
+    it('低音弦琴体共振增益更低,避免 200Hz 处过"轰"', () => {
+        const low = getBodyFilterPreset(6);
+        const high = getBodyFilterPreset(1);
+        expect(low.resonanceGain).toBeLessThan(high.resonanceGain);
+    });
 });
 
 describe('toAudioBuffer', () => {

@@ -67,7 +67,8 @@ export function generateStringData(params: KSParams): KSBufferData {
     // 衰减按音符"记谱时值"缩放：到槽位结束时衰减到约 10%。
     // 短音快速收干、长音自然延音，音符之间能分得开。
     const ringDuration = Math.max(0.06, sustain ?? duration); // 至少保留 60ms 琴身主体
-    const sustainFactor = isLow ? 1.15 : (isHigh ? 0.9 : 1.0); // 低音弦稍长、高音弦稍短
+    // 低音弦不再额外拉长延音(原 1.15),降低低音"突出感"；高音弦仍稍短
+    const sustainFactor = isLow ? 1.0 : (isHigh ? 0.9 : 1.0);
     const decay = mute
         ? 0.6 // 闷音：极快衰减（≈1ms）
         : Math.pow(0.03, 1 / (sampleRate * ringDuration * sustainFactor));
@@ -122,9 +123,11 @@ export function getBodyFilterPreset(stringNum?: number): {
     const isHigh = str <= 2;
 
     return {
-        // 低音弦低通保持较低（~3500）不发"电味"；高音弦 6000 避免过于尖锐
-        lowpassFreq: isLow ? 3500 : (isHigh ? 6000 : 6500),
-        resonanceFreq: isLow ? 200 : 800,
-        resonanceGain: 3.0,
+        // 低音弦低通再降到 2500：更暗更沉、不抢戏；高音弦 6000 避免过于尖锐
+        lowpassFreq: isLow ? 2500 : (isHigh ? 6000 : 6500),
+        // 低音共振峰下移到 180Hz：低音"沉"在下面，不顶在 200Hz 处
+        resonanceFreq: isLow ? 180 : 800,
+        // 低音弦保持低共振增益(1.5)，不增加响度上的"突出"
+        resonanceGain: isLow ? 1.5 : 3.0,
     };
 }
