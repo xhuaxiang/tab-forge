@@ -423,8 +423,7 @@ export function initEventListeners(): void {
         if (scoreStore.score.measures.length === 0) { setStatus('无内容', 'error'); return; }
         const playBtn = $('playBtn')!;
         const stopBtn = $('stopBtn')!;
-        const audioEngine = (await import('./audioEngine.ts')).currentAudioEngine;
-        audioEngine.setCallbacks({
+        const callbacks: import('./audioEngine.ts').PlaybackCallbacks = {
             onStateChange: (s) => {
                 playBtn.textContent = s === 'playing' ? '⏸ 暂停' : (s === 'paused' ? '▶ 继续' : '▶ 播放');
                 stopBtn.toggleAttribute('disabled', s === 'stopped');
@@ -435,13 +434,29 @@ export function initEventListeners(): void {
                 playBtn.textContent = '▶ 播放';
                 stopBtn.setAttribute('disabled', '');
             },
-        });
+        };
+        const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'ks';
+        if (engine === 'alphatab') {
+            try {
+                const { alphaTabPlayer } = await import('./alphaTab/alphaTabPlayer.ts');
+                alphaTabPlayer.setCallbacks(callbacks);
+                await alphaTabPlayer.play(scoreStore.score);
+                return;
+            } catch (e) {
+                console.error('alphaTab 播放失败，回退 Karplus-Strong', e);
+                setStatus('SoundFont 播放失败，已回退合成器', 'error');
+            }
+        }
+        const audioEngine = (await import('./audioEngine.ts')).currentAudioEngine;
+        audioEngine.setCallbacks(callbacks);
         await audioEngine.play(scoreStore.score);
     });
 
     $('stopBtn')?.addEventListener('click', async () => {
         const { currentAudioEngine } = await import('./audioEngine.ts');
         currentAudioEngine.stop();
+        const { alphaTabPlayer } = await import('./alphaTab/alphaTabPlayer.ts');
+        alphaTabPlayer.stop();
         setStatus('已停止', 'info');
     });
 

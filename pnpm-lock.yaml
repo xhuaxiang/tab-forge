@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      '@coderline/alphatab':
+        specifier: ^1.8.4
+        version: 1.8.4
     devDependencies:
       '@types/chrome':
         specifier: ^0.2.6
@@ -25,6 +29,10 @@ importers:
         version: 0.34.6
 
 packages:
+
+  '@coderline/alphatab@1.8.4':
+    resolution: {integrity: sha512-VN5rfTZZWgA63Ny1aDKCp02k3Qm9CHhg4Q9AnK0kHm7G+fNDNZo36TeToPDFoJ6VpB9+AHcCrHwHFUP1tKqdsw==, tarball: https://registry.npmmirror.com/@coderline/alphatab/-/alphatab-1.8.4.tgz}
+    engines: {node: '>=6.0.0'}
 
   '@esbuild/android-arm64@0.18.20':
     resolution: {integrity: sha512-Nz4rJcchGDtENV0eMKUNa6L12zz2zBDXuhj/Vjh18zGqB44Bi7MBMSXjgunJgjRhCmKOjnPuZp4Mb6OKqtMHLQ==, tarball: https://registry.npmmirror.com/@esbuild/android-arm64/-/android-arm64-0.18.20.tgz}
@@ -551,6 +559,8 @@ packages:
     engines: {node: '>=12.20'}
 
 snapshots:
+
+  '@coderline/alphatab@1.8.4': {}
 
   '@esbuild/android-arm64@0.18.20':
     optional: true
