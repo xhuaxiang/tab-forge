@@ -49,12 +49,16 @@
 /* ===== Reset ===== */
 *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
 
+/* 整体布局：内容水平居中（popup 固定宽度无感，网页宽窗口下居中） */
+html { background: var(--bg-primary); }
+
 body {
     font-family: var(--font-sans);
     background: var(--bg-primary);
     color: var(--text-primary);
     width: 780px;
     min-height: 660px;
+    margin: 0 auto;
     overflow-x: hidden;
     -webkit-font-smoothing: antialiased;
 }
@@ -109,6 +113,17 @@ body {
 .toolbar button:hover { background:#0f3460; border-color:var(--accent-primary); color:#fff; }
 .toolbar button:disabled { opacity:0.4; cursor:not-allowed; }
 .toolbar-sep { width:1px; height:18px; background:var(--border-default); margin:0 2px; }
+
+/* 工具栏引擎下拉：样式对齐工具栏按钮 */
+.toolbar select {
+    padding:3px 8px 3px 8px; border:1px solid var(--border-input); border-radius:var(--radius-md);
+    background:var(--bg-secondary); color:var(--text-secondary);
+    font-size:12px; cursor:pointer; outline:none;
+    appearance:none; -webkit-appearance:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path d='M0 0h8L4 5z' fill='%23888'/></svg>");
+    background-repeat:no-repeat; background-position:right 7px center; padding-right:18px;
+}
+.toolbar select:hover { border-color:var(--accent-primary); color:#fff; }
 
 /* ===== 六线谱显示区 ===== */
 .tab-area {

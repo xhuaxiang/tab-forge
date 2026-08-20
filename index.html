@@ -54,8 +54,11 @@
                 </div>
             </div>
 
-            <!-- Main Controls: 两列布局 -->
-            <div class="controls">
+            <!-- 折叠面板：音符 + 和弦（默认收起） -->
+            <details class="collapse-section">
+                <summary>🎸 音符 &amp; 和弦</summary>
+                <div class="collapse-content">
+                <div class="controls">
                 <!-- 左列：音符编辑 -->
                 <div class="control-group">
                     <div class="cg-header">
@@ -188,10 +191,12 @@
                         </div>
                     </div>
                 </div>
-            </div>
+                </div>
+                </div>
+            </details>
 
             <!-- 折叠面板：AI 即兴设置 -->
-            <details class="collapse-section" id="aiSettingsPanel">
+            <details class="collapse-section" id="aiSettingsPanel" open>
                 <summary>🤖 AI 即兴生成</summary>
                 <div class="collapse-content">
                     <div class="collapse-row">
