@@ -61,7 +61,8 @@ export function createAlphaTabWorkletOutput(
         }
 
         play(): void {
-            super.play();
+            // 不调 super.play()：基类会创建未 start 的 this.source，之后 stop() 会抛 InvalidStateError
+            this.activate();
             // 先请求一轮合成，addModule 期间采样进入 _pendingSamples
             this.onSampleRequest();
             void this._ensureWorklet().then(() => {
@@ -75,7 +76,7 @@ export function createAlphaTabWorkletOutput(
         }
 
         pause(): void {
-            super.pause();
+            // 不调 super.pause()：基类会对未 start 的 source 调 stop() 抛 InvalidStateError
             if (this._workletNode) this._workletNode.disconnect(0);
             this._connected = false;
         }
