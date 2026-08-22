@@ -642,23 +642,51 @@ async function handleAIGenerate(): Promise<void> {
             return;
         }
 
-        // 将 AI 生成的音符写入乐谱（自动创建小节）
-        for (const rawNote of result.notes) {
-            const dur = rawNote.duration || 0.25;
+        // 先清空乐谱，再输出全新即兴（避免追加旧内容导致小节结构混乱/堆叠）
+        scoreStore.clear();
+        if (scoreStore.score.measures.length === 0) {
+            scoreStore.addMeasure();
+        }
+
+        // 按 chordGroup 把连续音符分组为拍位：和弦整体进一小节，不被切开，容量按拍位计
+        const slots: Note[][] = [];
+        let current: Note[] = [];
+        for (const n of result.notes) {
+            if (n.chordGroup !== undefined && current.length > 0 && current[0].chordGroup === n.chordGroup) {
+                current.push(n);
+            } else {
+                if (current.length > 0) slots.push(current);
+                current = [n];
+            }
+        }
+        if (current.length > 0) slots.push(current);
+
+        let written = 0;
+        for (const slot of slots) {
+            const dur = slot[0].duration || 0.25;
             let measure = scoreStore.getActiveMeasure();
             if (!canAddToMeasure(measure, dur)) {
                 scoreStore.addMeasure();
                 measure = scoreStore.getActiveMeasure();
             }
-            if (rawNote.isRest) {
+            if (slot[0].isRest) {
                 scoreStore.addRest(dur);
-            } else {
-                scoreStore.addNote(rawNote as Note);
+                written++;
+                continue;
+            }
+            // 和弦内同弦去重（避免同一 X 上音符重叠），其余按序写入
+            const seenStrings = new Set<number>();
+            for (const n of slot) {
+                if (n.isRest || n.string === undefined) continue;
+                if (seenStrings.has(n.string)) continue;
+                seenStrings.add(n.string);
+                scoreStore.addNote(n);
+                written++;
             }
         }
 
         render();
-        setStatus(`✅ AI 已生成 ${result.notes.length} 个音符`, 'success');
+        setStatus(`✅ AI 已生成 ${written} 个音符`, 'success');
         if (statusEl) statusEl.textContent = `✅ 成功！已生成 ${result.notes.length} 个音符，${scoreStore.score.measures.length} 个小节`;
     } catch (e) {
         const msg = e instanceof Error ? e.message : '未知错误';
