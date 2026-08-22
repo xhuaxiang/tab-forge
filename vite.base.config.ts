@@ -4,6 +4,9 @@ import { defineConfig } from "vite";
 export default defineConfig({
     plugins: [],
     build: {
+        worker: {
+            format: 'es',
+        },
         rollupOptions: {
             output: {
                 entryFileNames: "[name].js",

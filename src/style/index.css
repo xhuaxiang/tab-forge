@@ -125,6 +125,19 @@ body {
 }
 .toolbar select:hover { border-color:var(--accent-primary); color:#fff; }
 
+/* 渲染方式切换（画布 / alphaTab，分段滑动式） */
+.renderer-switch {
+    display:flex; border:1px solid var(--border-input); border-radius:var(--radius-md); overflow:hidden;
+}
+.renderer-switch button {
+    padding:2px 8px; font-size:11px; border:none; background:var(--bg-secondary);
+    color:var(--text-muted); cursor:pointer; transition:all var(--transition-fast);
+}
+.renderer-switch button.active {
+    background:var(--accent-primary); color:var(--bg-primary); font-weight:600;
+}
+.renderer-switch button:hover:not(.active) { background:#0f3460; color:#fff; }
+
 /* ===== 六线谱显示区 ===== */
 .tab-area {
     background:var(--bg-tertiary); border:1px solid var(--border-default); border-radius:var(--radius-lg);

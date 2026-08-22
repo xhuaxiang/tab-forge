@@ -8,7 +8,7 @@
 import type { Note } from './types/index.ts';
 import { TUNING_PRESETS } from './types/index.ts';
 import { exportToAsciiTab, exportToJson } from './tabRenderer.ts';
-import { $, setStatus, render, getSearchSelectValue, durationName } from './state.ts';
+import { $, setStatus, render, setRenderMode, getSearchSelectValue, durationName } from './state.ts';
 import { canAddToMeasure } from './utils/measureUtils.ts';
 import { scoreStore } from './stores/scoreStore.ts';
 import { uiStore } from './stores/uiStore.ts';
@@ -490,6 +490,28 @@ export function initEventListeners(): void {
         btn.addEventListener('click', () => {
             document.querySelectorAll('.tab-nav button').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
+        });
+    });
+
+    // --- 渲染方式切换（画布 / alphaTab） ---
+    document.querySelectorAll('#rendererSwitch button').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const mode = btn.getAttribute('data-render');
+            if (mode !== 'canvas' && mode !== 'alphaTab') return;
+            document.querySelectorAll('#rendererSwitch button').forEach(b => {
+                b.classList.toggle('active', b === btn);
+            });
+            try {
+                await setRenderMode(mode);
+                setStatus(mode === 'alphaTab' ? '已切换到 alphaTab 渲染' : '已切换到画布渲染', 'info');
+            } catch (e) {
+                console.error('切换渲染器失败，回退画布', e);
+                setStatus('alphaTab 渲染初始化失败，已回退画布', 'error');
+                document.querySelectorAll('#rendererSwitch button').forEach(b => {
+                    b.classList.toggle('active', b.getAttribute('data-render') === 'canvas');
+                });
+                await setRenderMode('canvas');
+            }
         });
     });
 

@@ -7,11 +7,54 @@
 
 import { TabCanvasRenderer, createTabCanvas } from './canvas/index.ts';
 import { scoreStore } from './stores/scoreStore.ts';
+// 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
+import type { AlphaTabRenderer } from './alphaTab/alphaTabRenderer.ts';
 // ============================================================
-// 渲染器实例
+// 渲染器实例与切换
 // ============================================================
 
+export type RenderMode = 'canvas' | 'alphaTab';
+
 let canvasRenderer: TabCanvasRenderer | null = null;
+let alphaTabRenderer: AlphaTabRenderer | null = null;
+let renderMode: RenderMode = 'canvas';
+
+/** 当前渲染模式 */
+export function getRenderMode(): RenderMode {
+    return renderMode;
+}
+
+/** 切换渲染器：canvas（自研）↔ alphaTab（专业渲染，懒加载）
+ *
+ * 两个渲染器各自有独立容器：
+ * - #tabContent        自研 Canvas 六线谱
+ * - #alphaTabContainer alphaTab 专业渲染
+ * 切换时显示目标容器、隐藏另一个（swiper 式两块互切）。
+ */
+export async function setRenderMode(mode: RenderMode): Promise<void> {
+    if (mode === renderMode) return;
+    renderMode = mode;
+    const tabContainer = $('tabContent')!;
+    const alphaContainer = $('alphaTabContainer')!;
+
+    if (mode === 'alphaTab') {
+        tabContainer.style.display = 'none';
+        alphaContainer.style.display = 'block';
+        canvasRenderer = null;
+        alphaTabRenderer?.dispose();
+        const { AlphaTabRenderer } = await import('./alphaTab/alphaTabRenderer.ts');
+        alphaTabRenderer = new AlphaTabRenderer();
+        await alphaTabRenderer.mount(alphaContainer);
+        render();
+    } else {
+        alphaContainer.style.display = 'none';
+        tabContainer.style.display = 'block';
+        alphaTabRenderer?.dispose();
+        alphaTabRenderer = null;
+        initCanvasRenderer();
+        render();
+    }
+}
 
 // ============================================================
 // DOM 工具
@@ -47,8 +90,13 @@ export function initCanvasRenderer(): void {
 }
 
 export function render(): void {
-    if (!canvasRenderer) initCanvasRenderer();
-    canvasRenderer!.render(scoreStore.score);
+    console.log(renderMode)
+    if (renderMode === 'alphaTab') {
+        alphaTabRenderer?.render(scoreStore.score);
+    } else {
+        if (!canvasRenderer) initCanvasRenderer();
+        canvasRenderer!.render(scoreStore.score);
+    }
 }
 
 /** 获取当前 Canvas 渲染器（外部只读） */
