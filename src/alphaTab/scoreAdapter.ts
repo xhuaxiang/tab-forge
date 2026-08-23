@@ -7,7 +7,7 @@
  */
 
 import * as alphaTab from '@coderline/alphatab';
-import type { Note, NoteDuration, TabScore } from '../types/index.ts';
+import type { Note, NoteDuration, TabScore, Measure } from '../types/index.ts';
 import { forEachSlot } from '../utils/measureUtils.ts';
 
 /** 扫弦每弦间隔（毫秒），与 synthesis/scheduling.ts 保持一致 */
@@ -73,8 +73,14 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
     s.artist = score.artist ?? '';
     if (score.remarks) s.notices = score.remarks;
 
+    // 空谱兜底：至少生成一个小节，避免 alphaTab 渲染/MIDI 对空谱（0 bar / 0 track）报错
+    // （渲染器对空谱会走空状态提示而不调用本函数，这里兜底给播放等其他路径）
+    const measures: Measure[] = score.measures.length > 0
+        ? score.measures
+        : [{ index: 0, notes: [], timeSignatureNumerator: 4, timeSignatureDenominator: 4 }];
+
     // 先加入所有 MasterBar（Staff.addBar 按 bars.length-1 关联同序 masterBar）
-    for (const m of score.measures) {
+    for (const m of measures) {
         const mb = new at.model.MasterBar();
         mb.timeSignatureNumerator = m.timeSignatureNumerator;
         mb.timeSignatureDenominator = m.timeSignatureDenominator;
@@ -110,7 +116,7 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
 
     const flat: FlatEntry[] = [];
 
-    for (const measure of score.measures) {
+    for (const measure of measures) {
         const bar = new at.model.Bar();
         const voice = new at.model.Voice();
         let beatCount = 0;

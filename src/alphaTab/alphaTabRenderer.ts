@@ -28,6 +28,7 @@ export class AlphaTabRenderer {
     private mounted = false;
     private boundsLookup: BoundsLookupLike | null = null;
     private unsubscribeRenderFinished: (() => void) | null = null;
+    private emptyStateEl: HTMLElement | null = null;
     private readonly onClickBound = (e: MouseEvent): void => this.onContainerClick(e);
 
     /** 是否已就绪（可渲染） */
@@ -92,6 +93,19 @@ export class AlphaTabRenderer {
     /** 渲染当前谱面（load 后由 alphaTab 异步渲染） */
     render(score: TabScore): void {
         if (!this.api || !this.mod) return;
+        if (score.measures.length === 0) {
+            // 空谱：不加载 alphaTab（避免渲染占位/报错），显示空状态提示
+            if (!this.emptyStateEl || !this.container?.contains(this.emptyStateEl)) {
+                this.emptyStateEl = document.createElement('div');
+                this.emptyStateEl.className = 'empty-state';
+                this.emptyStateEl.innerHTML = '点击「+ 小节」开始创建吉他六线谱<br>'
+                    + '<span class="hint">提示：数字 = 品位，0 = 空弦，- = 不弹</span>';
+                this.container?.appendChild(this.emptyStateEl);
+            }
+            return;
+        }
+        this.emptyStateEl?.remove();
+        this.emptyStateEl = null;
         const atScore = tabScoreToAlphaTabScore(score);
         this.api.load(atScore);
     }
@@ -101,6 +115,8 @@ export class AlphaTabRenderer {
         this.unsubscribeRenderFinished = null;
         this.container?.removeEventListener('click', this.onClickBound);
         this.boundsLookup = null;
+        this.emptyStateEl?.remove();
+        this.emptyStateEl = null;
         this.api?.destroy();
         this.api = null;
         this.mod = null;
