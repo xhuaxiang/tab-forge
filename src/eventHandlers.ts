@@ -8,12 +8,13 @@
 import type { Note } from './types/index.ts';
 import { TUNING_PRESETS } from './types/index.ts';
 import { exportToAsciiTab, exportToJson } from './tabRenderer.ts';
-import { $, setStatus, render, setRenderMode, getSearchSelectValue, durationName } from './state.ts';
+import { $, setStatus, render, setRenderMode, durationName } from './state.ts';
 import { canAddToMeasure } from './utils/measureUtils.ts';
 import { scoreStore } from './stores/scoreStore.ts';
 import { uiStore } from './stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { getApiKey, saveApiKey, generateImprovisation, type GenerationOptions } from './improvisation/index.ts';
+import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from './alphaTab/scoreEditing.ts';
 
 // ============================================================
 // Search-Select 事件
@@ -21,21 +22,6 @@ import { getApiKey, saveApiKey, generateImprovisation, type GenerationOptions } 
 
 function closeAllSelects(): void {
     document.querySelectorAll('.search-select.open').forEach(el => el.classList.remove('open'));
-}
-
-// ============================================================
-// 内部工具
-// ============================================================
-
-function getTargetFret(): number | undefined {
-    const input = document.getElementById('targetFret') as HTMLInputElement;
-    if (!input) return undefined;
-    const v = parseInt(input.value, 10);
-    return (isNaN(v) || v < 0 || v > 24) ? undefined : v;
-}
-
-function isTieActive(): boolean {
-    return document.querySelector('.tech-btn[data-tech="tie"]')?.classList.contains('active') ?? false;
 }
 
 // ============================================================
@@ -127,26 +113,16 @@ export function initEventListeners(): void {
     // 技法栏事件
     // ============================================================
 
-    document.querySelectorAll('.tech-btn').forEach(btn => {
+    document.querySelectorAll<HTMLElement>('.tech-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-            const tech = (btn as HTMLElement).dataset.tech;
-            document.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('active'));
-            btn.classList.add('active');
-            uiStore.setTechnique(tech as 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato');
-
-            // H/P/S 技法显示目标品输入框，推弦显示推弦选项，揉弦无需额外选项
-            const tfRow = (document.getElementById('targetFret') as HTMLElement)?.closest('.input-group') as HTMLElement;
-            const bendOpts = document.getElementById('bendOptions');
-            if (tech === 'bend') {
-                if (tfRow) tfRow.style.display = 'none';
-                if (bendOpts) bendOpts.style.display = 'flex';
-            } else if (tech === 'none' || tech === 'vibrato') {
-                if (tfRow) tfRow.style.display = 'none';
-                if (bendOpts) bendOpts.style.display = 'none';
-            } else {
-                if (tfRow) tfRow.style.display = '';
-                if (bendOpts) bendOpts.style.display = 'none';
+            const tech = btn.dataset.tech as string;
+            if (tech === 'tie') {
+                // 延音标记独立切换，不改技法
+                btn.classList.toggle('active');
+                uiStore.tieActive = btn.classList.contains('active');
+                return;
             }
+            updateTechniqueUI(tech as AppTechnique);
         });
     });
 
@@ -196,47 +172,24 @@ export function initEventListeners(): void {
 
     // --- 添加音符 ---
     $('addNoteBtn')?.addEventListener('click', () => {
-        const stringNum = getSearchSelectValue('stringSelect');
-        const fret = getSearchSelectValue('fretSelect');
-        const durSel = $('inputDuration') as HTMLSelectElement;
-        const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
-
-        if (stringNum < 1 || stringNum > 6) { setStatus('弦号 1-6', 'error'); return; }
-        if (fret < 0 || fret > 24) { setStatus('品位 0-24', 'error'); return; }
-        if (duration <= 0) { setStatus('无效时值', 'error'); return; }
-
         const measure = scoreStore.getActiveMeasure();
+        const durSel = $('inputDuration') as HTMLSelectElement | null;
+        const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
         if (!canAddToMeasure(measure, duration)) {
             setStatus(`节拍已满（${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}）`, 'error');
             return;
         }
-        console.log(measure)
-        const isTie = isTieActive();
-        const tech = uiStore.currentTechnique;
-        const hasTech = tech !== 'none';
-        const targetFret = hasTech ? getTargetFret() : undefined;
-
-        if (!isTie && hasTech && tech !== 'bend' && tech !== 'vibrato') {
-            const notes = measure.notes
-            const prevFret = notes[notes.length - 1].targetFret || notes[notes.length - 1].fret
-            if (targetFret === prevFret) {
-                setStatus('请选择目标品', 'error');
-                return;
-            }
+        const built = buildNoteFromForm(true);
+        if (!built.note) {
+            setStatus(built.error ?? '表单值无效', 'error');
+            return;
         }
-
-        // 推弦/揉弦是单音符技法，不需要 tieToNext（H/P/S 才是双音符过渡技法）
-        const isSingleNoteTech = tech === 'bend' || tech === 'vibrato';
-        const note: Note = {
-            string: stringNum,
-            fret,
-            duration,
-            tieToNext: isSingleNoteTech ? isTie : (isTie || hasTech),
-            technique: hasTech ? tech : undefined,
-            targetFret: isSingleNoteTech ? undefined : targetFret,
-            bendAmount: tech === 'bend' ? uiStore.bendAmount : undefined,
-            bendRelease: tech === 'bend' ? uiStore.bendRelease : undefined,
-        };
+        const note = built.note;
+        const stringNum = note.string ?? 1;
+        const fret = note.fret ?? 0;
+        const isTie = isTieActive();
+        const tech = note.technique;
+        const hasTech = tech !== undefined;
 
         scoreStore.addNote(note);
         render();
@@ -250,11 +203,11 @@ export function initEventListeners(): void {
                 const amountLabels: Record<number, string> = { 0.25: '1/4', 0.5: '1/2', 1: 'Full' };
                 suffix += ` ${amountLabels[uiStore.bendAmount] || uiStore.bendAmount}`;
                 if (uiStore.bendRelease) suffix += ' 释放';
-            } else if (targetFret !== undefined) {
-                suffix += ` →${targetFret}品`;
+            } else if (note.targetFret !== undefined) {
+                suffix += ` →${note.targetFret}品`;
             }
         }
-        setStatus(`已添加: 第${stringNum}弦 ${fret}品 ${durationName(duration)}${suffix}`, 'success');
+        setStatus(`已添加: 第${stringNum}弦 ${fret}品 ${durationName(note.duration)}${suffix}`, 'success');
     });
 
     // --- 休止符 ---

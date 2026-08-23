@@ -99,3 +99,41 @@ export function buildSlotEntries(measure: Measure): import('../types/canvas.ts')
     });
     return entries;
 }
+
+/**
+ * 定位某个拍偏移（拍数，全音符=1）落在哪个 slot。
+ *
+ * 与 forEachSlot 相同的遍历逻辑，但返回 slot 在 measure.notes 里的原始边界，
+ * 供按位置插入/替换音符时 splice 使用。
+ * - `'slot'`：拍偏移正好落在某 slot 起始处
+ * - `'inside'`：拍偏移落在某 slot 内部（该 slot 跨多个拍）
+ * - `'end'`：超出所有内容（空小节隐式全音符休止 / 尾部）
+ */
+export type SlotLocation =
+    | { kind: 'slot'; index: number; slot: Note[]; start: number }
+    | { kind: 'inside'; afterIndex: number; slot: Note[]; start: number }
+    | { kind: 'end'; index: number };
+
+export function locateSlotAt(measure: Measure, beatOffset: number): SlotLocation {
+    const notes = measure.notes;
+    let acc = 0;
+    let i = 0;
+    while (i < notes.length) {
+        const first = notes[i];
+        let j = i + 1;
+        if (first.chordGroup !== undefined) {
+            while (j < notes.length && notes[j].chordGroup === first.chordGroup) j++;
+        }
+        const start = acc;
+        const end = acc + first.duration;
+        if (Math.abs(beatOffset - start) < 1e-6) {
+            return { kind: 'slot', index: i, slot: notes.slice(i, j), start };
+        }
+        if (beatOffset > start && beatOffset < end) {
+            return { kind: 'inside', afterIndex: j, slot: notes.slice(i, j), start };
+        }
+        acc = end;
+        i = j;
+    }
+    return { kind: 'end', index: notes.length };
+}

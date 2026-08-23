@@ -8,6 +8,7 @@
 import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
 import { STANDARD_TUNING } from '../types/index.ts';
 import { createEmptyMeasure } from '../tabRenderer.ts';
+import { locateSlotAt, measureTotalBeats, canAddToMeasure } from '../utils/measureUtils.ts';
 
 export const scoreStore = {
     /** 乐谱数据 */
@@ -81,6 +82,37 @@ export const scoreStore = {
         measure.notes.push({ isRest: true, duration } as Note);
     },
 
+    /** 在指定小节、指定拍偏移处插入音符（供 alphaTab 点击编辑） */
+    insertNoteAt(measureIndex: number, beatOffset: number, note: Note): { ok: boolean; reason?: string } {
+        const measure = this.score.measures[measureIndex];
+        if (!measure) return { ok: false, reason: '小节不存在' };
+
+        const loc = locateSlotAt(measure, beatOffset);
+        const notes = measure.notes;
+
+        // 目标 slot 是休止 → 替换（「空白拍」场景）
+        if ((loc.kind === 'slot' || loc.kind === 'inside') && loc.slot[0].isRest) {
+            const first = loc.slot[0];
+            const replaceIndex = loc.kind === 'slot' ? loc.index : loc.afterIndex - 1;
+            const cap = measure.timeSignatureNumerator * (1 / measure.timeSignatureDenominator);
+            const total = measureTotalBeats(measure);
+            if (total - first.duration + note.duration > cap + 0.001) {
+                return { ok: false, reason: '时值超出小节容量' };
+            }
+            notes.splice(replaceIndex, 1, note);
+            return { ok: true };
+        }
+
+        // 目标 slot 是音符 → 合并进该 slot（单音变和弦 / 和弦追加）
+        if (loc.kind === 'slot') return appendToSlot(measure, loc.index + loc.slot.length, loc.slot, note);
+        if (loc.kind === 'inside') return appendToSlot(measure, loc.afterIndex, loc.slot, note);
+
+        // 超出所有内容（空小节隐式全音符休止 / 尾部）
+        if (!canAddToMeasure(measure, note.duration)) return { ok: false, reason: '节拍已满' };
+        notes.push(note);
+        return { ok: true };
+    },
+
     /** 设置调弦 */
     setTuning(tuning: Tuning): void {
         this.score.tuning = { ...tuning };
@@ -112,3 +144,19 @@ export const scoreStore = {
         }
     },
 };
+
+/** 把音符合并进已有音符 slot（单音→和弦或和弦追加） */
+function appendToSlot(measure: Measure, afterIndex: number, slot: Note[], note: Note): { ok: boolean; reason?: string } {
+    if (slot.some(n => n.string === note.string)) return { ok: false, reason: '该弦已有音符' };
+    if (slot[0].chordGroup !== undefined) {
+        note.chordGroup = slot[0].chordGroup;
+    } else {
+        const g = Date.now();
+        for (const n of slot) n.chordGroup = g;
+        note.chordGroup = g;
+    }
+    // 和弦内音符共享 slot 时值
+    note.duration = slot[0].duration;
+    measure.notes.splice(afterIndex, 0, note);
+    return { ok: true };
+}

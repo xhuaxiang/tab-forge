@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Measure, Note } from '../types/index.ts';
-import { forEachSlot, measureTotalBeats, canAddToMeasure } from './measureUtils.ts';
+import { forEachSlot, measureTotalBeats, canAddToMeasure, locateSlotAt } from './measureUtils.ts';
 
 function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
     return { string: 1, fret: 0, ...partial };
@@ -59,5 +59,57 @@ describe('canAddToMeasure', () => {
             note({ duration: 0.25 }), note({ duration: 0.25 }),
         ]);
         expect(canAddToMeasure(m, 0.25)).toBe(false);
+    });
+});
+
+describe('locateSlotAt', () => {
+    it('拍偏移正好落在 slot 起始 → slot 边界', () => {
+        const m = measure([note({ duration: 0.25 }), note({ duration: 0.25 })]);
+        const loc = locateSlotAt(m, 0.25);
+        expect(loc.kind).toBe('slot');
+        if (loc.kind === 'slot') {
+            expect(loc.index).toBe(1);
+            expect(loc.slot).toHaveLength(1);
+            expect(loc.start).toBeCloseTo(0.25, 5);
+        }
+    });
+
+    it('拍偏移落在跨拍 slot 内部 → inside', () => {
+        const m = measure([note({ duration: 0.5 }), note({ duration: 0.25 })]);
+        const loc = locateSlotAt(m, 0.25);
+        expect(loc.kind).toBe('inside');
+        if (loc.kind === 'inside') {
+            expect(loc.afterIndex).toBe(1);
+            expect(loc.slot).toHaveLength(1);
+        }
+    });
+
+    it('和弦 slot 整体返回', () => {
+        const m = measure([
+            note({ duration: 0.25, chordGroup: 1 }),
+            note({ duration: 0.25, chordGroup: 1, string: 2 }),
+        ]);
+        const loc = locateSlotAt(m, 0);
+        expect(loc.kind).toBe('slot');
+        if (loc.kind === 'slot') {
+            expect(loc.slot).toHaveLength(2);
+        }
+    });
+
+    it('超出所有内容 → end', () => {
+        const m = measure([note({ duration: 0.25 })]);
+        expect(locateSlotAt(m, 1).kind).toBe('end');
+    });
+
+    it('浮点累计误差下仍命中边界', () => {
+        // 0.125+0.125+0.25 累计不应因浮点导致错位
+        const m = measure([
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.25 }),
+        ]);
+        const loc = locateSlotAt(m, 0.125 + 0.125);
+        expect(loc.kind).toBe('slot');
+        if (loc.kind === 'slot') expect(loc.index).toBe(2);
     });
 });

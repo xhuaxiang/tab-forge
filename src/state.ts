@@ -90,7 +90,6 @@ export function initCanvasRenderer(): void {
 }
 
 export function render(): void {
-    console.log(renderMode)
     if (renderMode === 'alphaTab') {
         alphaTabRenderer?.render(scoreStore.score);
     } else {
