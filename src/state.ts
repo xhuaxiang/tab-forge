@@ -17,7 +17,7 @@ export type RenderMode = 'canvas' | 'alphaTab';
 
 let canvasRenderer: TabCanvasRenderer | null = null;
 let alphaTabRenderer: AlphaTabRenderer | null = null;
-let renderMode: RenderMode = 'canvas';
+let renderMode: RenderMode = 'alphaTab'; // 默认 alphaTab 渲染
 
 /** 当前渲染模式 */
 export function getRenderMode(): RenderMode {
@@ -31,8 +31,8 @@ export function getRenderMode(): RenderMode {
  * - #alphaTabContainer alphaTab 专业渲染
  * 切换时显示目标容器、隐藏另一个（swiper 式两块互切）。
  */
-export async function setRenderMode(mode: RenderMode): Promise<void> {
-    if (mode === renderMode) return;
+export async function setRenderMode(mode: RenderMode, force = false): Promise<void> {
+    if (!force && mode === renderMode) return;
     renderMode = mode;
     const tabContainer = $('tabContent')!;
     const alphaContainer = $('alphaTabContainer')!;

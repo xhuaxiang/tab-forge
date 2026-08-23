@@ -5,7 +5,7 @@
  * 不包含具体业务逻辑，只做组装和启动。
  */
 
-import { $, setStatus, initCanvasRenderer, render, getCanvasRenderer } from './state.ts';
+import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './state.ts';
 import { initEventListeners } from './eventHandlers.ts';
 
 // ============================================================
@@ -14,8 +14,8 @@ import { initEventListeners } from './eventHandlers.ts';
 
 function init(): void {
     initEventListeners();
-    initCanvasRenderer();
-    render();
+    // 默认 alphaTab 渲染
+    void setRenderMode('alphaTab', true);
 
     const container = $('tabContent')!;
     const ro = new ResizeObserver(() => {
