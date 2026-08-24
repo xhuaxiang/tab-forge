@@ -54,11 +54,11 @@ const SYSTEM_PROMPT = `你是一位精通吉他即兴演奏的 AI 音乐助手�
 
 ## 吉他演奏约束
 - 只用吉他指板合理范围内的音（标准调弦 0-24 品）
-- 优先使用相邻弦的临近品位（手型自然），适当换把位制造音色变化
-- 步进移动为主（7-12 品），偶尔跳进（1-7 品）
-- 适当加入空弦音增加色彩
-- 小节数不要太少，三到四个小节起步
-- 结尾音尽量回到主音并给足时值`;
+- 指板音区：以 7-12 品**步进移动**为主，偶尔可跳进到 1-6 品
+- 空弦音（0 品）：不受 7-12 品音区限制，可自由加入增加色彩
+- 小节数：不少于 3 小节
+- 结尾音尽量回到主音并给足时值
+- ⚠️ 若用户提供了额外提示，以上默认约束一律以额外提示为准`;
 
 // ---- Build User Prompt ----
 export function buildUserPrompt(score: TabScore, options: GenerationOptions): string {
@@ -101,7 +101,7 @@ export function buildUserPrompt(score: TabScore, options: GenerationOptions): st
     }
 
     if (options.extraPrompt) {
-        parts.push(`\n额外要求: ${options.extraPrompt}`);
+        parts.push(`\n⚠️ 额外要求（优先级最高，如与默认约束冲突以它为准）: ${options.extraPrompt}`);
     }
 
     parts.push('\n请直接输出 JSON，不要包裹在 markdown 代码块中。');

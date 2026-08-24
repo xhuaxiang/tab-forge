@@ -47,6 +47,7 @@ export class AlphaTabRenderer {
         settings.core.enableLazyLoading = false; // 禁用懒加载，立即渲染全部内容
         settings.core.fontDirectory = new URL('font/', document.baseURI).href; // 字体放 public/font，dev/web/扩展通用
         settings.core.includeNoteBounds = true; // 收集音符边界，供点击命中
+        settings.display.scale = 0.75; // 整体缩放（含字体），适配紧凑布局
         settings.player.playerMode = mod.PlayerMode.Disabled;
 
         // 深色主题适配：浅色音符/文字/谱线，让 alphaTab 内容在深色背景上可见
