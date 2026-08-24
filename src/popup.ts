@@ -6,6 +6,7 @@
  */
 
 import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './state.ts';
+import { scoreStore } from './stores/scoreStore.ts';
 import { initEventListeners } from './eventHandlers.ts';
 
 // ============================================================
@@ -14,6 +15,8 @@ import { initEventListeners } from './eventHandlers.ts';
 
 function init(): void {
     initEventListeners();
+    // scoreStore 数据变更自动触发渲染（集中式，eventHandlers 不再手动 render）
+    scoreStore.setOnChange(() => render());
     // 默认 alphaTab 渲染
     void setRenderMode('alphaTab', true);
 

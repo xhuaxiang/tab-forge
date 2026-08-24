@@ -8,12 +8,14 @@
 import type { Note } from './types/index.ts';
 import { TUNING_PRESETS } from './types/index.ts';
 import { exportToAsciiTab, exportToJson } from './tabRenderer.ts';
-import { $, setStatus, render, setRenderMode, durationName } from './state.ts';
+import { $, setStatus, setRenderMode, durationName } from './state.ts';
 import { canAddToMeasure } from './utils/measureUtils.ts';
 import { scoreStore } from './stores/scoreStore.ts';
 import { uiStore } from './stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { getApiKey, saveApiKey, generateImprovisation, type GenerationOptions } from './improvisation/index.ts';
+import { SCORE_DEFAULTS, IMPROV_CONFIG } from './config.ts';
+import type { Tuning } from './types/index.ts';
 import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from './alphaTab/scoreEditing.ts';
 
 // ============================================================
@@ -129,7 +131,6 @@ export function initEventListeners(): void {
     // --- 小节操作 ---
     $('addMeasure')?.addEventListener('click', () => {
         const n = scoreStore.addMeasure();
-        render();
         setStatus(`已添加小节 ${n}`, 'success');
     });
 
@@ -138,7 +139,6 @@ export function initEventListeners(): void {
             setStatus('无小节可删', 'error');
             return;
         }
-        render();
         setStatus('已删除最后一个小节', 'info');
     });
 
@@ -149,14 +149,15 @@ export function initEventListeners(): void {
         }
         if (confirm('确定清空所有小节？')) {
             scoreStore.clear();
-            render();
-            setStatus('已清空', 'info');
+                setStatus('已清空', 'info');
         }
     });
 
     // --- AI 即兴生成 ---
-    // 初始化 API Key 输入框
+    // 初始化 API Key 输入框 + 选项下拉（从 IMPROV_CONFIG 生成）
     initAIKeyInput();
+    initImprovConfig();
+    syncScoreDefaultsToUI();
 
     // Toolbar 快速按钮：打开 AI 设置面板
     $('aiImprovBtn')?.addEventListener('click', () => {
@@ -192,7 +193,6 @@ export function initEventListeners(): void {
         const hasTech = tech !== undefined;
 
         scoreStore.addNote(note);
-        render();
 
         let suffix = '';
         if (isTie) suffix = ' (延音)';
@@ -221,7 +221,6 @@ export function initEventListeners(): void {
             return;
         }
         scoreStore.addRest(duration);
-        render();
         setStatus(`已添加 ${durationName(duration)} 休止符`, 'success');
     });
 
@@ -344,7 +343,6 @@ export function initEventListeners(): void {
         updateArpeggioButton();
         updateStrumButton();
 
-        render();
         setStatus(`已添加和弦${chordName ? ' (' + chordName + ')' : ''}: ${active.length}弦${uiStore.currentArpeggio ? ' 琶音' : ''}`, 'success');
     });
 
@@ -358,7 +356,6 @@ export function initEventListeners(): void {
             const inp = $(`tuning${i}`) as HTMLInputElement;
             if (inp) inp.value = preset[`string${i}` as keyof typeof preset];
         }
-        render();
         setStatus(`调弦: ${sel.value}`, 'success');
     });
 
@@ -366,8 +363,7 @@ export function initEventListeners(): void {
         $(`tuning${i}`)?.addEventListener('change', (e) => {
             const inp = e.target as HTMLInputElement;
             scoreStore.setStringTuning(i, inp.value);
-            render();
-            setStatus(`第${i}弦 = ${inp.value}`, 'info');
+                setStatus(`第${i}弦 = ${inp.value}`, 'info');
         });
     }
 
@@ -475,21 +471,18 @@ export function initEventListeners(): void {
 
     bpmInput?.addEventListener('change', () => {
         const v = parseInt(bpmInput.value, 10);
-        scoreStore.setBpm(isNaN(v) ? 120 : v);
+        scoreStore.setBpm(isNaN(v) ? SCORE_DEFAULTS.bpm : v);
         bpmInput.value = String(scoreStore.score.bpm);
-        render();
         setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
     });
     bpmInc?.addEventListener('click', () => {
         scoreStore.setBpm(scoreStore.score.bpm + 5);
         bpmInput.value = String(scoreStore.score.bpm);
-        render();
         setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
     });
     bpmDec?.addEventListener('click', () => {
         scoreStore.setBpm(scoreStore.score.bpm - 5);
         bpmInput.value = String(scoreStore.score.bpm);
-        render();
         setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
     });
 
@@ -499,8 +492,7 @@ export function initEventListeners(): void {
         keySelect.value = scoreStore.score.key || 'C';
         keySelect.addEventListener('change', () => {
             scoreStore.setKey(keySelect.value);
-            render();
-            setStatus(`调性: ${keySelect.value}`, 'info');
+                setStatus(`调性: ${keySelect.value}`, 'info');
         });
     }
 
@@ -510,8 +502,7 @@ export function initEventListeners(): void {
         timeSigSelect.value = scoreStore.score.timeSignature;
         timeSigSelect.addEventListener('change', () => {
             scoreStore.setTimeSignature(timeSigSelect.value);
-            render();
-            setStatus(`拍号: ${timeSigSelect.value}`, 'info');
+                setStatus(`拍号: ${timeSigSelect.value}`, 'info');
         });
     }
 
@@ -522,6 +513,64 @@ export function initEventListeners(): void {
 // ============================================================
 // AI 即兴生成
 // ============================================================
+
+/** 从 IMPROV_CONFIG 生成即兴选项下拉（小节数/音阶/风格/密度），单一来源 */
+function initImprovConfig(): void {
+    const fillSelect = (id: string, options: ReadonlyArray<{ value: string; label: string }>, defaultVal: string): void => {
+        const sel = document.getElementById(id) as HTMLSelectElement | null;
+        if (!sel) return;
+        sel.innerHTML = '';
+        for (const o of options) {
+            const opt = document.createElement('option');
+            opt.value = o.value;
+            opt.textContent = o.label;
+            if (o.value === defaultVal) opt.selected = true;
+            sel.appendChild(opt);
+        }
+    };
+
+    const numSel = document.getElementById('aiNumMeasures') as HTMLSelectElement | null;
+    if (numSel) {
+        numSel.innerHTML = '';
+        for (const n of IMPROV_CONFIG.numMeasures.options) {
+            const opt = document.createElement('option');
+            opt.value = String(n);
+            opt.textContent = String(n);
+            if (n === IMPROV_CONFIG.numMeasures.default) opt.selected = true;
+            numSel.appendChild(opt);
+        }
+    }
+    fillSelect('aiScaleType', IMPROV_CONFIG.scaleTypes, IMPROV_CONFIG.scaleTypes[0].value);
+    fillSelect('aiStyle', IMPROV_CONFIG.styles, IMPROV_CONFIG.styles[0].value);
+    fillSelect('aiDensity', IMPROV_CONFIG.densities, IMPROV_CONFIG.densities[1].value);
+}
+
+/** 把 SCORE_DEFAULTS 同步到页面控件（调性/BPM/调弦/预设），单一来源 */
+function syncScoreDefaultsToUI(): void {
+    const { key, bpm, tuning } = SCORE_DEFAULTS;
+
+    const keySel = document.getElementById('keySelect') as HTMLSelectElement | null;
+    if (keySel) keySel.value = key;
+
+    const bpmInput = document.getElementById('bpmInput') as HTMLInputElement | null;
+    if (bpmInput) bpmInput.value = String(bpm);
+
+    for (let i = 1; i <= 6; i++) {
+        const input = document.getElementById(`tuning${i}`) as HTMLInputElement | null;
+        if (input) input.value = tuning[`string${i}` as keyof Tuning];
+    }
+
+    const presetSel = document.getElementById('tuningPreset') as HTMLSelectElement | null;
+    if (presetSel) {
+        const match = Object.entries(TUNING_PRESETS).find(([, t]) => isTuningEqual(t, tuning));
+        presetSel.value = match ? match[0] : 'standard';
+    }
+}
+
+function isTuningEqual(a: Tuning, b: Tuning): boolean {
+    return a.string1 === b.string1 && a.string2 === b.string2 && a.string3 === b.string3
+        && a.string4 === b.string4 && a.string5 === b.string5 && a.string6 === b.string6;
+}
 
 /** 初始化 API Key 输入框（从存储中加载已保存的 Key） */
 async function initAIKeyInput(): Promise<void> {
@@ -553,11 +602,11 @@ async function handleAIGenerate(): Promise<void> {
     // 保存 Key
     await saveApiKey(apiKey);
 
-    // 最少 3 小节，避免 AI 产出过短（如 1 拍）
-    const numMeasures = Math.max(3, parseInt((document.getElementById('aiNumMeasures') as HTMLSelectElement)?.value || '4', 10));
-    const scaleType = (document.getElementById('aiScaleType') as HTMLSelectElement)?.value || 'Major (Ionian)';
-    const style = (document.getElementById('aiStyle') as HTMLSelectElement)?.value || 'Jazz';
-    const density = (document.getElementById('aiDensity') as HTMLSelectElement)?.value || '中';
+    // 最少 3 小节，避免 AI 产出过短（如 1 拍）；默认值统一取 IMPROV_CONFIG
+    const numMeasures = Math.max(IMPROV_CONFIG.numMeasures.min, parseInt((document.getElementById('aiNumMeasures') as HTMLSelectElement)?.value || String(IMPROV_CONFIG.numMeasures.default), 10));
+    const scaleType = (document.getElementById('aiScaleType') as HTMLSelectElement)?.value || IMPROV_CONFIG.scaleTypes[0].value;
+    const style = (document.getElementById('aiStyle') as HTMLSelectElement)?.value || IMPROV_CONFIG.styles[0].value;
+    const density = (document.getElementById('aiDensity') as HTMLSelectElement)?.value || IMPROV_CONFIG.densities[1].value;
     const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement)?.value?.trim();
 
     const options: GenerationOptions = {
@@ -597,6 +646,7 @@ async function handleAIGenerate(): Promise<void> {
         }
 
         // 先清空乐谱，再输出全新即兴（避免追加旧内容导致小节结构混乱/堆叠）
+        scoreStore.beginBatch();
         scoreStore.clear();
         if (scoreStore.score.measures.length === 0) {
             scoreStore.addMeasure();
@@ -643,8 +693,8 @@ async function handleAIGenerate(): Promise<void> {
         while (scoreStore.score.measures.length < numMeasures) {
             scoreStore.addMeasure();
         }
+        scoreStore.endBatch(); // 批量结束，统一渲染一次
 
-        render();
         setStatus(`✅ AI 已生成 ${written} 个音符`, 'success');
         if (statusEl) statusEl.textContent = `✅ 成功！已生成 ${result.notes.length} 个音符，${scoreStore.score.measures.length} 个小节`;
     } catch (e) {

@@ -13,7 +13,7 @@ import type { model } from '@coderline/alphatab';
 import type { Note, NoteDuration } from '../types/index.ts';
 import { scoreStore } from '../stores/scoreStore.ts';
 import { uiStore } from '../stores/uiStore.ts';
-import { $, setStatus, render, getSearchSelectValue, durationName } from '../state.ts';
+import { $, setStatus, getSearchSelectValue, durationName } from '../state.ts';
 import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from './scoreMapping.ts';
 
 export type { AppTechnique } from './scoreMapping.ts';
@@ -192,12 +192,11 @@ function insertNoteAtBeat(beat: model.Beat): void {
     }
 
     const offset = beatOffsetInMeasure(beat);
-    const result = scoreStore.insertNoteAt(measureIndex, offset, built.note);
+    const result = scoreStore.insertNoteAt(measureIndex, offset, built.note); // 内部 _notify 自动渲染
     if (!result.ok) {
         setStatus(result.reason ?? '插入失败', 'error');
         return;
     }
 
-    render();
     setStatus(`已插入: 第${built.note.string}弦 ${built.note.fret}品 ${durationName(built.note.duration)} @ 小节${measureIndex + 1}`, 'success');
 }
