@@ -553,7 +553,8 @@ async function handleAIGenerate(): Promise<void> {
     // 保存 Key
     await saveApiKey(apiKey);
 
-    const numMeasures = parseInt((document.getElementById('aiNumMeasures') as HTMLSelectElement)?.value || '4', 10);
+    // 最少 3 小节，避免 AI 产出过短（如 1 拍）
+    const numMeasures = Math.max(3, parseInt((document.getElementById('aiNumMeasures') as HTMLSelectElement)?.value || '4', 10));
     const scaleType = (document.getElementById('aiScaleType') as HTMLSelectElement)?.value || 'Major (Ionian)';
     const style = (document.getElementById('aiStyle') as HTMLSelectElement)?.value || 'Jazz';
     const density = (document.getElementById('aiDensity') as HTMLSelectElement)?.value || '中';
@@ -636,6 +637,11 @@ async function handleAIGenerate(): Promise<void> {
                 scoreStore.addNote(n);
                 written++;
             }
+        }
+
+        // 强制小节数：AI 按拍容量重排后可能少于配置数，补空小节到 numMeasures
+        while (scoreStore.score.measures.length < numMeasures) {
+            scoreStore.addMeasure();
         }
 
         render();
