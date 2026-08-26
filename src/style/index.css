@@ -170,6 +170,7 @@ body {
     background:var(--bg-tertiary); color:var(--text-primary); font-size:12px; outline:none;
 }
 .compact-select:focus { border-color:var(--border-focus); }
+.compact-select.mini { padding:3px 5px; font-size:11px; }
 
 .compact-input {
     width:100%; padding:3px 6px; border:1px solid var(--border-input); border-radius:var(--radius-sm);

@@ -95,8 +95,9 @@ export class AlphaTabRenderer {
     render(score: TabScore): void {
         if (!this.api || !this.mod) return;
         if (score.measures.length === 0) {
-            // 空谱：不加载 alphaTab（避免渲染占位/报错），显示空状态提示
+            // 空谱（如清空）：隐藏 alphaTab 面（不 remove，避免脱离 DOM 导致后续白屏），显示空状态
             if (!this.emptyStateEl || !this.container?.contains(this.emptyStateEl)) {
+                this.container?.querySelectorAll<HTMLElement>('.at-surface').forEach(el => { el.style.display = 'none'; });
                 this.emptyStateEl = document.createElement('div');
                 this.emptyStateEl.className = 'empty-state';
                 this.emptyStateEl.innerHTML = '点击「+ 小节」开始创建吉他六线谱<br>'
@@ -107,6 +108,7 @@ export class AlphaTabRenderer {
         }
         this.emptyStateEl?.remove();
         this.emptyStateEl = null;
+        this.container?.querySelectorAll<HTMLElement>('.at-surface').forEach(el => { el.style.display = ''; });
         const atScore = tabScoreToAlphaTabScore(score);
         this.api.load(atScore);
     }

@@ -580,6 +580,8 @@ async function initAIKeyInput(): Promise<void> {
     if (saved) {
         input.value = saved;
     }
+    // API Key 在 summary 右侧：点击输入框不折叠面板
+    input.addEventListener('click', (e) => e.stopPropagation());
     // 修改时自动保存
     input.addEventListener('change', () => {
         saveApiKey(input.value.trim());

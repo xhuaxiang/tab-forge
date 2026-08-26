@@ -204,36 +204,36 @@
 
             <!-- 折叠面板：AI 即兴设置 -->
             <details class="collapse-section" id="aiSettingsPanel" open>
-                <summary>🤖 AI 即兴生成</summary>
+                <summary style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+                    <span>🤖 AI 即兴生成</span>
+                    <span id="aiApiKeyWrap" style="display:flex; align-items:center; gap:4px;">
+                        <span style="font-size:11px; color:var(--text-muted);">API Key</span>
+                        <input type="password" id="aiApiKey" class="compact-input" placeholder="sk-..." title="DeepSeek API Key" style="width:200px;">
+                    </span>
+                </summary>
                 <div class="collapse-content">
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>DeepSeek API Key</label>
-                            <input type="password" id="aiApiKey" class="compact-input" placeholder="sk-..." style="width:100%;">
-                        </div>
-                        <div class="input-group" style="flex:1;">
                             <label>小节数</label>
-                            <select id="aiNumMeasures" class="compact-select" style="width:100%;"><!-- 由 initImprovConfig 从 IMPROV_CONFIG 填充 --></select>
-                        </div>
-                    </div>
-                    <div class="collapse-row">
-                        <div class="input-group" style="flex:1;">
-                            <label>音阶类型</label>
-                            <select id="aiScaleType" class="compact-select" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
+                            <select id="aiNumMeasures" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 从 IMPROV_CONFIG 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
                             <label>风格</label>
-                            <select id="aiStyle" class="compact-select" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
+                            <select id="aiStyle" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
+                        </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>音阶类型</label>
+                            <select id="aiScaleType" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
+                        </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>音符密度</label>
+                            <select id="aiDensity" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
                         </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>音符密度</label>
-                            <select id="aiDensity" class="compact-select" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
-                        </div>
-                        <div class="input-group" style="flex:1;">
-                            <label>额外提示（可选）</label>
-                            <input type="text" id="aiExtraPrompt" class="compact-input" placeholder="如：多用滑弦、结尾渐慢..." style="width:100%;">
+                            <label>额外需求（可选）</label>
+                            <textarea id="aiExtraPrompt" class="compact-input" rows="5" placeholder="如：多用滑弦、结尾渐慢..." style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
                     <button id="aiGenerateBtn" class="btn btn-primary" style="width:100%; margin-top:4px;">🤖 生成即兴谱</button>
