@@ -137,3 +137,13 @@ export function locateSlotAt(measure: Measure, beatOffset: number): SlotLocation
     }
     return { kind: 'end', index: notes.length };
 }
+
+/** 创建空白小节 */
+export function createEmptyMeasure(index: number): Measure {
+    return {
+        index,
+        notes: [],
+        timeSignatureNumerator: 4,
+        timeSignatureDenominator: 4,
+    };
+}

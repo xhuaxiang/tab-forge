@@ -13,10 +13,10 @@ import type { model } from '@coderline/alphatab';
 import type { Note, NoteDuration } from '../types/index.ts';
 import { scoreStore } from '../stores/scoreStore.ts';
 import { uiStore } from '../stores/uiStore.ts';
-import { $, setStatus, getSearchSelectValue, durationName } from '../state.ts';
-import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from './scoreMapping.ts';
+import { $, setStatus, getSearchSelectValue, durationName } from '../app/state.ts';
+import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from '../utils/scoreMapping.ts';
 
-export type { AppTechnique } from './scoreMapping.ts';
+export type { AppTechnique } from '../utils/scoreMapping.ts';
 
 export interface ScoreClickHit {
     beat: model.Beat | null;

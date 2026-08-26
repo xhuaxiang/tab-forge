@@ -15,7 +15,7 @@ import {
     alphaStringToAppString,
     beatOffsetInMeasure,
     detectTechnique,
-} from './scoreMapping.ts';
+} from '../utils/scoreMapping.ts';
 
 function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
     return { string: 1, fret: 0, ...partial };

@@ -5,9 +5,9 @@
  * 不包含具体业务逻辑，只做组装和启动。
  */
 
-import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './state.ts';
+import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './app/state.ts';
 import { scoreStore } from './stores/scoreStore.ts';
-import { initEventListeners } from './eventHandlers.ts';
+import { initEventListeners } from './app/eventHandlers.ts';
 
 // ============================================================
 // 初始化

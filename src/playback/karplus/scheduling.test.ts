@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Measure, Note } from '../types/index.ts';
+import type { Measure, Note } from '../../types/index.ts';
 import { buildSchedule } from './scheduling.ts';
 
 const BPM = 120; // 一拍 = 0.5s

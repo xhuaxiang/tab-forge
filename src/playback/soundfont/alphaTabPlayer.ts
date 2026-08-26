@@ -12,9 +12,9 @@
  * - 适配层独立在 scoreAdapter.ts，本文件只做播放生命周期。
  */
 
-import type { PlaybackCallbacks, PlaybackState } from '../audioEngine.ts';
-import type { TabScore } from '../types/index.ts';
-import { tabScoreToAlphaTabScore } from './scoreAdapter.ts';
+import type { PlaybackCallbacks, PlaybackState } from '../karplus/audioEngine.ts';
+import type { TabScore } from '../../types/index.ts';
+import { tabScoreToAlphaTabScore } from '../../alphaTab/scoreAdapter.ts';
 import { createAlphaTabWorkletOutput } from './alphaTabOutput.ts';
 import soundfontUrl from '@coderline/alphatab/soundfont/sonivox.sf3?url';
 

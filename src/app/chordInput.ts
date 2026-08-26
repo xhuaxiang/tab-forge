@@ -5,7 +5,7 @@
  * 状态存储在 uiStore 中。
  */
 
-import { uiStore } from './stores/uiStore.ts';
+import { uiStore } from '../stores/uiStore.ts';
 
 // ============================================================
 // 和弦预设

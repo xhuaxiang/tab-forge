@@ -1,9 +1,10 @@
 /**
- * synthesis/ 合成模块导出
+ * playback/karplus — Karplus-Strong 合成模块导出
  *
  * 职责分层:
  *   karplusStrong.ts — 纯算法层，生成 AudioBuffer，不连接 AudioContext
  *   guitarEngine.ts  — 引擎层，管理 AudioContext、节点连接、生命周期
+ *   scheduling.ts    — 播放调度（纯函数）
  *
  * 未来可扩展:
  *   piano.ts         — 钢琴/键盘合成

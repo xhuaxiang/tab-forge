@@ -6,8 +6,7 @@
  */
 
 import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
-import { createEmptyMeasure } from '../tabRenderer.ts';
-import { locateSlotAt, measureTotalBeats, canAddToMeasure } from '../utils/measureUtils.ts';
+import { locateSlotAt, measureTotalBeats, canAddToMeasure, createEmptyMeasure } from '../utils/measureUtils.ts';
 import { SCORE_DEFAULTS } from '../config.ts';
 
 export const scoreStore = {

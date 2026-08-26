@@ -5,10 +5,10 @@
  * 2. 录音已拆到 recorder.ts
  */
 
-import type { TabScore, Note, Tuning, Measure } from './types/index.ts';
-import { getNoteFromFret, getNoteFrequency } from './types/index.ts';
-import { GuitarEngine } from './synthesis/guitarEngine.ts';
-import { buildSchedule } from './synthesis/scheduling.ts';
+import type { TabScore, Note, Tuning, Measure } from '../../types/index.ts';
+import { getNoteFromFret, getNoteFrequency } from '../../types/index.ts';
+import { GuitarEngine } from './guitarEngine.ts';
+import { buildSchedule } from './scheduling.ts';
 
 /** 播放状态 */
 export type PlaybackState = 'idle' | 'playing' | 'paused' | 'stopped';

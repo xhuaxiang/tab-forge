@@ -12,8 +12,8 @@
  *   休止符与延音跳过、空小节按 4/4 兜底。
  */
 
-import type { Measure, Note } from '../types/index.ts';
-import { forEachSlot } from '../utils/measureUtils.ts';
+import type { Measure, Note } from '../../types/index.ts';
+import { forEachSlot } from '../../utils/measureUtils.ts';
 
 /** 单条播放事件 */
 export interface ScheduledEvent {

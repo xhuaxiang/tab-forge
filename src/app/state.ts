@@ -5,10 +5,10 @@
  * 状态数据已迁移到 stores/
  */
 
-import { TabCanvasRenderer, createTabCanvas } from './canvas/index.ts';
-import { scoreStore } from './stores/scoreStore.ts';
+import { TabCanvasRenderer, createTabCanvas } from '../canvas/index.ts';
+import { scoreStore } from '../stores/scoreStore.ts';
 // 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
-import type { AlphaTabRenderer } from './alphaTab/alphaTabRenderer.ts';
+import type { AlphaTabRenderer } from '../alphaTab/alphaTabRenderer.ts';
 // ============================================================
 // 渲染器实例与切换
 // ============================================================
@@ -42,7 +42,7 @@ export async function setRenderMode(mode: RenderMode, force = false): Promise<vo
         alphaContainer.style.display = 'block';
         canvasRenderer = null;
         alphaTabRenderer?.dispose();
-        const { AlphaTabRenderer } = await import('./alphaTab/alphaTabRenderer.ts');
+        const { AlphaTabRenderer } = await import('../alphaTab/alphaTabRenderer.ts');
         alphaTabRenderer = new AlphaTabRenderer();
         await alphaTabRenderer.mount(alphaContainer);
         render();
