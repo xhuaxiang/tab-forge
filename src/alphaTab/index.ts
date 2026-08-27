@@ -6,5 +6,5 @@
  */
 
 export { tabScoreToAlphaTabScore, noteNameToMidi } from './scoreAdapter.ts';
-export { alphaTabPlayer } from '../playback/soundfont/alphaTabPlayer.ts';
+export { alphaTabPlayer } from '../playback/soundfont/index.ts';
 export { AlphaTabRenderer } from './alphaTabRenderer.ts';

@@ -12,6 +12,8 @@
  *   sampler.ts       — 采样播放器
  */
 
+export { AudioEngine, currentAudioEngine } from './audioEngine.ts';
+export type { PlaybackState, PlaybackCallbacks } from './audioEngine.ts';
 export { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 export type { KSParams, KSBufferData } from './karplusStrong.ts';
 export { GuitarEngine } from './guitarEngine.ts';

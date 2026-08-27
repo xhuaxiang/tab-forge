@@ -12,7 +12,7 @@
  * - 适配层独立在 scoreAdapter.ts，本文件只做播放生命周期。
  */
 
-import type { PlaybackCallbacks, PlaybackState } from '../karplus/audioEngine.ts';
+import type { PlaybackCallbacks, PlaybackState } from '../karplus/index.ts';
 import type { TabScore } from '../../types/index.ts';
 import { tabScoreToAlphaTabScore } from '../../alphaTab/scoreAdapter.ts';
 import { createAlphaTabWorkletOutput } from './alphaTabOutput.ts';

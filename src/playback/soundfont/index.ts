@@ -7,3 +7,4 @@
  */
 
 export { alphaTabPlayer } from './alphaTabPlayer.ts';
+export { createAlphaTabWorkletOutput } from './alphaTabOutput.ts';

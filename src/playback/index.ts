@@ -7,9 +7,9 @@
  */
 
 // ---- Karplus-Strong 合成 ----
-export { AudioEngine, currentAudioEngine } from './karplus/audioEngine.ts';
-export type { PlaybackState, PlaybackCallbacks } from './karplus/audioEngine.ts';
 export {
+    AudioEngine,
+    currentAudioEngine,
     GuitarEngine,
     buildSchedule,
     beatDurationSec,
@@ -18,7 +18,7 @@ export {
     toAudioBuffer,
     getBodyFilterPreset,
 } from './karplus/index.ts';
-export type { ScheduledEvent, PlaybackSchedule, KSParams, KSBufferData } from './karplus/index.ts';
+export type { PlaybackState, PlaybackCallbacks, ScheduledEvent, PlaybackSchedule, KSParams, KSBufferData } from './karplus/index.ts';
 
 // ---- SoundFont 播放 ----
-export { alphaTabPlayer } from './soundfont/index.ts';
+export { alphaTabPlayer, createAlphaTabWorkletOutput } from './soundfont/index.ts';

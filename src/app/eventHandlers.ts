@@ -372,7 +372,7 @@ export function initEventListeners(): void {
         if (scoreStore.score.measures.length === 0) { setStatus('无内容', 'error'); return; }
         const playBtn = $('playBtn')!;
         const stopBtn = $('stopBtn')!;
-        const callbacks: import('../playback/karplus/audioEngine.ts').PlaybackCallbacks = {
+        const callbacks: import('../playback/index.ts').PlaybackCallbacks = {
             onStateChange: (s) => {
                 playBtn.textContent = s === 'playing' ? '⏸ 暂停' : (s === 'paused' ? '▶ 继续' : '▶ 播放');
                 stopBtn.toggleAttribute('disabled', s === 'stopped');
@@ -387,7 +387,7 @@ export function initEventListeners(): void {
         const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'ks';
         if (engine === 'alphatab') {
             try {
-                const { alphaTabPlayer } = await import('../playback/soundfont/alphaTabPlayer.ts');
+                const { alphaTabPlayer } = await import('../playback/soundfont/index.ts');
                 alphaTabPlayer.setCallbacks(callbacks);
                 await alphaTabPlayer.play(scoreStore.score);
                 return;
@@ -396,15 +396,15 @@ export function initEventListeners(): void {
                 setStatus('SoundFont 播放失败，已回退合成器', 'error');
             }
         }
-        const audioEngine = (await import('../playback/karplus/audioEngine.ts')).currentAudioEngine;
+        const audioEngine = (await import('../playback/karplus/index.ts')).currentAudioEngine;
         audioEngine.setCallbacks(callbacks);
         await audioEngine.play(scoreStore.score);
     });
 
     $('stopBtn')?.addEventListener('click', async () => {
-        const { currentAudioEngine } = await import('../playback/karplus/audioEngine.ts');
+        const { currentAudioEngine } = await import('../playback/karplus/index.ts');
         currentAudioEngine.stop();
-        const { alphaTabPlayer } = await import('../playback/soundfont/alphaTabPlayer.ts');
+        const { alphaTabPlayer } = await import('../playback/soundfont/index.ts');
         alphaTabPlayer.stop();
         setStatus('已停止', 'info');
     });
