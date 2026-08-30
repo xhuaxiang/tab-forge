@@ -4,7 +4,7 @@
  * 集中定义乐谱全局默认与 AI 即兴生成配置，页面 UI 与业务逻辑统一从这里读。
  */
 
-import { STANDARD_TUNING, type Tuning } from './types/index.ts';
+import { STANDARD_TUNING, type Tuning, type NoteDuration } from './types/index.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {
@@ -65,3 +65,54 @@ export const IMPROV_CONFIG = {
 export function getHint(options: ImprovSelectOption[], value: string): string | undefined {
     return options.find(o => o.value === value)?.hint;
 }
+
+// ============================================================
+// PDF 导入解析配置
+// ============================================================
+
+/**
+ * PDF 导入解析的几何/节奏阈值（初版粗略值，待真实样本 PDF 提供后调优）。
+ * 所有数值都在 PDF 用户空间坐标系下（y 轴向上）。
+ */
+export const PDF_IMPORT_CONFIG: {
+    /** 小于此长度的水平/垂直线段忽略 */
+    minLineLen: number;
+    /** 六线谱候选谱线至少这么宽 */
+    staffMinWidth: number;
+    /** 相邻谱线间距合理范围 [min, max] */
+    lineSpacing: [number, number];
+    /** 同一谱线的 y 聚类容差 */
+    yClusterTol: number;
+    /** 同一直线的 x 片段合并间隔 */
+    xMergeGap: number;
+    /** 竖线聚成小节线（barline）的 x 容差 */
+    barlineXTol: number;
+    /** 音符归属小节的边缘容差 */
+    measureEdgeTol: number;
+    /** 同一拍（x 近等）的和弦分组容差 */
+    chordXTol: number;
+    /** 文本基线 → 字形垂直中心系数（PDF y 向上，字形中心 = 基线 + 系数×字高） */
+    textBaselineToCenter: number;
+    /** 同弦相邻数字项合并为两位数的间距系数（× 字高） */
+    numMergeGap: number;
+    /** 技法标记命中最近音符的 x 容差（× 字高） */
+    techTol: number;
+    /** 无法推断时值时的兜底（四分音符） */
+    defaultDuration: NoteDuration;
+    /** 合法幂时值（与 NoteDuration 一致，dur×4 = 拍数） */
+    durations: NoteDuration[];
+} = {
+    minLineLen: 30,
+    staffMinWidth: 100,
+    lineSpacing: [4, 40],
+    yClusterTol: 2,
+    xMergeGap: 5,
+    barlineXTol: 3,
+    measureEdgeTol: 5,
+    chordXTol: 3,
+    textBaselineToCenter: 0.4,
+    numMergeGap: 0.7,
+    techTol: 2.0,
+    defaultDuration: 0.25,
+    durations: [1, 0.5, 0.25, 0.125, 0.0625, 0.03125],
+};

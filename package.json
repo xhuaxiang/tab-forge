@@ -29,6 +29,7 @@
     "vitest": "^0.34.6"
   },
   "dependencies": {
-    "@coderline/alphatab": "^1.8.4"
+    "@coderline/alphatab": "^1.8.4",
+    "pdfjs-dist": "^5.7.284"
   }
 }

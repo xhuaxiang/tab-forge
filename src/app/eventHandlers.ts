@@ -5,7 +5,7 @@
  * 不处理 UI 自身逻辑（如和弦网格），只做事件到 store action 的桥接。
  */
 
-import type { Note } from '../types/index.ts';
+import type { Note, TabScore } from '../types/index.ts';
 import { TUNING_PRESETS } from '../types/index.ts';
 import { exportToAsciiTab, exportToJson } from '../utils/tabExport.ts';
 import { $, setStatus, setRenderMode, durationName } from './state.ts';
@@ -149,7 +149,8 @@ export function initEventListeners(): void {
         }
         if (confirm('确定清空所有小节？')) {
             scoreStore.clear();
-                setStatus('已清空', 'info');
+            // [Phase 2] 清空恢复：导入后锁定渲染切换，清空时在此解锁 rendererSwitch
+            setStatus('已清空', 'info');
         }
     });
 
@@ -506,8 +507,53 @@ export function initEventListeners(): void {
         });
     }
 
+    // --- PDF 导入 ---
+    $('importPdfBtn')?.addEventListener('click', () => {
+        ($('pdfFileInput') as HTMLInputElement | null)?.click();
+    });
+    $('pdfFileInput')?.addEventListener('change', handlePdfImport);
+
     // --- 导出 ---
     $('exportTopBtn')?.addEventListener('click', handleExport);
+}
+
+// ============================================================
+// PDF 导入
+// ============================================================
+
+/** 处理「导入 PDF」文件选择 */
+async function handlePdfImport(e: Event): Promise<void> {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    input.value = ''; // 重置：同一文件可再次导入
+    setStatus(`⏳ 正在解析 ${file.name}...`, 'info');
+    try {
+        const buf = await file.arrayBuffer();
+        const { parsePdfFile } = await import('../pdfImport/index.ts'); // 懒加载，保持主包轻量
+        const score = await parsePdfFile(buf);
+        if (score.measures.length === 0) {
+            setStatus('未识别到可导入的六线谱内容', 'error');
+            return;
+        }
+        scoreStore.loadScore(score);
+        // [Phase 2] 导入后强制 alphaTab 渲染 + 锁定 rendererSwitch
+        syncImportedScoreToUI(score);
+        setStatus(`✅ 已导入 ${score.measures.length} 小节（${score.title || '未知标题'}）`, 'success');
+    } catch (err) {
+        console.error('PDF 导入失败', err);
+        setStatus(`PDF 导入失败: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+}
+
+/** 导入后把 key / 拍号 / BPM 同步到工具栏控件（避免 UI 值与 store 不一致） */
+function syncImportedScoreToUI(score: TabScore): void {
+    const keySel = document.getElementById('keySelect') as HTMLSelectElement | null;
+    if (keySel && score.key) keySel.value = score.key;
+    const tsSel = document.getElementById('timeSigSelect') as HTMLSelectElement | null;
+    if (tsSel) tsSel.value = score.timeSignature;
+    const bpm = document.getElementById('bpmInput') as HTMLInputElement | null;
+    if (bpm) bpm.value = String(score.bpm);
 }
 
 // ============================================================

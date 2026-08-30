@@ -101,6 +101,16 @@ export const scoreStore = {
         this._notify();
     },
 
+    /** 整体替换乐谱（PDF 导入等整谱载入用），只通知一次 */
+    loadScore(score: TabScore): void {
+        this.score = {
+            ...score,
+            measures: score.measures.map((m, i) => ({ ...m, index: i })),
+        };
+        this.selectedMeasure = Math.max(0, this.score.measures.length - 1);
+        this._notify();
+    },
+
     /** 添加音符到当前小节（单音/休止符/和弦音符统一走此方法） */
     addNote(note: Note): void {
         const measure = this.getActiveMeasure();
