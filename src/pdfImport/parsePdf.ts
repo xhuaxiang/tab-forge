@@ -35,19 +35,31 @@ interface Slot {
 }
 
 /** 水平线段（用户空间） */
-interface HLine { y: number; x1: number; x2: number }
+export interface HLine { y: number; x1: number; x2: number }
 /** 垂直线段（用户空间） */
-interface VLine { x: number; y1: number; y2: number }
+export interface VLine { x: number; y1: number; y2: number }
 
 // ============================================================
 // 入口
 // ============================================================
 
-/** 解析 PDF 文件字节 → TabScore（pdfjs 懒加载，仅在运行时触发） */
-export async function parsePdfFile(arrayBuffer: ArrayBuffer): Promise<TabScore> {
+/**
+ * 解析 PDF 文件字节 → TabScore。
+ * 主路径：矢量解析；矢量读不出（扫描/图片 PDF）→ 懒加载 OCR 回退。
+ * @param onProgress 可选进度回调（OCR 识别阶段用），入参为状态消息
+ */
+export async function parsePdfFile(
+    arrayBuffer: ArrayBuffer,
+    onProgress?: (msg: string) => void,
+): Promise<TabScore> {
+    // pdfjs getDocument 会把 data transfer 给 worker，导致原 buffer 被 detach。
+    // 若矢量读不出要走 OCR 回退，需用提前拷贝的副本（否则二次使用抛 detached 错误）。
+    const ocrBuffer = arrayBuffer.slice(0);
     const { extractGeometry } = await import('./pdfLoader.ts');
-    const pages = await extractGeometry(arrayBuffer);
-    return parseTabGeometry(pages);
+    const score = parseTabGeometry(await extractGeometry(arrayBuffer));
+    if (score.measures.length > 0) return score;
+    const { parsePdfOcr } = await import('./ocr/index.ts');
+    return parsePdfOcr(ocrBuffer, onProgress);
 }
 
 /**
@@ -129,7 +141,7 @@ function classifySegments(segments: LineSegment[]): { hLines: HLine[]; vLines: V
 }
 
 /** 水平线按 y 聚类（yClusterTol），同 y 的 x 片段合并为一条 */
-function mergeHLines(hLines: HLine[]): HLine[] {
+export function mergeHLines(hLines: HLine[]): HLine[] {
     const ys = [...new Set(hLines.map(h => h.y))].sort((a, b) => a - b);
     const clusters: number[][] = [];
     for (const y of ys) {
@@ -154,7 +166,7 @@ function mergeHLines(hLines: HLine[]): HLine[] {
 }
 
 /** 在合并后的谱线中找 6 条等距长线 = 一个 tab 谱表（标准记谱是 5 线，靠数量+等距区分） */
-function detectStaffs(merged: HLine[]): Staff[] {
+export function detectStaffs(merged: HLine[]): Staff[] {
     const candidates = merged
         .filter(h => (h.x2 - h.x1) >= CFG.staffMinWidth)
         .sort((a, b) => a.y - b.y);

@@ -109,7 +109,8 @@ export const PDF_IMPORT_CONFIG: {
     xMergeGap: 5,
     barlineXTol: 3,
     measureEdgeTol: 5,
-    chordXTol: 3,
+    // OCR 数字位置有噪声，和弦分组容差取 8；小节内相邻拍间距通常 ≥25 不会误合并
+    chordXTol: 8,
     textBaselineToCenter: 0.4,
     numMergeGap: 0.7,
     techTol: 2.0,

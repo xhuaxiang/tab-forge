@@ -26,9 +26,9 @@ interface PdfTextItemLike {
     height: number;
 }
 
-/** pdfjs 懒加载单例（设置一次 workerSrc） */
+/** pdfjs 懒加载单例（设置一次 workerSrc）；OCR 渲染复用同一实例 */
 let pdfjsPromise: Promise<typeof import('pdfjs-dist')> | null = null;
-function getPdfJs(): Promise<typeof import('pdfjs-dist')> {
+export function getPdfJs(): Promise<typeof import('pdfjs-dist')> {
     if (!pdfjsPromise) {
         pdfjsPromise = import('pdfjs-dist').then((m) => {
             m.GlobalWorkerOptions.workerSrc = workerUrl;

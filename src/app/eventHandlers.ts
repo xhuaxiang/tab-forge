@@ -531,7 +531,7 @@ async function handlePdfImport(e: Event): Promise<void> {
     try {
         const buf = await file.arrayBuffer();
         const { parsePdfFile } = await import('../pdfImport/index.ts'); // 懒加载，保持主包轻量
-        const score = await parsePdfFile(buf);
+        const score = await parsePdfFile(buf, (msg) => setStatus(msg, 'info'));
         if (score.measures.length === 0) {
             setStatus('未识别到可导入的六线谱内容', 'error');
             return;
