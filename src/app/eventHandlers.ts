@@ -13,7 +13,7 @@ import { canAddToMeasure } from '../utils/measureUtils.ts';
 import { scoreStore } from '../stores/scoreStore.ts';
 import { uiStore } from '../stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
-import { getApiKey, saveApiKey, generateImprovisation, type GenerationOptions } from '../improvisation/index.ts';
+import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, type GenerationOptions } from '../improvisation/index.ts';
 import { SCORE_DEFAULTS, IMPROV_CONFIG } from '../config.ts';
 import type { Tuning } from '../types/index.ts';
 import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from '../alphaTab/scoreEditing.ts';
@@ -590,6 +590,13 @@ async function initAIKeyInput(): Promise<void> {
 
 /** 处理 AI 生成按钮点击 */
 async function handleAIGenerate(): Promise<void> {
+    // 隐藏功能：额外要求填「修改系统对话」→ 打开系统提示词编辑弹窗（不依赖 API Key）
+    const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement)?.value?.trim();
+    if (isSystemPromptTrigger(extraPrompt)) {
+        openSystemPromptEditor();
+        return;
+    }
+
     const apiKeyInput = document.getElementById('aiApiKey') as HTMLInputElement;
     const statusEl = document.getElementById('aiGenStatus');
     const btn = document.getElementById('aiGenerateBtn') as HTMLButtonElement;
@@ -609,7 +616,6 @@ async function handleAIGenerate(): Promise<void> {
     const scaleType = (document.getElementById('aiScaleType') as HTMLSelectElement)?.value || IMPROV_CONFIG.scaleTypes[0].value;
     const style = (document.getElementById('aiStyle') as HTMLSelectElement)?.value || IMPROV_CONFIG.styles[0].value;
     const density = (document.getElementById('aiDensity') as HTMLSelectElement)?.value || IMPROV_CONFIG.densities[1].value;
-    const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement)?.value?.trim();
 
     const options: GenerationOptions = {
         numMeasures,

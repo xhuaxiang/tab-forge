@@ -6,8 +6,9 @@
  */
 
 import type { Note } from '../types/index.ts';
-import { SYSTEM_PROMPT, buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
+import { buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
 import { parseAIResponse } from './responseParser.ts';
+import { getEffectiveSystemPrompt } from './systemPromptEditor.ts';
 import type { TabScore } from '../types/index.ts';
 
 // ---- 配置 ----
@@ -75,6 +76,8 @@ export async function generateImprovisation(
     apiKey: string,
 ): Promise<AIGenerationResult> {
     const userPrompt = buildUserPrompt(score, options);
+    // 生效的 system prompt：自定义（隐藏功能「修改系统对话」保存）优先，否则默认
+    const systemPrompt = await getEffectiveSystemPrompt();
 
     try {
         const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
@@ -86,7 +89,7 @@ export async function generateImprovisation(
             body: JSON.stringify({
                 model: DEEPSEEK_CONFIG.model,
                 messages: [
-                    { role: 'system', content: SYSTEM_PROMPT },
+                    { role: 'system', content: systemPrompt },
                     { role: 'user', content: userPrompt },
                 ],
                 temperature: DEEPSEEK_CONFIG.temperature,
