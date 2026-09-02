@@ -3,7 +3,7 @@
  * 后台服务工作进程 - 处理持久化存储和跨页面通信
  */
 
-import type { TabScore } from './types/index.ts';
+import type { TabScore } from './core/types/index.ts';
 
 // 默认乐谱数据
 const DEFAULT_SCORE: TabScore = {

@@ -6,7 +6,7 @@
  */
 
 import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './app/state.ts';
-import { scoreStore } from './stores/scoreStore.ts';
+import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 
 // ============================================================

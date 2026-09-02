@@ -5,18 +5,18 @@
  * 不处理 UI 自身逻辑（如和弦网格），只做事件到 store action 的桥接。
  */
 
-import type { Note } from '../types/index.ts';
-import { TUNING_PRESETS } from '../types/index.ts';
-import { exportToAsciiTab, exportToJson } from '../utils/tabExport.ts';
+import type { Note } from '../core/types/index.ts';
+import { TUNING_PRESETS } from '../core/types/index.ts';
+import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
 import { $, setStatus, setRenderMode, durationName } from './state.ts';
-import { canAddToMeasure } from '../utils/measureUtils.ts';
-import { scoreStore } from '../stores/scoreStore.ts';
-import { uiStore } from '../stores/uiStore.ts';
+import { canAddToMeasure } from '../core/utils/measureUtils.ts';
+import { scoreStore } from '../core/stores/scoreStore.ts';
+import { uiStore } from '../core/stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
-import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, type GenerationOptions } from '../improvisation/index.ts';
-import { SCORE_DEFAULTS, IMPROV_CONFIG } from '../config.ts';
-import type { Tuning } from '../types/index.ts';
-import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from '../alphaTab/scoreEditing.ts';
+import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, type GenerationOptions } from '../features/ai/index.ts';
+import { SCORE_DEFAULTS, IMPROV_CONFIG } from '../core/config.ts';
+import type { Tuning } from '../core/types/index.ts';
+import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
 
 // ============================================================
 // Search-Select 事件
@@ -372,7 +372,7 @@ export function initEventListeners(): void {
         if (scoreStore.score.measures.length === 0) { setStatus('无内容', 'error'); return; }
         const playBtn = $('playBtn')!;
         const stopBtn = $('stopBtn')!;
-        const callbacks: import('../playback/index.ts').PlaybackCallbacks = {
+        const callbacks: import('../features/playback/index.ts').PlaybackCallbacks = {
             onStateChange: (s) => {
                 playBtn.textContent = s === 'playing' ? '⏸ 暂停' : (s === 'paused' ? '▶ 继续' : '▶ 播放');
                 stopBtn.toggleAttribute('disabled', s === 'stopped');
@@ -387,7 +387,7 @@ export function initEventListeners(): void {
         const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'ks';
         if (engine === 'alphatab') {
             try {
-                const { alphaTabPlayer } = await import('../playback/soundfont/index.ts');
+                const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
                 alphaTabPlayer.setCallbacks(callbacks);
                 await alphaTabPlayer.play(scoreStore.score);
                 return;
@@ -396,15 +396,15 @@ export function initEventListeners(): void {
                 setStatus('SoundFont 播放失败，已回退合成器', 'error');
             }
         }
-        const audioEngine = (await import('../playback/karplus/index.ts')).currentAudioEngine;
+        const audioEngine = (await import('../features/playback/karplus/index.ts')).currentAudioEngine;
         audioEngine.setCallbacks(callbacks);
         await audioEngine.play(scoreStore.score);
     });
 
     $('stopBtn')?.addEventListener('click', async () => {
-        const { currentAudioEngine } = await import('../playback/karplus/index.ts');
+        const { currentAudioEngine } = await import('../features/playback/karplus/index.ts');
         currentAudioEngine.stop();
-        const { alphaTabPlayer } = await import('../playback/soundfont/index.ts');
+        const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
         alphaTabPlayer.stop();
         setStatus('已停止', 'info');
     });
