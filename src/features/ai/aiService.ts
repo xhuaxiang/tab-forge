@@ -133,6 +133,68 @@ export async function generateImprovisation(
     }
 }
 
+// ---- Prompt 调试：用显式 system/user prompt 直接调用（供 promptDebug 面板）----
+
+export interface DebugGenerateResult {
+    /** AI 原始 content（未解析） */
+    raw: string;
+    /** 解析出的音符 */
+    notes: Note[];
+    error?: string;
+}
+
+/**
+ * 用指定的 system/user prompt 直接调用 DeepSeek，返回原始响应 + 解析结果。
+ * 与 generateImprovisation 的唯一区别：prompt 由调用方显式给出（绕过默认读取），供调试面板使用。
+ */
+export async function debugGenerate(
+    systemPrompt: string,
+    userPrompt: string,
+    apiKey: string,
+): Promise<DebugGenerateResult> {
+    try {
+        const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: DEEPSEEK_CONFIG.model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                ],
+                temperature: DEEPSEEK_CONFIG.temperature,
+                max_tokens: DEEPSEEK_CONFIG.maxTokens,
+                response_format: { type: 'json_object' },
+                thinking: { type: 'disabled' },
+            }),
+            signal: AbortSignal.timeout(60000),
+        });
+
+        if (!response.ok) {
+            const errBody = await response.text().catch(() => '');
+            let errMsg = `HTTP ${response.status}`;
+            try {
+                const e = JSON.parse(errBody);
+                if (e.error?.message) errMsg = e.error.message;
+            } catch { /* keep default */ }
+            return { raw: '', notes: [], error: `API 请求失败: ${errMsg}` };
+        }
+
+        const data = await response.json();
+        const raw = data?.choices?.[0]?.message?.content ?? '';
+        if (!raw) return { raw, notes: [], error: 'AI 未返回内容' };
+
+        const parsed = parseAIResponse(raw);
+        return { raw, notes: parsed.notes, error: parsed.error };
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : '网络错误';
+        return { raw: '', notes: [], error: `请求失败: ${msg}` };
+    }
+}
+
 /**
  * 通过 background service worker 调用（仅 Extension 环境可用）
  */

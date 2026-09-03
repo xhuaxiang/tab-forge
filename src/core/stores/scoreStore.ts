@@ -108,6 +108,61 @@ export const scoreStore = {
         this._notify();
     },
 
+    /**
+     * 用拍平音符重建整谱（AI 生成 / Prompt 调试结果导入）。
+     * 按 chordGroup 分组成拍位，按拍号容量填满切小节，末尾补足到 minMeasures 小节。
+     * @returns 实际写入的音符数
+     */
+    loadNotes(notes: Note[], minMeasures: number): number {
+        this.beginBatch();
+        this.clear();
+        if (this.score.measures.length === 0) this.addMeasure();
+
+        // 按 chordGroup 分组成拍位：和弦整体进一小节，不被切开，容量按拍位计
+        const slots: Note[][] = [];
+        let current: Note[] = [];
+        for (const n of notes) {
+            if (n.chordGroup !== undefined && current.length > 0 && current[0].chordGroup === n.chordGroup) {
+                current.push(n);
+            } else {
+                if (current.length > 0) slots.push(current);
+                current = [n];
+            }
+        }
+        if (current.length > 0) slots.push(current);
+
+        let written = 0;
+        for (const slot of slots) {
+            const dur = slot[0].duration || 0.25;
+            let measure = this.getActiveMeasure();
+            if (!canAddToMeasure(measure, dur)) {
+                this.addMeasure();
+                measure = this.getActiveMeasure();
+            }
+            if (slot[0].isRest) {
+                this.addRest(dur);
+                written++;
+                continue;
+            }
+            // 和弦内同弦去重（避免同一 X 上音符重叠），其余按序写入
+            const seenStrings = new Set<number>();
+            for (const n of slot) {
+                if (n.isRest || n.string === undefined) continue;
+                if (seenStrings.has(n.string)) continue;
+                seenStrings.add(n.string);
+                this.addNote(n);
+                written++;
+            }
+        }
+
+        // 补足小节数（AI 按拍容量重排后可能少于配置数）
+        while (this.score.measures.length < minMeasures) {
+            this.addMeasure();
+        }
+        this.endBatch(); // 批量结束，统一渲染一次
+        return written;
+    },
+
     /** 添加休止符到当前小节 */
     addRest(duration: number): void {
         const measure = this.getActiveMeasure();
