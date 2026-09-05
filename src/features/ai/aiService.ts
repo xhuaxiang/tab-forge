@@ -66,16 +66,16 @@ export interface AIGenerationResult {
 /**
  * 调用 DeepSeek API 生成即兴谱
  *
- * @param score    当前乐谱上下文
+ * @param _score   当前乐谱上下文（暂未使用：调试期 user prompt 最小化，score 上下文注入临时移除；保留参数以兼容调用方与后台消息协议）
  * @param options  生成选项
  * @param apiKey   DeepSeek API Key
  */
 export async function generateImprovisation(
-    score: TabScore,
+    _score: TabScore,
     options: GenerationOptions,
     apiKey: string,
 ): Promise<AIGenerationResult> {
-    const userPrompt = buildUserPrompt(score, options);
+    const userPrompt = buildUserPrompt(options);
     // 生效的 system prompt：自定义（隐藏功能「修改系统对话」保存）优先，否则默认
     const systemPrompt = await getEffectiveSystemPrompt();
 

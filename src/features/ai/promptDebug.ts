@@ -38,7 +38,7 @@ function readCurrentOptions(): GenerationOptions {
 export function openPromptDebug(): void {
     void (async () => {
         const system = await getEffectiveSystemPrompt();
-        const user = buildUserPrompt(scoreStore.score, readCurrentOptions());
+        const user = buildUserPrompt(readCurrentOptions());
         buildModal(system, user);
     })();
 }
@@ -131,7 +131,7 @@ function buildModal(initialSystem: string, initialUser: string): void {
 
     // 用当前乐谱 + 面板选项重新渲染用户提示词（丢弃手改）
     modal.querySelector('#pdRegen')?.addEventListener('click', () => {
-        userTa.value = buildUserPrompt(scoreStore.score, readCurrentOptions());
+        userTa.value = buildUserPrompt(readCurrentOptions());
         resultEl.textContent = '⟳ 已按当前乐谱/选项重新生成用户提示词。';
     });
 }
