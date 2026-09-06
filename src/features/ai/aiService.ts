@@ -66,16 +66,16 @@ export interface AIGenerationResult {
 /**
  * 调用 DeepSeek API 生成即兴谱
  *
- * @param score    当前乐谱上下文
+ * @param _score   当前乐谱上下文（暂未使用：调试期 user prompt 最小化，score 上下文注入临时移除；保留参数以兼容调用方与后台消息协议）
  * @param options  生成选项
  * @param apiKey   DeepSeek API Key
  */
 export async function generateImprovisation(
-    score: TabScore,
+    _score: TabScore,
     options: GenerationOptions,
     apiKey: string,
 ): Promise<AIGenerationResult> {
-    const userPrompt = buildUserPrompt(score, options);
+    const userPrompt = buildUserPrompt(options);
     // 生效的 system prompt：自定义（隐藏功能「修改系统对话」保存）优先，否则默认
     const systemPrompt = await getEffectiveSystemPrompt();
 
@@ -130,6 +130,68 @@ export async function generateImprovisation(
         }
         const msg = e instanceof Error ? e.message : '网络错误';
         return { notes: [], error: `请求失败: ${msg}` };
+    }
+}
+
+// ---- Prompt 调试：用显式 system/user prompt 直接调用（供 promptDebug 面板）----
+
+export interface DebugGenerateResult {
+    /** AI 原始 content（未解析） */
+    raw: string;
+    /** 解析出的音符 */
+    notes: Note[];
+    error?: string;
+}
+
+/**
+ * 用指定的 system/user prompt 直接调用 DeepSeek，返回原始响应 + 解析结果。
+ * 与 generateImprovisation 的唯一区别：prompt 由调用方显式给出（绕过默认读取），供调试面板使用。
+ */
+export async function debugGenerate(
+    systemPrompt: string,
+    userPrompt: string,
+    apiKey: string,
+): Promise<DebugGenerateResult> {
+    try {
+        const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+                model: DEEPSEEK_CONFIG.model,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                ],
+                temperature: DEEPSEEK_CONFIG.temperature,
+                max_tokens: DEEPSEEK_CONFIG.maxTokens,
+                response_format: { type: 'json_object' },
+                thinking: { type: 'disabled' },
+            }),
+            signal: AbortSignal.timeout(60000),
+        });
+
+        if (!response.ok) {
+            const errBody = await response.text().catch(() => '');
+            let errMsg = `HTTP ${response.status}`;
+            try {
+                const e = JSON.parse(errBody);
+                if (e.error?.message) errMsg = e.error.message;
+            } catch { /* keep default */ }
+            return { raw: '', notes: [], error: `API 请求失败: ${errMsg}` };
+        }
+
+        const data = await response.json();
+        const raw = data?.choices?.[0]?.message?.content ?? '';
+        if (!raw) return { raw, notes: [], error: 'AI 未返回内容' };
+
+        const parsed = parseAIResponse(raw);
+        return { raw, notes: parsed.notes, error: parsed.error };
+    } catch (e) {
+        const msg = e instanceof Error ? e.message : '网络错误';
+        return { raw: '', notes: [], error: `请求失败: ${msg}` };
     }
 }
 

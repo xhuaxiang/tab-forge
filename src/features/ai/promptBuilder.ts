@@ -1,12 +1,10 @@
 /**
- * promptBuilder — 根据乐谱状态构建 DeepSeek AI 的 prompt
+ * promptBuilder — 构建 DeepSeek AI 即兴生成的 system / user prompt
  *
- * 将所有用户上下文（调性、BPM、拍号、调弦等）注入 system/user prompt，
  * 要求 AI 返回严格符合 Note[] 结构的 JSON。
+ * 注（调试期实验）：user prompt 已最小化，仅含 extraPrompt + 输出格式要求；
+ * 调性/BPM/拍号/调弦 等 score 上下文注入暂时移除，原实现保留在 git 历史中。
  */
-
-import type { TabScore } from '../../core/types/index.ts';
-import { IMPROV_CONFIG, getHint } from '../../core/config.ts';
 
 // ---- System Prompt ----
 const SYSTEM_PROMPT = `你是一位精通吉他即兴演奏的 AI 音乐助手。
@@ -56,49 +54,13 @@ const SYSTEM_PROMPT = `你是一位精通吉他即兴演奏的 AI 音乐助手�
 - 只用吉他指板合理范围内的音（标准调弦 0-24 品）
 - 指板音区：以 7-12 品**步进移动**为主，偶尔可跳进到 1-6 品
 - 空弦音（0 品）：不受 7-12 品音区限制，可自由加入增加色彩
-- 小节数：不少于 3 小节
+- 小节数：不少于 3 小节，每个小节不要有太多空音
 - 结尾音尽量回到主音并给足时值
 - ⚠️ 若用户提供了额外提示，以上默认约束一律以额外提示为准`;
 
 // ---- Build User Prompt ----
-export function buildUserPrompt(score: TabScore, options: GenerationOptions): string {
-    const { measures: existingMeasures, tuning, bpm, key: scoreKey, timeSignature } = score;
-
-    const tuningStr = [
-        `1弦=${tuning.string1}`,
-        `2弦=${tuning.string2}`,
-        `3弦=${tuning.string3}`,
-        `4弦=${tuning.string4}`,
-        `5弦=${tuning.string5}`,
-        `6弦=${tuning.string6}`,
-    ].join(', ');
-
+export function buildUserPrompt(options: GenerationOptions): string {
     const parts: string[] = [];
-    parts.push(`请生成 ${options.numMeasures} 小节吉他即兴独奏。`);
-    parts.push(`- 调性: ${scoreKey || 'C'}`);
-    parts.push(`- 音阶类型: ${options.scaleType}`);
-    parts.push(`- BPM: ${bpm}`);
-    parts.push(`- 拍号: ${timeSignature}`);
-    parts.push(`- 调弦: ${tuningStr}`);
-    parts.push(`- 风格: ${options.style}`);
-    parts.push(`- 音符密度: ${options.density}`);
-
-    // 密度对应的时值分布要求（默认取「中」）
-    const densityHint = getHint(IMPROV_CONFIG.densities, options.density)
-        ?? IMPROV_CONFIG.densities[1].hint;
-    if (densityHint) parts.push(`- 密度节奏要求: ${densityHint}`);
-
-    // 风格对应的节奏性格
-    const styleHint = getHint(IMPROV_CONFIG.styles, options.style);
-    if (styleHint) {
-        parts.push(`- 风格节奏要求: ${styleHint}`);
-    }
-
-    parts.push('\n⚠️ 硬性要求：务必让每个音符的 duration 有所变化，绝不能所有音符时长相同；每小节时长总和要等于拍号总拍数。');
-
-    if (existingMeasures.length > 0) {
-        parts.push(`\n当前乐谱已有 ${existingMeasures.length} 个小节，请在末尾延续风格，并沿用其节奏/技法特色。`);
-    }
 
     if (options.extraPrompt) {
         parts.push(`\n⚠️ 额外要求（优先级最高，如与默认约束冲突以它为准）: ${options.extraPrompt}`);

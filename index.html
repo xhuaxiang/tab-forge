@@ -233,11 +233,12 @@
                     </div>
                     <button id="aiGenerateBtn" class="btn btn-primary" style="width:100%; margin-top:4px;">🤖 生成即兴谱</button>
                     <div id="aiGenStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
+                    <button id="aiPromptDebugBtn" class="btn btn-sm" style="margin-top:6px; width:100%;" title="调试 AI 即兴生成的提示词（System Prompt + User Prompt）">🧪 调试 Prompt</button>
                 </div>
             </details>
 
             <!-- 折叠面板：调弦 + 录音 -->
-            <details class="collapse-section">
+            <details class="collapse-section" style="display: none">
                 <summary>⚙️ 调弦 &amp; 调性 &amp; 录音</summary>
                 <div class="collapse-content">
                     <div class="collapse-row">
