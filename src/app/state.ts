@@ -7,6 +7,7 @@
 
 import { TabCanvasRenderer, createTabCanvas } from '../features/canvas/index.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
+import { syncMeasureNav } from './measureNav.ts';
 // 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
 import type { AlphaTabRenderer } from '../features/alphaTab/alphaTabRenderer.ts';
 // ============================================================
@@ -96,6 +97,18 @@ export function render(): void {
         if (!canvasRenderer) initCanvasRenderer();
         canvasRenderer!.render(scoreStore.score);
     }
+    renderHighlight();
+}
+
+/** 按当前渲染模式刷新「选中小节」高亮（alphaTab 覆盖框 / canvas 底色）；未选中传 -1 隐藏 */
+export function renderHighlight(): void {
+    const sel = scoreStore.selectedMeasure ?? -1;
+    if (renderMode === 'alphaTab') {
+        alphaTabRenderer?.setSelectedMeasure(sel);
+    } else {
+        canvasRenderer?.setSelectedMeasure(sel);
+    }
+    syncMeasureNav();
 }
 
 /** 获取当前 Canvas 渲染器（外部只读） */

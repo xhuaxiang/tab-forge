@@ -375,3 +375,42 @@ body {
 
 /* ===== 向下兼容旧组件 ===== */
 .hidden-input { display:none; }
+
+/* ===== 小节导航（选中小节）===== */
+.measure-nav {
+    display:flex; align-items:center; gap:6px; margin:6px 0;
+}
+.measure-nav-btn {
+    padding:2px 10px; border:1px solid var(--border-input); border-radius:var(--radius-md);
+    background:var(--bg-secondary); color:var(--text-secondary); cursor:pointer; font-size:14px;
+    line-height:1.4;
+}
+.measure-nav-btn:hover:not(:disabled) { background:#0f3460; border-color:var(--accent-primary); color:#fff; }
+.measure-nav-btn:disabled { opacity:0.35; cursor:not-allowed; }
+.measure-nav-label { font-size:12px; color:var(--text-muted); white-space:nowrap; }
+.measure-nav-chips { display:flex; gap:4px; overflow-x:auto; flex:1; padding:2px 0; }
+.measure-chip {
+    min-width:24px; padding:2px 6px; text-align:center; font-size:12px;
+    border:1px solid var(--border-input); border-radius:var(--radius-sm);
+    background:var(--bg-secondary); color:var(--text-secondary); cursor:pointer;
+    font-family:var(--font-mono);
+}
+.measure-chip:hover { background:#0f3460; border-color:var(--accent-primary); color:#fff; }
+.measure-chip.active {
+    background:var(--accent-primary); border-color:var(--accent-primary); color:var(--bg-primary); font-weight:700;
+}
+
+/* ===== alphaTab 选中小节高亮框 ===== */
+#alphaTabContainer { position:relative; }
+.at-measure-highlight {
+    position:absolute; pointer-events:none; z-index:5;
+    background:rgba(247,151,30,0.14); border:1px solid rgba(247,151,30,0.75); border-radius:4px;
+}
+
+/* ===== 原位编辑音符（应用修改/删除该拍）===== */
+.note-edit-bar {
+    display:flex; align-items:center; gap:4px; margin-top:6px; flex-wrap:wrap;
+    padding:4px 6px; border:1px dashed var(--border-focus); border-radius:var(--radius-md);
+    background:rgba(247,151,30,0.08);
+}
+.note-edit-hint { font-size:11px; color:var(--accent-primary); flex:1; min-width:80px; }

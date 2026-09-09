@@ -8,10 +8,35 @@
 import type { Measure, Note } from '../types/index.ts';
 
 /**
- * 按拍位分组遍历 measure.notes
+ * 按拍位分组遍历 measure.notes（单一来源）
  *
  * 单音/休止符各自独立为一组（`notes.length === 1`），
- * 和弦内同 chordGroup 的音符合并为一组（`notes.length > 1`）。
+ * 和弦内连续同 chordGroup 的音符合并为一组。
+ *
+ * 与 forEachSlot 相同，但额外提供每组在 measure.notes 里的起始下标，
+ * 供「按下标定位拍位组」的编辑逻辑复用（见 measureEdit）。
+ *
+ * @param callback 每组回调：(start=组首下标, notes=组成员)
+ */
+export function forEachSlotGroup(
+    measure: Measure,
+    callback: (start: number, notes: Note[]) => void,
+): void {
+    const notes = measure.notes;
+    let i = 0;
+    while (i < notes.length) {
+        const first = notes[i];
+        let j = i + 1;
+        if (first.chordGroup !== undefined) {
+            while (j < notes.length && notes[j].chordGroup === first.chordGroup) j++;
+        }
+        callback(i, notes.slice(i, j));
+        i = j;
+    }
+}
+
+/**
+ * 按拍位分组遍历 measure.notes
  *
  * @param callback 每组回调，参数为当前拍位的所有音符（单音则长度为1）
  */
@@ -19,30 +44,7 @@ export function forEachSlot(
     measure: Measure,
     callback: (notes: Note[]) => void,
 ): void {
-    let group: Note[] = [];
-    let lastGroupId: number | undefined;
-
-    function flush() {
-        if (group.length > 0) {
-            callback(group);
-            group = [];
-        }
-    }
-
-    for (const note of measure.notes) {
-        if (note.chordGroup !== undefined) {
-            if (note.chordGroup !== lastGroupId) {
-                flush();
-                lastGroupId = note.chordGroup;
-            }
-            group.push(note);
-        } else {
-            flush();
-            lastGroupId = undefined;
-            callback([note]);
-        }
-    }
-    flush();
+    forEachSlotGroup(measure, (_start, notes) => callback(notes));
 }
 
 /**

@@ -16,7 +16,7 @@ import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton }
 import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../features/ai/index.ts';
 import { SCORE_DEFAULTS, IMPROV_CONFIG } from '../core/config.ts';
 import type { Tuning } from '../core/types/index.ts';
-import { buildNoteFromForm, updateTechniqueUI, isTieActive, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
+import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
 
 // ============================================================
 // Search-Select 事件
@@ -174,8 +174,10 @@ export function initEventListeners(): void {
     // Prompt 调试面板
     $('aiPromptDebugBtn')?.addEventListener('click', openPromptDebug);
 
-    // --- 添加音符 ---
+    // --- 添加音符（新增/追加时退出原位编辑态） ---
     $('addNoteBtn')?.addEventListener('click', () => {
+        clearEditTarget();
+        clearInsertTarget();
         const measure = scoreStore.getActiveMeasure();
         const durSel = $('inputDuration') as HTMLSelectElement | null;
         const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
@@ -210,11 +212,13 @@ export function initEventListeners(): void {
                 suffix += ` →${note.targetFret}品`;
             }
         }
-        setStatus(`已添加: 第${stringNum}弦 ${fret}品 ${durationName(note.duration)}${suffix}`, 'success');
+        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · 第${stringNum}弦 ${fret}品 ${durationName(note.duration)}${suffix}`, 'success');
     });
 
     // --- 休止符 ---
     $('addRestBtn')?.addEventListener('click', () => {
+        clearEditTarget();
+        clearInsertTarget();
         const durSel = $('inputDuration') as HTMLSelectElement;
         const duration = parseFloat(durSel?.value || '0.25');
         if (duration <= 0) { setStatus('无效时值', 'error'); return; }
@@ -224,8 +228,17 @@ export function initEventListeners(): void {
             return;
         }
         scoreStore.addRest(duration);
-        setStatus(`已添加 ${durationName(duration)} 休止符`, 'success');
+        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · ${durationName(duration)} 休止符`, 'success');
     });
+
+    // --- 原位编辑已有音符（点谱面音符后出现） ---
+    $('applyNoteEditBtn')?.addEventListener('click', applyEditTarget);
+    $('muteNoteBtn')?.addEventListener('click', muteEditTarget);
+    $('cancelNoteEditBtn')?.addEventListener('click', clearEditTarget);
+
+    // --- 定位插入点（点空白拍后出现） ---
+    $('writeInsertBtn')?.addEventListener('click', writeInsertTarget);
+    $('cancelInsertBtn')?.addEventListener('click', cancelInsertTarget);
 
     // --- 推弦幅度按钮 ---
     document.querySelectorAll('.bend-amount-btn').forEach(btn => {
@@ -297,6 +310,8 @@ export function initEventListeners(): void {
 
     // --- 添加和弦 ---
     $('addChordBtn')?.addEventListener('click', () => {
+        clearEditTarget();
+        clearInsertTarget();
         const durSel = document.getElementById('chordDuration') as HTMLSelectElement;
         const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
         if (duration <= 0) { setStatus('无效时值', 'error'); return; }
@@ -346,7 +361,7 @@ export function initEventListeners(): void {
         updateArpeggioButton();
         updateStrumButton();
 
-        setStatus(`已添加和弦${chordName ? ' (' + chordName + ')' : ''}: ${active.length}弦${uiStore.currentArpeggio ? ' 琶音' : ''}`, 'success');
+        setStatus(`已添加和弦: 小节${scoreStore.activeMeasureIndex() + 1} ${chordName ? '(' + chordName + ') ' : ''}${active.length}弦${uiStore.currentArpeggio ? ' 琶音' : ''}`, 'success');
     });
 
     // --- 调弦 ---

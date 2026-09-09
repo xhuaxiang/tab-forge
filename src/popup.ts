@@ -5,7 +5,7 @@
  * 不包含具体业务逻辑，只做组装和启动。
  */
 
-import { $, setStatus, render, getCanvasRenderer, setRenderMode } from './app/state.ts';
+import { $, setStatus, render, getCanvasRenderer, setRenderMode, renderHighlight } from './app/state.ts';
 import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 
@@ -16,7 +16,13 @@ import { initEventListeners } from './app/eventHandlers.ts';
 function init(): void {
     initEventListeners();
     // scoreStore 数据变更自动触发渲染（集中式，eventHandlers 不再手动 render）
-    scoreStore.setOnChange(() => render());
+    scoreStore.setOnChange(() => {
+        render();
+    });
+    // 选中小节变化只刷新高亮与导航（不整谱重渲染）
+    scoreStore.setOnSelectChange(() => {
+        renderHighlight();
+    });
     // 默认 alphaTab 渲染
     void setRenderMode('alphaTab', true);
 
@@ -31,7 +37,7 @@ function init(): void {
         }
     });
     ro.observe(container);
-
+    
     setStatus('就绪 — 点击「+ 小节」开始创建吉他六线谱', 'info');
 }
 

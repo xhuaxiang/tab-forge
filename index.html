@@ -42,6 +42,14 @@
                 <button id="clearBtn" title="清空乐谱" class="btn-ghost">🗑 清空</button>
             </div>
 
+            <!-- 小节导航（选中小节，chips 由 JS 填充） -->
+            <div class="measure-nav" id="measureNav" style="display:none;">
+                <button id="navMeasurePrev" class="measure-nav-btn" title="上一小节" disabled>‹</button>
+                <span class="measure-nav-label" id="navMeasureLabel">小节 —</span>
+                <div class="measure-nav-chips" id="navMeasureChips"></div>
+                <button id="navMeasureNext" class="measure-nav-btn" title="下一小节" disabled>›</button>
+            </div>
+
             <!-- Tab Display -->
             <div class="tab-area" id="tabDisplay">
                 <div id="tabContent" style="width: 100%; height: 100%; min-height: 200px;">
@@ -151,6 +159,21 @@
                     <div class="action-bar">
                         <button id="addNoteBtn" class="btn btn-primary" style="flex:2;">添加</button>
                         <button id="addRestBtn" class="btn" style="flex:1;">𝄽 休止</button>
+                    </div>
+
+                    <!-- 原位编辑已有音符（点击谱面音符后出现） -->
+                    <div class="note-edit-bar" id="noteEditBar" style="display:none;">
+                        <span class="note-edit-hint" id="noteEditHint"></span>
+                        <button id="applyNoteEditBtn" class="btn btn-primary btn-sm">✓ 应用修改</button>
+                        <button id="muteNoteBtn" class="btn btn-sm" title="把该拍静音为休止符">🗑 删除该拍</button>
+                        <button id="cancelNoteEditBtn" class="btn btn-sm" title="取消">✕</button>
+                    </div>
+
+                    <!-- 点击空白拍 → 仅定位插入点，确认后才写入（不自动填旧数据） -->
+                    <div class="note-edit-bar" id="noteInsertBar" style="display:none;">
+                        <span class="note-edit-hint" id="noteInsertHint"></span>
+                        <button id="writeInsertBtn" class="btn btn-primary btn-sm">✓ 写入此拍</button>
+                        <button id="cancelInsertBtn" class="btn btn-sm" title="取消">✕</button>
                     </div>
                 </div>
 

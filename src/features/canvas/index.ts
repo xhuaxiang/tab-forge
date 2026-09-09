@@ -30,6 +30,7 @@
  */
 
 import type { TabScore } from '../../core/types/index.ts';
+import type { RowLayout } from '../../core/types/canvas.ts';
 import { COLORS, LAYOUT } from './constants.ts';
 import { layoutRows } from './layout.ts';
 import { renderTabRow, getRowTopY, getStringY, getContentBounds } from './techniques/measureRenderer.ts';
@@ -48,6 +49,17 @@ export class TabCanvasRenderer {
     private width: number = 0;
     private height: number = 0;
     private dpr: number = 1;
+    /** 选中小节号（-1 = 无） */
+    private selectedMeasure = -1;
+    /** 最近一次渲染的谱（供选中变化时局部重绘） */
+    private lastScore: TabScore | null = null;
+
+    /** 设置选中小节并重绘高亮（无选中传 -1） */
+    setSelectedMeasure(index: number): void {
+        if (index === this.selectedMeasure && this.lastScore) return;
+        this.selectedMeasure = index;
+        if (this.lastScore) this.render(this.lastScore);
+    }
 
     constructor(canvas: HTMLCanvasElement) {
         this.canvas = canvas;
@@ -83,6 +95,7 @@ export class TabCanvasRenderer {
     // ============================================================
 
     render(score: TabScore): void {
+        this.lastScore = score;
         this.clear();
 
         const { measures, tuning, bpm, title, artist } = score;
@@ -126,11 +139,44 @@ export class TabCanvasRenderer {
             // 行底小节编号
             renderMeasureNumbers(this.ctx, row.notePositions, rowTopY);
         }
+
+        // 选中小节高亮（半透明，画在最上层）
+        this.drawMeasureHighlight(rows);
     }
 
-    /** 高亮某一小节（播放时） */
-    highlightMeasure(_measureIndex: number): void {
-        // 预留接口
+    /** 高亮某一小节（选中联动；传入 -1 取消） */
+    highlightMeasure(measureIndex: number): void {
+        this.setSelectedMeasure(measureIndex);
+    }
+
+    /** 画选中小节的半透明底色框 */
+    private drawMeasureHighlight(rows: RowLayout[]): void {
+        const sel = this.selectedMeasure;
+        if (sel < 0) return;
+
+        for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
+            const row = rows[rowIdx];
+            const last = row.startMeasureIdx + row.measures.length - 1;
+            if (sel < row.startMeasureIdx || sel > last) continue;
+
+            const positions = row.notePositions.filter(p => p.measureIdx === sel);
+            if (positions.length === 0) continue;
+            const xs = positions.map(p => p.x);
+            const x0 = Math.min(...xs) - 10;
+            const x1 = Math.max(...xs) + 10;
+            const rowTopY = getRowTopY(rowIdx);
+            const y0 = rowTopY - 2;
+            const y1 = rowTopY + 5 * LAYOUT.lineSpacing + 2;
+
+            const ctx = this.ctx;
+            ctx.save();
+            ctx.fillStyle = 'rgba(247,151,30,0.14)';
+            ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+            ctx.strokeStyle = 'rgba(247,151,30,0.8)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+            ctx.restore();
+        }
     }
 
     /** 销毁释放 */

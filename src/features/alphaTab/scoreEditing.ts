@@ -15,6 +15,7 @@ import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { $, setStatus, getSearchSelectValue, durationName } from '../../app/state.ts';
 import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from '../../core/utils/scoreMapping.ts';
+import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 
 export type { AppTechnique } from '../../core/utils/scoreMapping.ts';
 
@@ -135,20 +136,134 @@ export function buildNoteFromForm(prevFretCheck = true): { note: Note | null; er
 }
 
 // ============================================================
+// 原位编辑目标（点已有音符后，表单区出现「应用修改/删除该拍」）
+// ============================================================
+
+export interface EditTarget {
+    measureIndex: number;
+    noteIndex: number;
+    string: number;
+    fret: number;
+}
+
+let editTarget: EditTarget | null = null;
+
+/** 当前编辑目标（无则 null），供 eventHandlers 绑定按钮 */
+export function getEditTarget(): EditTarget | null {
+    return editTarget;
+}
+
+/** 清除编辑目标并隐藏编辑条 */
+export function clearEditTarget(): void {
+    editTarget = null;
+    setActionBar('noteEditBar', 'noteEditHint', null);
+}
+
+/** 用表单当前值覆盖编辑目标音符（保留该拍时值；和弦内只换单弦） */
+export function applyEditTarget(): void {
+    const t = editTarget;
+    if (!t) {
+        setStatus('请先在谱面点击一个已有音符', 'info');
+        return;
+    }
+    const built = buildNoteFromForm(false);
+    if (!built.note) {
+        setStatus(built.error ?? '表单值无效', 'error');
+        return;
+    }
+    const r = scoreStore.updateNoteAt(t.measureIndex, t.noteIndex, built.note);
+    if (!r.ok) {
+        setStatus(r.reason ?? '修改失败', 'error');
+        return;
+    }
+    clearEditTarget();
+    setStatus(`已修改: 小节${t.measureIndex + 1} · 第${built.note.string}弦 ${built.note.fret}品`, 'success');
+}
+
+/** 把编辑目标整拍（单音/和弦）静音为休止符 */
+export function muteEditTarget(): void {
+    const t = editTarget;
+    if (!t) {
+        setStatus('请先在谱面点击一个已有音符', 'info');
+        return;
+    }
+    const r = scoreStore.muteNoteAt(t.measureIndex, t.noteIndex);
+    if (!r.ok) {
+        setStatus(r.reason ?? '删除失败', 'error');
+        return;
+    }
+    clearEditTarget();
+    setStatus(`已删除（休止）: 小节${t.measureIndex + 1} · 第${t.string}弦`, 'success');
+}
+
+/**
+ * 编辑/插入操作条显隐（text=null 隐藏；否则展开所在面板并滚动到可见）
+ * @param barId  操作条元素 id
+ * @param hintId 提示文本元素 id
+ * @param text   提示文本（null = 隐藏）
+ */
+function setActionBar(barId: string, hintId: string, text: string | null): void {
+    const bar = document.getElementById(barId) as HTMLElement | null;
+    if (!bar) return;
+    if (text === null) {
+        bar.style.display = 'none';
+        return;
+    }
+    bar.style.display = '';
+    const hint = document.getElementById(hintId);
+    if (hint) hint.textContent = text;
+    const details = bar.closest('details');
+    if (details instanceof HTMLDetailsElement && !details.open) details.open = true;
+    bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+/** 刷新编辑条显隐/提示 */
+function renderEditUI(): void {
+    setActionBar('noteEditBar', 'noteEditHint', editTarget
+        ? `编辑: 小节${editTarget.measureIndex + 1} · 第${editTarget.string}弦 ${editTarget.fret}品`
+        : null);
+}
+
+// ============================================================
 // 点击入口
 // ============================================================
 
 export function handleScoreClick(hit: ScoreClickHit): void {
     const { beat, note } = hit;
     if (!beat) {
-        setStatus('未命中拍位（点击空白）', 'info');
+        // 点完全没有内容的空白处 → 取消选中，并清掉编辑/插入态
+        scoreStore.selectMeasure(null);
+        clearEditTarget();
+        clearInsertTarget();
+        setStatus('已取消选中', 'info');
         return;
     }
+    const measureIndex = beat.voice.bar.index;
+    // 点哪个小节就选中哪个小节（供表单追加与高亮联动）
+    scoreStore.selectMeasure(measureIndex);
+
     if (note) {
+        // 点已有音符 → 载入并进入原位编辑（不自动插入）
+        clearInsertTarget();
         loadAlphaNoteIntoForm(note, beat);
+        setEditTargetFromNote(note, beat, measureIndex);
         return;
     }
-    insertNoteAtBeat(beat);
+    // 点空白拍 → 仅定位「插入点」，确认后才写入，避免自动沿用上一个音符的数据
+    clearEditTarget();
+    clearInsertTarget();
+    armInsertTarget(beat);
+}
+
+/** 由点中的 alphaTab 音符反查应用数据下标，记录为编辑目标 */
+function setEditTargetFromNote(note: model.Note, beat: model.Beat, measureIndex: number): void {
+    const appString = alphaStringToAppString(note.string);
+    if (appString < 1 || appString > 6) return; // 不支持类型（载入时已报错）
+    const measure = scoreStore.score.measures[measureIndex];
+    if (!measure) return;
+    const noteIndex = findNoteAtBeat(measure, beatOffsetInMeasure(beat), appString, note.fret);
+    editTarget = noteIndex === null ? null : { measureIndex, noteIndex, string: appString, fret: note.fret };
+    renderEditUI();
 }
 
 /** 点击已有音符 → 载入表单 */
@@ -176,27 +291,66 @@ function loadAlphaNoteIntoForm(note: model.Note, beat: model.Beat): void {
     setStatus(`已载入: 第${appString}弦 ${note.fret}品 ${durationName(dur)}${suffix}`, 'info');
 }
 
-/** 点击空白拍 → 用表单值插入音符 */
-function insertNoteAtBeat(beat: model.Beat): void {
+// ============================================================
+// 插入点（点空白拍 → 定位，点「✓ 写入此拍」才插入）
+// ============================================================
+
+interface InsertTarget {
+    measureIndex: number;
+    beatOffset: number;
+}
+
+let insertTarget: InsertTarget | null = null;
+
+/** 定位插入目标（不写谱） */
+function armInsertTarget(beat: model.Beat): void {
     const measureIndex = beat.voice.bar.index;
     const measure = scoreStore.score.measures[measureIndex];
     if (!measure) {
         setStatus('小节不存在', 'error');
         return;
     }
+    insertTarget = { measureIndex, beatOffset: beatOffsetInMeasure(beat) };
+    renderInsertUI();
+    setStatus(`已定位插入点: 小节${measureIndex + 1} · 表单设好后点「✓ 写入此拍」`, 'info');
+}
 
+/** 用表单当前值写入已定位的插入点 */
+export function writeInsertTarget(): void {
+    const t = insertTarget;
+    if (!t) {
+        setStatus('请先在谱面点击空白拍定位插入点', 'info');
+        return;
+    }
     const built = buildNoteFromForm(false);
     if (!built.note) {
         setStatus(built.error ?? '表单值无效', 'error');
         return;
     }
-
-    const offset = beatOffsetInMeasure(beat);
-    const result = scoreStore.insertNoteAt(measureIndex, offset, built.note); // 内部 _notify 自动渲染
+    const result = scoreStore.insertNoteAt(t.measureIndex, t.beatOffset, built.note); // 内部 _notify 自动渲染
     if (!result.ok) {
-        setStatus(result.reason ?? '插入失败', 'error');
+        setStatus(result.reason ?? '写入失败', 'error');
         return;
     }
+    clearInsertTarget();
+    setStatus(`已写入: 小节${t.measureIndex + 1} · 第${built.note.string}弦 ${built.note.fret}品`, 'success');
+}
 
-    setStatus(`已插入: 第${built.note.string}弦 ${built.note.fret}品 ${durationName(built.note.duration)} @ 小节${measureIndex + 1}`, 'success');
+/** 取消插入点 */
+export function cancelInsertTarget(): void {
+    clearInsertTarget();
+    setStatus('已取消插入', 'info');
+}
+
+/** 清除插入点并隐藏插入条 */
+export function clearInsertTarget(): void {
+    insertTarget = null;
+    setActionBar('noteInsertBar', 'noteInsertHint', null);
+}
+
+/** 刷新插入条显隐/提示 */
+function renderInsertUI(): void {
+    setActionBar('noteInsertBar', 'noteInsertHint', insertTarget
+        ? `插入点: 小节${insertTarget.measureIndex + 1}`
+        : null);
 }
