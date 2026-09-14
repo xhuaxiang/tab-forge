@@ -2,14 +2,17 @@
  * systemPromptEditor — 系统提示词编辑器（隐藏功能，独立功能文件）
  *
  * 在 AI 即兴面板的「额外要求」里输入「修改系统对话」触发：
- * 弹出一个居中弹窗，textarea 预填当前生效的 SYSTEM_PROMPT，可编辑；
+ * 弹出一个居中弹窗，textarea 预填当前生效的「专业性描述」，可编辑；
  * 确认后按 api-key 那套逻辑（chrome.storage.local / localStorage）存到本地，
- * 之后生成即兴时使用自定义 system prompt（未设置则用默认）。
+ * 之后生成即兴时使用它（未设置则用默认）。
+ *
+ * 存的是专业性描述，不含数据结构 —— 数据结构由 composeSystemPrompt 在发请求前恒定追加，
+ * 不展示、不可编辑，避免契约被改坏导致解析静默失败。
  *
  * 不侵入 promptBuilder.ts；纯逻辑（触发判断/存储/取生效值）与 UI（弹窗）都在本文件。
  */
 
-import { SYSTEM_PROMPT } from './promptBuilder.ts';
+import { composeSystemPrompt, stripContract, DEFAULT_EXPERT_PROMPT } from './promptBuilder.ts';
 import { setStatus } from '../../app/dom.ts';
 
 /** 触发隐藏功能的额外要求文案 */
@@ -28,8 +31,8 @@ export function isSystemPromptTrigger(extraPrompt?: string): boolean {
     return extraPrompt?.trim() === TRIGGER_EXTRA_PROMPT;
 }
 
-/** 读取自定义 system prompt（未设置返回 null） */
-export async function getCustomSystemPrompt(): Promise<string | null> {
+/** 读取本地存的专业性描述原文（未设置返回 null） */
+async function readStoredPrompt(): Promise<string | null> {
     if (isChromeExtension()) {
         try {
             const result = await chrome.storage.local.get<Record<typeof STORAGE_KEY, string>>(STORAGE_KEY);
@@ -46,7 +49,16 @@ export async function getCustomSystemPrompt(): Promise<string | null> {
     }
 }
 
-/** 保存自定义 system prompt */
+/**
+ * 读取自定义专业性描述（未设置返回 null）。
+ * 旧版存的是「专业性描述 + 数据结构」整段，这里剥掉数据结构块，与当前格式统一。
+ */
+export async function getCustomSystemPrompt(): Promise<string | null> {
+    const raw = await readStoredPrompt();
+    return raw ? stripContract(raw) : null;
+}
+
+/** 保存自定义专业性描述（不含数据结构） */
 export async function saveCustomSystemPrompt(prompt: string): Promise<void> {
     if (isChromeExtension()) {
         await chrome.storage.local.set({ [STORAGE_KEY]: prompt });
@@ -57,17 +69,24 @@ export async function saveCustomSystemPrompt(prompt: string): Promise<void> {
     } catch { /* ignore */ }
 }
 
-/** 当前生效的 system prompt：自定义优先，未设置用默认 */
-export async function getEffectiveSystemPrompt(): Promise<string> {
+/** 当前生效的可编辑部分（专业性描述，不含数据结构）：自定义优先，未设置用默认 */
+export async function getEditableSystemPrompt(): Promise<string> {
     const custom = await getCustomSystemPrompt();
-    return custom && custom.trim() ? custom : SYSTEM_PROMPT;
+    return custom && custom.trim() ? custom : DEFAULT_EXPERT_PROMPT;
 }
 
-/** 打开居中弹窗编辑系统提示词，确认后保存并关闭 */
+/**
+ * 当前生效的完整 system prompt（专业性描述 + 代码追加的数据结构），发请求用。
+ * 编辑器/调试面板只经手可编辑部分，别用这个去预填输入框。
+ */
+export async function getEffectiveSystemPrompt(): Promise<string> {
+    return composeSystemPrompt(await getEditableSystemPrompt());
+}
+
+/** 打开居中弹窗编辑专业性描述，确认后保存并关闭 */
 export function openSystemPromptEditor(): void {
     void (async () => {
-        const current = await getEffectiveSystemPrompt();
-        buildModal(current);
+        buildModal(await getEditableSystemPrompt());
     })();
 }
 

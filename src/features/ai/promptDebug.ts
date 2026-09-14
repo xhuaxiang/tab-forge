@@ -2,18 +2,21 @@
  * promptDebug — AI 即兴 Prompt 调试面板（供调参 / 交接他人使用）
  *
  * 同时展示并编辑两段最终会发给 DeepSeek 的提示词：
- *   ① 系统提示词 System Prompt —— 角色 / 格式 / 规则
+ *   ① 系统提示词 System Prompt —— 只放「专业性描述」（人格 / 节奏 / 旋律 / 演奏约束）
  *   ② 用户提示词 User Prompt   —— 每次生成的具体指令（默认由 buildUserPrompt 生成，可临时改）
  * 提供「生成测试」直接调用并展示 AI 原始响应，方便快速迭代。
  *
- * 找到合适的两段后，回写到 src/features/ai/promptBuilder.ts：
- *   SYSTEM_PROMPT 常量（①）+ buildUserPrompt 函数（②）。
+ * ① 不展示数据结构：契约在发送前由 composeSystemPrompt 恒定追加，改了也白改，故不给看。
+ *
+ * 找到合适的两段后回写进代码：① → promptBuilder.ts，② → buildUserPrompt 函数。
  */
 
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { IMPROV_CONFIG } from '../../core/config.ts';
-import { SYSTEM_PROMPT, buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
-import { getEffectiveSystemPrompt, saveCustomSystemPrompt } from './systemPromptEditor.ts';
+import {
+    composeSystemPrompt, DEFAULT_EXPERT_PROMPT, buildUserPrompt, type GenerationOptions,
+} from './promptBuilder.ts';
+import { getEditableSystemPrompt, saveCustomSystemPrompt } from './systemPromptEditor.ts';
 import { getApiKey, debugGenerate } from './aiService.ts';
 import { setStatus } from '../../app/dom.ts';
 
@@ -37,7 +40,7 @@ function readCurrentOptions(): GenerationOptions {
 /** 打开 Prompt 调试弹窗 */
 export function openPromptDebug(): void {
     void (async () => {
-        const system = await getEffectiveSystemPrompt();
+        const system = await getEditableSystemPrompt();
         const user = buildUserPrompt(readCurrentOptions());
         buildModal(system, user);
     })();
@@ -51,12 +54,14 @@ function buildModal(initialSystem: string, initialUser: string): void {
             <h3>🧪 Prompt 调试</h3>
             <p style="font-size:12px;color:var(--text-muted);margin:2px 0 8px;line-height:1.5;">
                 改上面两段提示词 → 点「▶ 用上方提示词生成」→ 出谱并自动关窗。
-                找到合适组合后，把内容回写进 <code>src/features/ai/promptBuilder.ts</code>（SYSTEM_PROMPT 常量 + buildUserPrompt 函数）。
+                找到合适组合后回写进代码：① → <code>src/features/ai/promptBuilder.ts</code>，
+                ② → <code>buildUserPrompt</code> 函数。
             </p>
 
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:2px;">① 系统提示词（System Prompt）</div>
             <p style="font-size:11px;color:var(--text-muted);margin:0 0 4px;line-height:1.5;">
-                给 AI 的「角色与规则」：告诉它你是谁、输出格式、节奏/旋律/技法要求。影响 AI「怎么想、怎么生成」。
+                给 AI 的「角色与规则」：告诉它你是谁、节奏/旋律/技法要求。影响 AI「怎么想、怎么生成」。
+                音符对象格式 / 输出格式属于数据结构，由代码恒定追加 —— 这里不展示也改不了。
                 点「保存系统提示词」后对所有生成生效（存本地，覆盖代码默认）。
             </p>
             <textarea class="modal-textarea" id="pdSystem" style="min-height:140px;font-size:13px;line-height:1.6;color:var(--text-primary);"></textarea>
@@ -103,7 +108,8 @@ function buildModal(initialSystem: string, initialUser: string): void {
             return;
         }
         resultEl.textContent = '⏳ 正在调用 DeepSeek...';
-        const res = await debugGenerate(systemTa.value, userTa.value, apiKey);
+        // 只发了可编辑部分，发送前把数据结构补上 —— 否则 AI 不知道输出格式
+        const res = await debugGenerate(composeSystemPrompt(systemTa.value), userTa.value, apiKey);
         if (res.error) {
             resultEl.textContent = `❌ ${res.error}`;
         } else if (res.notes.length === 0) {
@@ -116,17 +122,17 @@ function buildModal(initialSystem: string, initialUser: string): void {
         }
     });
 
-    // 保存系统提示词到本地（沿用「修改系统对话」的存储，互相一致）
+    // 保存专业性描述到本地（沿用「修改系统对话」的存储，互相一致）
     modal.querySelector('#pdSave')?.addEventListener('click', async () => {
         await saveCustomSystemPrompt(systemTa.value);
-        resultEl.textContent = '💾 系统提示词已保存到本地，后续生成将使用它。';
+        resultEl.textContent = '💾 系统提示词已保存到本地，后续生成将使用它（数据结构仍由代码追加）。';
     });
 
-    // 恢复默认：清掉自定义 → 显示代码里的 SYSTEM_PROMPT
+    // 恢复默认：清掉自定义 → 显示代码里的默认专业性描述
     modal.querySelector('#pdReset')?.addEventListener('click', async () => {
         await saveCustomSystemPrompt('');
-        systemTa.value = SYSTEM_PROMPT;
-        resultEl.textContent = '↺ 已恢复默认系统提示词（来自 promptBuilder.ts 的 SYSTEM_PROMPT）。';
+        systemTa.value = DEFAULT_EXPERT_PROMPT;
+        resultEl.textContent = '↺ 已恢复默认系统提示词（来自 promptBuilder.ts）。';
     });
 
     // 用当前乐谱 + 面板选项重新渲染用户提示词（丢弃手改）
