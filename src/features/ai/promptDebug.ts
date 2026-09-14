@@ -15,7 +15,7 @@ import { IMPROV_CONFIG } from '../../core/config.ts';
 import { SYSTEM_PROMPT, buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
 import { getEffectiveSystemPrompt, saveCustomSystemPrompt } from './systemPromptEditor.ts';
 import { getApiKey, debugGenerate } from './aiService.ts';
-import { setStatus } from '../../app/state.ts';
+import { setStatus } from '../../app/dom.ts';
 
 /** 从 AI 面板控件读取当前生成选项 */
 function readCurrentOptions(): GenerationOptions {

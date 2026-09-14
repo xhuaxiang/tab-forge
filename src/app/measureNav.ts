@@ -3,7 +3,7 @@
  *
  * 渲染器无关的「选中小节」入口：◀ ▶ 步进 + 小节数字 chips。
  * 点击通过 scoreStore.selectMeasure 切换选中（走轻量 onSelectChange，
- * 由 state 负责刷新渲染器高亮）。DOM 自身由 refreshMeasureNav 从 store 重建。
+ * 由 render.ts 负责刷新渲染器高亮）。DOM 自身由 refreshMeasureNav 从 store 重建。
  */
 
 import { scoreStore } from '../core/stores/scoreStore.ts';
@@ -30,7 +30,7 @@ export function initMeasureNav(): void {
     });
 }
 
-/** 懒初始化 + 立即刷新（由 state.render/renderHighlight 统一调用，popup 无需单独接线） */
+/** 懒初始化 + 立即刷新（由 render.ts 的 render/renderHighlight 统一调用，popup 无需单独接线） */
 export function syncMeasureNav(): void {
     initMeasureNav();
     refreshMeasureNav();

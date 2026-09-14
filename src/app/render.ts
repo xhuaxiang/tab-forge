@@ -1,15 +1,19 @@
 /**
- * state — 应用状态与渲染入口
+ * render — 渲染编排（渲染器协调层）
  *
- * 管理 Canvas 渲染器实例和通用工具函数。
- * 状态数据已迁移到 stores/
+ * 管理 Canvas（自研）与 alphaTab（专业，懒加载）两个渲染器实例与切换。
+ * 对外暴露 render() / renderHighlight()，由 popup.ts 注入到 scoreStore 的
+ * onChange / onSelectChange，实现「数据变更 → 刷对应渲染器」。
+ * DOM 助手（$ / setStatus）在 dom.ts；纯工具在 core/utils，本文件不混装。
  */
 
-import { TabCanvasRenderer, createTabCanvas } from '../features/canvas/index.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
+import { $ } from './dom.ts';
 import { syncMeasureNav } from './measureNav.ts';
+import { TabCanvasRenderer, createTabCanvas } from '../features/canvas/index.ts';
 // 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
 import type { AlphaTabRenderer } from '../features/alphaTab/alphaTabRenderer.ts';
+
 // ============================================================
 // 渲染器实例与切换
 // ============================================================
@@ -58,25 +62,7 @@ export async function setRenderMode(mode: RenderMode, force = false): Promise<vo
 }
 
 // ============================================================
-// DOM 工具
-// ============================================================
-
-/** 简写 DOM 选择器 */
-export function $(id: string): HTMLElement | null {
-    return document.getElementById(id);
-}
-
-const statusBar = $('statusBar')!;
-
-/** 设置状态栏消息 */
-export function setStatus(msg: string, type: 'info' | 'success' | 'error' = 'info'): void {
-    statusBar.textContent = msg;
-    statusBar.className = 'status-bar';
-    if (type) statusBar.classList.add(type);
-}
-
-// ============================================================
-// Canvas 渲染
+// 渲染入口
 // ============================================================
 
 export function initCanvasRenderer(): void {
@@ -115,28 +101,3 @@ export function renderHighlight(): void {
 export function getCanvasRenderer(): TabCanvasRenderer | null {
     return canvasRenderer;
 }
-
-// ============================================================
-// 工具函数
-// ============================================================
-
-/** 获取 Search-Select 组件的选中值 */
-export function getSearchSelectValue(id: string): number {
-    const val = document.getElementById(id)?.dataset.value;
-    if (val === undefined || val === '') return 1;
-    return Number(val);
-}
-
-/** 时值名称 */
-export function durationName(d: number): string {
-    const m: Record<number, string> = {
-        1: '全音符',
-        0.5: '二分音符',
-        0.25: '四分音符',
-        0.125: '八分音符',
-        0.0625: '十六分',
-        0.03125: '三十二分',
-    };
-    return m[d] || `${d}拍`;
-}
-

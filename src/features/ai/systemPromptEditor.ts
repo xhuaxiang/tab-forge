@@ -10,7 +10,7 @@
  */
 
 import { SYSTEM_PROMPT } from './promptBuilder.ts';
-import { setStatus } from '../../app/state.ts';
+import { setStatus } from '../../app/dom.ts';
 
 /** 触发隐藏功能的额外要求文案 */
 export const TRIGGER_EXTRA_PROMPT = '修改系统对话';

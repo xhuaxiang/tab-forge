@@ -8,8 +8,10 @@
 import type { Note } from '../core/types/index.ts';
 import { TUNING_PRESETS } from '../core/types/index.ts';
 import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
-import { $, setStatus, setRenderMode, durationName } from './state.ts';
+import { $, setStatus } from './dom.ts';
+import { setRenderMode } from './render.ts';
 import { canAddToMeasure } from '../core/utils/measureUtils.ts';
+import { durationName } from '../core/utils/duration.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
 import { uiStore } from '../core/stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';

@@ -29,16 +29,3 @@ export function getRestSymbol(duration: NoteDuration): string {
         default:     return '𝄽';
     }
 }
-
-/** 时值名称（用于显示） */
-export function getDurationName(duration: NoteDuration): string {
-    const names: Record<number, string> = {
-        1: '全音符',
-        0.5: '二分音符',
-        0.25: '四分音符',
-        0.125: '八分音符',
-        0.0625: '十六分音符',
-        0.03125: '三十二分音符',
-    };
-    return names[duration] || '未知';
-}

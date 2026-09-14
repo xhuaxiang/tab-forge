@@ -13,8 +13,9 @@ import type { model } from '@coderline/alphatab';
 import type { Note, NoteDuration } from '../../core/types/index.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
-import { $, setStatus, getSearchSelectValue, durationName } from '../../app/state.ts';
+import { $, setStatus, getSearchSelectValue } from '../../app/dom.ts';
 import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from '../../core/utils/scoreMapping.ts';
+import { durationName } from '../../core/utils/duration.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 
 export type { AppTechnique } from '../../core/utils/scoreMapping.ts';

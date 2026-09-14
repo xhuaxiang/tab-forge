@@ -5,7 +5,8 @@
  * 不包含具体业务逻辑，只做组装和启动。
  */
 
-import { $, setStatus, render, getCanvasRenderer, setRenderMode, renderHighlight } from './app/state.ts';
+import { $, setStatus } from './app/dom.ts';
+import { render, getCanvasRenderer, setRenderMode, renderHighlight } from './app/render.ts';
 import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 
