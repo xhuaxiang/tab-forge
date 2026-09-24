@@ -280,7 +280,7 @@ function loadAlphaNoteIntoForm(note: model.Note, beat: model.Beat): void {
     const dur = alphaDurationToAppDuration(beat.duration);
     setFormDuration(dur);
 
-    const t = detectTechnique(note);
+    const t = detectTechnique(note, uiStore.bendAmount);
     setFormTechnique(t.tech, {
         targetFret: t.targetFret,
         bendAmount: t.bendAmount,

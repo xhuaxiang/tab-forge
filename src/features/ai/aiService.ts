@@ -10,14 +10,7 @@ import { buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
 import { parseAIResponse } from './responseParser.ts';
 import { getEffectiveSystemPrompt } from './systemPromptEditor.ts';
 import type { TabScore } from '../../core/types/index.ts';
-
-// ---- 配置 ----
-export const DEEPSEEK_CONFIG = {
-    endpoint: 'https://api.deepseek.com/v1/chat/completions',
-    model: 'deepseek-v4-flash',
-    temperature: 0.8,
-    maxTokens: 4096,
-};
+import { DEEPSEEK_CONFIG } from '../../core/config.ts';
 
 // ---- API Key 存储（兼容 extension + web）----
 const STORAGE_KEY = 'TabForge_DeepSeekApiKey';

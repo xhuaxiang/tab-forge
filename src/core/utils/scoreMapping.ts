@@ -6,7 +6,6 @@
 
 import { model } from '@coderline/alphatab';
 import type { NoteDuration } from '../types/index.ts';
-import { uiStore } from '../stores/uiStore.ts';
 
 export type AppTechnique = 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
 
@@ -35,14 +34,18 @@ export function beatOffsetInMeasure(beat: model.Beat): number {
     return offset;
 }
 
-/** alphaTab Note → 应用技法 */
-export function detectTechnique(n: model.Note): { tech: AppTechnique; targetFret?: number; bendAmount?: number; bendRelease?: boolean } {
+/**
+ * alphaTab Note → 应用技法
+ *
+ * @param fallbackBendAmount 无 maxBendPoint 时的推弦幅度回退值（由调用方传入，保持本函数为纯函数）
+ */
+export function detectTechnique(n: model.Note, fallbackBendAmount: number): { tech: AppTechnique; targetFret?: number; bendAmount?: number; bendRelease?: boolean } {
     if (n.vibrato !== model.VibratoType.None) return { tech: 'vibrato' };
 
     if (n.bendType !== model.BendType.None) {
         return {
             tech: 'bend',
-            bendAmount: n.maxBendPoint ? n.maxBendPoint.value / 4 : uiStore.bendAmount,
+            bendAmount: n.maxBendPoint ? n.maxBendPoint.value / 4 : fallbackBendAmount,
             bendRelease: n.bendType === model.BendType.BendRelease,
         };
     }

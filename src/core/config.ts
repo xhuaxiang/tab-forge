@@ -22,6 +22,14 @@ export const SCORE_DEFAULTS = {
 // AI 即兴生成配置
 // ============================================================
 
+/** DeepSeek API 调用配置（endpoint / 模型 / 温度 / 最大 token） */
+export const DEEPSEEK_CONFIG = {
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    model: 'deepseek-v4-flash',
+    temperature: 0.8,
+    maxTokens: 4096,
+};
+
 export interface ImprovSelectOption {
     /** 提交给 AI 的值 */
     value: string;

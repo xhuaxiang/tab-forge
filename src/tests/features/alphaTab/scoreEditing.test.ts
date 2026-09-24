@@ -71,7 +71,7 @@ describe('detectTechnique', () => {
             note({ duration: 0.25, technique: 'bend', bendAmount: 1 }),
         ])]));
         const n = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        const t = detectTechnique(n);
+        const t = detectTechnique(n, 1);
         expect(t.tech).toBe('bend');
         expect(t.bendAmount).toBeCloseTo(1, 5);
     });
@@ -81,7 +81,7 @@ describe('detectTechnique', () => {
             note({ duration: 0.25, technique: 'vibrato' }),
         ])]));
         const n = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        expect(detectTechnique(n).tech).toBe('vibrato');
+        expect(detectTechnique(n, 1).tech).toBe('vibrato');
     });
 
     it('hammerOn → 前音符（origin）检测为 hammerOn + 目标品', () => {
@@ -90,7 +90,7 @@ describe('detectTechnique', () => {
             note({ duration: 0.25, fret: 2, technique: 'hammerOn' }),
         ])]));
         const origin = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        const t = detectTechnique(origin);
+        const t = detectTechnique(origin, 1);
         expect(t.tech).toBe('hammerOn');
         expect(t.targetFret).toBe(2);
     });
@@ -101,7 +101,7 @@ describe('detectTechnique', () => {
             note({ duration: 0.25, fret: 2, technique: 'slide' }),
         ])]));
         const origin = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        const t = detectTechnique(origin);
+        const t = detectTechnique(origin, 1);
         expect(t.tech).toBe('slide');
     });
 });
