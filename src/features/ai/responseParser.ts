@@ -79,7 +79,6 @@ function sanitizeNote(raw: RawNote): Note | null {
 
     const note: Note = { string, fret, duration };
 
-    if (raw.isRest) note.isRest = true;
     if (raw.tieToNext) note.tieToNext = true;
     if (raw.technique) {
         if (isAITechnique(raw.technique)) {
