@@ -9,11 +9,7 @@
 import * as alphaTab from '@coderline/alphatab';
 import type { Note, NoteDuration, TabScore, Measure } from '../../core/types/index.ts';
 import { forEachSlot } from '../../core/utils/measureUtils.ts';
-
-/** 扫弦每弦间隔（毫秒），与 synthesis/scheduling.ts 保持一致 */
-const STRUM_INTERVAL_MS = 12;
-/** 琶音每弦间隔（毫秒），与 synthesis/scheduling.ts 保持一致 */
-const ARPEGGIO_INTERVAL_MS = 40;
+import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../core/config.ts';
 
 /** 音名基音 → 半音（C=0 … B=11） */
 const BASE_SEMITONE: Record<string, number> = {

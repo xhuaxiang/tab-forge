@@ -14,6 +14,7 @@
 
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot } from '../../../core/utils/measureUtils.ts';
+import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../../core/config.ts';
 
 /** 单条播放事件 */
 export interface ScheduledEvent {
@@ -45,11 +46,6 @@ export const DURATION_TO_BEATS: Record<number, number> = {
     0.0625: 0.25, // 十六分音符
     0.03125: 0.125, // 三十二分音符
 };
-
-/** 扫弦每弦间隔（毫秒） */
-const STRUM_INTERVAL_MS = 12;
-/** 琶音每弦间隔（毫秒） */
-const ARPEGGIO_INTERVAL_MS = 40;
 
 /**
  * 构建完整播放队列（按时间顺序）。

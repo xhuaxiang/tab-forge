@@ -8,6 +8,7 @@
  */
 
 import { scoreStore } from '../core/stores/scoreStore.ts';
+import { DEFAULT_RENDER_MODE } from '../core/config.ts';
 import { $ } from './dom.ts';
 import { syncMeasureNav } from './measureNav.ts';
 import { TabCanvasRenderer, createTabCanvas } from '../features/canvas/index.ts';
@@ -22,7 +23,7 @@ export type RenderMode = 'canvas' | 'alphaTab';
 
 let canvasRenderer: TabCanvasRenderer | null = null;
 let alphaTabRenderer: AlphaTabRenderer | null = null;
-let renderMode: RenderMode = 'alphaTab'; // 默认 alphaTab 渲染
+let renderMode: RenderMode = DEFAULT_RENDER_MODE;
 
 /** 当前渲染模式 */
 export function getRenderMode(): RenderMode {

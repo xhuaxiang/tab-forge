@@ -19,6 +19,27 @@ export const SCORE_DEFAULTS = {
 };
 
 // ============================================================
+// 渲染 / 播放可调参数
+// ============================================================
+
+/** 默认渲染器（RenderMode 的取值之一，见 app/render.ts） */
+export const DEFAULT_RENDER_MODE = 'alphaTab';
+
+/** alphaTab 整体显示缩放（含字体），适配紧凑布局 */
+export const ALPHATAB_DISPLAY_SCALE = 0.75;
+
+/**
+ * 扫弦每弦间隔（毫秒）
+ *
+ * 渲染侧（alphaTab scoreAdapter）与播放侧（karplus scheduling）共用同一个值，
+ * 改这里两边一致——此前两边各写一份 12，靠注释保持同步。
+ */
+export const STRUM_INTERVAL_MS = 12;
+
+/** 琶音每弦间隔（毫秒），同 {@link STRUM_INTERVAL_MS} */
+export const ARPEGGIO_INTERVAL_MS = 40;
+
+// ============================================================
 // AI 即兴生成配置
 // ============================================================
 
@@ -29,6 +50,9 @@ export const DEEPSEEK_CONFIG = {
     temperature: 0.8,
     maxTokens: 4096,
 };
+
+/** AI 请求超时（毫秒）：兜底，避免无限挂起，超时给出明确错误 */
+export const AI_TIMEOUT_MS = 60000;
 
 export interface ImprovSelectOption {
     /** 提交给 AI 的值 */

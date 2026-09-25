@@ -31,7 +31,7 @@
 
 import type { TabScore } from '../../core/types/index.ts';
 import type { RowLayout } from '../../core/types/canvas.ts';
-import { COLORS, LAYOUT } from './constants.ts';
+import { COLORS, LAYOUT, MEASURE_HIGHLIGHT } from './constants.ts';
 import { layoutRows } from './layout.ts';
 import { renderTabRow, getRowTopY, getStringY, getContentBounds } from './techniques/measureRenderer.ts';
 import { renderEmptyState, renderInfoBar } from './techniques/infoBar.ts';
@@ -170,9 +170,12 @@ export class TabCanvasRenderer {
 
             const ctx = this.ctx;
             ctx.save();
-            ctx.fillStyle = 'rgba(247,151,30,0.14)';
+            // 高亮色与 accent 同色，用 globalAlpha 派生透明度，避免复制一份 rgba 字面量
+            ctx.globalAlpha = MEASURE_HIGHLIGHT.fillAlpha;
+            ctx.fillStyle = COLORS.accent;
             ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
-            ctx.strokeStyle = 'rgba(247,151,30,0.8)';
+            ctx.globalAlpha = MEASURE_HIGHLIGHT.strokeAlpha;
+            ctx.strokeStyle = COLORS.accent;
             ctx.lineWidth = 1;
             ctx.strokeRect(x0, y0, x1 - x0, y1 - y0);
             ctx.restore();

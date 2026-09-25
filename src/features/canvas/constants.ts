@@ -26,6 +26,14 @@ export const COLORS = {
     beamFill: 'rgba(150,150,150,0.25)',
 };
 
+/** 选中小节高亮框：底色与边框色都取自 COLORS.accent，此处只给透明度 */
+export const MEASURE_HIGHLIGHT = {
+    /** 底色透明度 */
+    fillAlpha: 0.14,
+    /** 边框透明度 */
+    strokeAlpha: 0.8,
+};
+
 export const STRING_COLORS: Record<number, string> = {
     1: COLORS.string1,
     2: COLORS.string2,

@@ -10,7 +10,7 @@ import { buildUserPrompt, type GenerationOptions } from './promptBuilder.ts';
 import { parseAIResponse } from './responseParser.ts';
 import { getEffectiveSystemPrompt } from './systemPromptEditor.ts';
 import type { TabScore } from '../../core/types/index.ts';
-import { DEEPSEEK_CONFIG } from '../../core/config.ts';
+import { DEEPSEEK_CONFIG, AI_TIMEOUT_MS } from '../../core/config.ts';
 
 // ---- API Key 存储（兼容 extension + web）----
 const STORAGE_KEY = 'TabForge_DeepSeekApiKey';
@@ -93,7 +93,7 @@ export async function generateImprovisation(
                 thinking: { type: 'disabled' },
             }),
             // 兜底超时：避免无限挂起，超时给出明确错误
-            signal: AbortSignal.timeout(60000),
+            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
         });
 
         if (!response.ok) {
@@ -163,7 +163,7 @@ export async function debugGenerate(
                 response_format: { type: 'json_object' },
                 thinking: { type: 'disabled' },
             }),
-            signal: AbortSignal.timeout(60000),
+            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
         });
 
         if (!response.ok) {
