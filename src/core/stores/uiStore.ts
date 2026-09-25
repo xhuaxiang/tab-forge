@@ -35,9 +35,21 @@ export const uiStore = {
         this.currentTechnique = tech;
     },
 
-    /** 切换延音标记 */
-    toggleTie(): void {
-        this.tieActive = !this.tieActive;
+    // 设置型动作：延音/推弦的状态来源是 DOM（按钮 class）与表单回填，
+    // 不是「切换」语义，故提供 set 而非 toggle。
+    /** 设置延音标记 */
+    setTie(active: boolean): void {
+        this.tieActive = active;
+    },
+
+    /** 设置推弦幅度（半音数） */
+    setBendAmount(amount: number): void {
+        this.bendAmount = amount;
+    },
+
+    /** 设置推弦后是否释放 */
+    setBendRelease(on: boolean): void {
+        this.bendRelease = on;
     },
 
     /** 切换琶音方向: '' → 'up' → 'down' → '' */

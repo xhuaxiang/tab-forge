@@ -74,10 +74,10 @@ export function setFormTechnique(tech: AppTechnique, opts: { targetFret?: number
     if (tech === 'bend') {
         document.querySelectorAll<HTMLElement>('.bend-amount-btn').forEach(b =>
             b.classList.toggle('active', parseFloat(b.dataset.bendAmount || '1') === opts.bendAmount));
-        uiStore.bendAmount = opts.bendAmount ?? uiStore.bendAmount;
+        uiStore.setBendAmount(opts.bendAmount ?? uiStore.bendAmount);
         const relBtn = document.getElementById('bendReleaseToggle');
         relBtn?.classList.toggle('active', !!opts.bendRelease);
-        uiStore.bendRelease = !!opts.bendRelease;
+        uiStore.setBendRelease(!!opts.bendRelease);
     }
     if (opts.targetFret !== undefined) {
         const tf = document.getElementById('targetFret') as HTMLInputElement | null;
@@ -85,7 +85,7 @@ export function setFormTechnique(tech: AppTechnique, opts: { targetFret?: number
     }
     const tieBtn = document.querySelector('.tech-btn[data-tech="tie"]');
     tieBtn?.classList.toggle('active', !!opts.tie);
-    uiStore.tieActive = !!opts.tie;
+    uiStore.setTie(!!opts.tie);
 }
 
 export function isTieActive(): boolean {

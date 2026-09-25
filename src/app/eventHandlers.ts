@@ -123,7 +123,7 @@ export function initEventListeners(): void {
             if (tech === 'tie') {
                 // 延音标记独立切换，不改技法
                 btn.classList.toggle('active');
-                uiStore.tieActive = btn.classList.contains('active');
+                uiStore.setTie(btn.classList.contains('active'));
                 return;
             }
             updateTechniqueUI(tech as AppTechnique);
@@ -248,14 +248,14 @@ export function initEventListeners(): void {
             document.querySelectorAll('.bend-amount-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const amount = parseFloat((btn as HTMLElement).dataset.bendAmount || '1');
-            uiStore.bendAmount = amount;
+            uiStore.setBendAmount(amount);
         });
     });
 
     // --- 推弦释放切换 ---
     $('bendReleaseToggle')?.addEventListener('click', () => {
         const btn = $('bendReleaseToggle')!;
-        uiStore.bendRelease = !uiStore.bendRelease;
+        uiStore.setBendRelease(!uiStore.bendRelease);
         btn.classList.toggle('active', uiStore.bendRelease);
     });
 
