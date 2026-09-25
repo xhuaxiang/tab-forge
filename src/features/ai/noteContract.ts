@@ -6,8 +6,9 @@
  * 改那边只影响生成质量，改这边则直接决定数据能否被解析落库。
  *
  * ⚠️ 本文件的字段与取值必须与 responseParser.ts 的校验保持一致：
- *   sanitizeNote 只认它白名单里的字段/技法，对不上的会被静默丢弃（不报错、不提示）。
- *   改这里请同步核对 responseParser.ts。
+ *   sanitizeNote 只认它白名单里的字段/技法，对不上的会被丢弃。
+ *   尤其是 `technique`：这里改取值，必须同步 responseParser.ts 的 `AI_TECHNIQUES`，
+ *   否则 AI 发的技法会被忽略（该处已加 console.warn 留痕，但仍然是漏的）。
  */
 
 /** 音符对象格式 + 顶层输出格式 */

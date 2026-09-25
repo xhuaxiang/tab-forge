@@ -7,13 +7,14 @@
 
 import type { Note, NoteDuration } from '../../core/types/index.ts';
 
-/** AI 返回的原始音符结构 */
+/** AI 返回的原始音符结构（来自 JSON.parse，取值一律按不可信处理） */
 interface RawNote {
     string?: number;
     fret?: number;
     duration?: number;
     isRest?: boolean;
-    technique?: 'hammerOn' | 'pullOff' | 'slide' | null;
+    /** 合法取值见 AI_TECHNIQUES；来自 AI 输出，故按 string 校验而非直接信联合类型 */
+    technique?: string | null;
     targetFret?: number;
     tieToNext?: boolean;
     chordGroup?: number;
@@ -31,6 +32,20 @@ interface RawResponse {
 
 /** 合法的时值集合 */
 const VALID_DURATIONS = new Set([1, 0.5, 0.25, 0.125, 0.0625, 0.03125]);
+
+/**
+ * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
+ *
+ * Note.technique 全集有 5 个值（core/types/index.ts），其中 bend / vibrato 只由
+ * 编辑器 UI 内部产生、AI 不写入，故不在此列。
+ * ⚠️ 往 noteContract.ts 加技法时务必同步这一行，否则 AI 发来的技法会落不进去。
+ */
+const AI_TECHNIQUES = ['hammerOn', 'pullOff', 'slide'] as const;
+type AITechnique = (typeof AI_TECHNIQUES)[number];
+
+function isAITechnique(t: string): t is AITechnique {
+    return (AI_TECHNIQUES as readonly string[]).includes(t);
+}
 
 /** 规范化时值为最近的有效枚举值 */
 function clampDuration(d: number | undefined): NoteDuration {
@@ -66,10 +81,18 @@ function sanitizeNote(raw: RawNote): Note | null {
 
     if (raw.isRest) note.isRest = true;
     if (raw.tieToNext) note.tieToNext = true;
-    if (raw.technique && ['hammerOn', 'pullOff', 'slide'].includes(raw.technique)) {
-        note.technique = raw.technique;
-        if (raw.targetFret !== undefined && raw.targetFret >= 0 && raw.targetFret <= 24) {
-            note.targetFret = raw.targetFret;
+    if (raw.technique) {
+        if (isAITechnique(raw.technique)) {
+            note.technique = raw.technique;
+            if (raw.targetFret !== undefined && raw.targetFret >= 0 && raw.targetFret <= 24) {
+                note.targetFret = raw.targetFret;
+            }
+        } else {
+            // 契约漂移的显式信号：AI 发了 noteContract 未暴露的技法（很可能是漏扩白名单）。
+            // 丢弃技法但保留音符本身，并留下可排查的痕迹，而不是静默吞掉。
+            console.warn(
+                `[TabForge] responseParser: 未知技法 "${raw.technique}"，已忽略该技法（核对 noteContract.ts 与 AI_TECHNIQUES 是否同步）`
+            );
         }
     }
     if (raw.chordGroup !== undefined) note.chordGroup = raw.chordGroup;
