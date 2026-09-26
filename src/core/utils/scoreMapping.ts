@@ -1,11 +1,12 @@
 /**
- * scoreMapping — alphaTab ↔ 应用数据映射（纯函数，无 DOM，可单测）
+ * scoreMapping — 应用 ↔ alphaTab 的通用换算（纯函数，无 DOM，可单测）
  *
- * 两个方向都在本文件，保持成对：
- * - 写入侧「应用 → alphaTab」：scoreAdapter 构造谱面时用；
- * - 读入侧「alphaTab → 应用」：点击谱面回填表单时用。
+ * 按**换算主题**成组，不按「哪边用」分节：同一个换算的两个方向（弦号、时值）
+ * 放在一起、共用一份实现——分开写只会各自漂移。
+ * 工具是通用的：`canvas ↮ alphaTab`、`karplus ↮ soundfont` 管的是**实现**
+ * 互不混入，管不到本文件，两边都可以 import。
+ *
  * 与 scoreEditing 分离，保证在 Node 测试环境下可导入。
- *
  * 签名只用 core/types 的类型、原始值与 alphaTab 的 model 类型/枚举
  * （CLAUDE.md 允许的第三方类型），故不读 store、不碰 DOM。
  */
@@ -16,10 +17,10 @@ import type { NoteDuration } from '../types/index.ts';
 export type AppTechnique = 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
 
 // ============================================================
-// 写入侧：应用 → alphaTab
+// 音名 → MIDI 音号
 // ============================================================
 
-/** 音名基音 → 半音（C=0 … B=11），供 noteNameToMidi 解析音名 */
+/** 音名基音 → 半音（C=0 … B=11） */
 const BASE_SEMITONE: Record<string, number> = {
     C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
 };
@@ -36,13 +37,29 @@ export function noteNameToMidi(noteName: string): number {
     return (octave + 1) * 12 + semi;
 }
 
+// ============================================================
+// 弦号（双向）
+// ============================================================
+
 /**
- * 应用弦号 → alphaTab 弦号。
- * 应用 1=高音E(最顶线)..6=低音E；alphaTab 1=最底弦。故取 7 - n。
+ * 弦号互换：应用 1=高音E(最顶线)..6=低音E ↔ alphaTab 1=最底弦。
+ *
+ * 两个方向是**同一个自逆变换**（7 - n），共用这一份实现；
+ * 下面两个导出名只是为了在调用处读出方向，别再各写一遍公式。
  */
-export function appStringToAlphaString(appString: number): number {
-    return 7 - appString;
+export function flipStringNumber(n: number): number {
+    return 7 - n;
 }
+
+/** alphaTab 弦号 → 应用弦号 */
+export const alphaStringToAppString = flipStringNumber;
+
+/** 应用弦号 → alphaTab 弦号 */
+export const appStringToAlphaString = flipStringNumber;
+
+// ============================================================
+// 时值（双向）
+// ============================================================
 
 /** 应用时值（相对值）→ alphaTab Duration 枚举值；未知时值回落到四分音符 */
 export function appDurationToAlpha(d: NoteDuration): model.Duration {
@@ -57,24 +74,30 @@ export function appDurationToAlpha(d: NoteDuration): model.Duration {
     }
 }
 
-// ============================================================
-// 读入侧：alphaTab → 应用
-// ============================================================
-
-/** alphaTab 弦号（1=最低弦）→ 应用弦号（1=高音E） */
-export function alphaStringToAppString(alphaString: number): number {
-    return 7 - alphaString;
-}
-
-/** alphaTab Duration 枚举值 → 应用时值（相对值） */
-export function alphaDurationToAppDuration(d: model.Duration): NoteDuration {
-    return (1 / (d as number)) as NoteDuration;
-}
-
-/** alphaTab Duration → 全音符分数（Quarter→0.25），与 measureTotalBeats 同单位 */
+/**
+ * alphaTab Duration → 全音符分数（Quarter→0.25），与 `measureTotalBeats` 同单位。
+ *
+ * 这是反向换算的**唯一实现**；`alphaDurationToAppDuration` 只是同一数值换了个口径声明。
+ */
 export function alphaDurationToWholeNote(d: model.Duration): number {
     return 1 / (d as number);
 }
+
+/**
+ * alphaTab Duration → 应用时值（相对值）。
+ *
+ * 数值与 `alphaDurationToWholeNote` 完全相同，差别只在返回类型：
+ * 这里声明为 `NoteDuration`，但**断言不做运行时校验**——传入
+ * `model.Duration.SixtyFourth`（=64）会返回 0.015625，并不在 `NoteDuration` 全集内，
+ * 调用方不可假定返回值一定是合法时值。
+ */
+export function alphaDurationToAppDuration(d: model.Duration): NoteDuration {
+    return alphaDurationToWholeNote(d) as NoteDuration;
+}
+
+// ============================================================
+// 拍位与技法（alphaTab → 应用）
+// ============================================================
 
 /** 该 beat 在小节内的拍偏移（全音符=1） */
 export function beatOffsetInMeasure(beat: model.Beat): number {
