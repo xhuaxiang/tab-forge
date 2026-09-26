@@ -4,12 +4,16 @@
  * 把应用内存模型（TabScore）转成 alphaTab 的 model.Score，
  * 供 SoundFont 播放（alphaTabPlayer）以及将来可能的渲染 / 导出复用。
  * 本文件是独立适配层，不触碰任何功能块。
+ *
+ * 只做「按结构 1:1 映射」；技法/延音那类需要跨槽回看的二次修改在
+ * techniqueAdapter.ts（本文件在结尾把 flatten 列表交给它）。
  */
 
 import * as alphaTab from '@coderline/alphatab';
-import type { Note, NoteDuration, TabScore, Measure } from '../../core/types/index.ts';
+import type { NoteDuration, TabScore, Measure } from '../../core/types/index.ts';
 import { forEachSlot } from '../../core/utils/measureUtils.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../core/config.ts';
+import { applyTechniques, type FlatEntry } from './techniqueAdapter.ts';
 
 /** 音名基音 → 半音（C=0 … B=11） */
 const BASE_SEMITONE: Record<string, number> = {
@@ -47,13 +51,6 @@ export function appDurationToAlpha(d: NoteDuration): alphaTab.model.Duration {
  */
 export function appStringToAlphaString(appString: number): number {
     return 7 - appString;
-}
-
-/** 扁平化后的音符条目，供技法/延音的跨槽 lookbehind 使用 */
-interface FlatEntry {
-    appNote: Note;
-    alphaNote: alphaTab.model.Note;
-    alphaString: number;
 }
 
 /**
@@ -173,77 +170,9 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
     track.addStaff(staff);
     s.addTrack(track);
 
-    applyTechniques(at, flat);
+    // 技法/延音后处理：需要在播放顺序里跨槽回看同弦前一个音符（见 techniqueAdapter.ts）
+    applyTechniques(flat);
 
     s.finish(new at.Settings());
     return s;
-}
-
-/** 技法/延音后处理：需要在播放顺序里跨槽回看同弦前一个音符 */
-function applyTechniques(
-    at: typeof alphaTab,
-    flat: FlatEntry[],
-): void {
-    for (let i = 0; i < flat.length; i++) {
-        const { appNote, alphaNote, alphaString } = flat[i];
-        if (appNote.isRest) continue;
-
-        // 延音目标：tieToNext 且非技法（技法音符的 tie 只表示弧线，不合并播放）
-        if (appNote.tieToNext && !appNote.technique) {
-            alphaNote.isTieDestination = true;
-        }
-
-        switch (appNote.technique) {
-            case 'hammerOn':
-            case 'pullOff': {
-                const prev = prevSameString(flat, i, alphaString);
-                if (prev) prev.alphaNote.isHammerPullOrigin = true;
-                break;
-            }
-            case 'slide': {
-                const prev = prevSameString(flat, i, alphaString);
-                if (prev) prev.alphaNote.slideOutType = at.model.SlideOutType.Shift;
-                break;
-            }
-            case 'bend': {
-                // app bendAmount 单位是半音；alphaTab BendPoint.value 单位是四分之一音（半音×4）
-                const semitones = appNote.bendAmount ?? 1;
-                const value = Math.round(semitones * 4);
-                if (appNote.bendRelease) {
-                    alphaNote.bendType = at.model.BendType.BendRelease;
-                    alphaNote.bendPoints = [
-                        new at.model.BendPoint(0, 0),
-                        new at.model.BendPoint(30, value),
-                        new at.model.BendPoint(60, 0),
-                    ];
-                } else {
-                    alphaNote.bendType = at.model.BendType.Bend;
-                    alphaNote.bendPoints = [
-                        new at.model.BendPoint(0, 0),
-                        new at.model.BendPoint(60, value),
-                    ];
-                }
-                break;
-            }
-            case 'vibrato': {
-                alphaNote.vibrato = at.model.VibratoType.Slight;
-                break;
-            }
-            default:
-                break;
-        }
-    }
-}
-
-/** 在 flat 列表里向前找同弦的最近一个非休止音符 */
-function prevSameString(
-    flat: FlatEntry[],
-    upTo: number,
-    alphaString: number,
-): FlatEntry | null {
-    for (let j = upTo - 1; j >= 0; j--) {
-        const e = flat[j];
-        if (!e.appNote.isRest && e.alphaString === alphaString) return e;
-    }
-    return null;
 }
