@@ -2,13 +2,14 @@
  * duration 单元测试
  *
  * durationName 是纯映射（无 DOM），验证：
- * 6 个合法时值的中文名、非法/未覆盖时值的 `${d}拍` 兜底，
- * 以及它与 core/types 的 DURATION_NAMES 用词的差异（事实记录）。
+ * 6 个合法时值的中文名，以及非法/未覆盖时值的 `${d}拍` 兜底。
+ *
+ * 注：`durationName` 现在是时值中文名的唯一来源（core/types 里那份
+ * 用词不一致的 `DURATION_NAMES` 已删），故不再有「两处用词对比」。
  */
 
 import { describe, it, expect } from 'vitest';
 import { durationName } from '../../../core/utils/duration.ts';
-import { DURATION_NAMES } from '../../../core/types/index.ts';
 
 describe('durationName 合法时值', () => {
     it('1 → 全音符', () => {
@@ -27,11 +28,11 @@ describe('durationName 合法时值', () => {
         expect(durationName(0.125)).toBe('八分音符');
     });
 
-    it('0.0625 → 十六分（不带「音符」二字，与 DURATION_NAMES 不一致）', () => {
+    it('0.0625 → 十六分', () => {
         expect(durationName(0.0625)).toBe('十六分');
     });
 
-    it('0.03125 → 三十二分（不带「音符」二字，与 DURATION_NAMES 不一致）', () => {
+    it('0.03125 → 三十二分', () => {
         expect(durationName(0.03125)).toBe('三十二分');
     });
 
@@ -76,23 +77,5 @@ describe('durationName 非法/未覆盖时值兜底', () => {
 
     it('0.015625（三十二分再细分，映射表未收录）→ 兜底而非被截断', () => {
         expect(durationName(0.015625)).toBe('0.015625拍');
-    });
-});
-
-describe('durationName 与 DURATION_NAMES 用词对比', () => {
-    it('1 / 0.5 / 0.25 / 0.125 四处用词完全一致', () => {
-        for (const d of [1, 0.5, 0.25, 0.125]) {
-            expect(durationName(d)).toBe(DURATION_NAMES[d]);
-        }
-    });
-
-    it('0.0625 与 0.03125 两处用词不一致（durationName 少「音符」二字）', () => {
-        expect(DURATION_NAMES[0.0625]).toBe('十六分音符');
-        expect(durationName(0.0625)).toBe('十六分');
-        expect(durationName(0.0625)).not.toBe(DURATION_NAMES[0.0625]);
-
-        expect(DURATION_NAMES[0.03125]).toBe('三十二分音符');
-        expect(durationName(0.03125)).toBe('三十二分');
-        expect(durationName(0.03125)).not.toBe(DURATION_NAMES[0.03125]);
     });
 });

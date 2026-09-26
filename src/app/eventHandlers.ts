@@ -16,7 +16,7 @@ import { scoreStore } from '../core/stores/scoreStore.ts';
 import { uiStore } from '../core/stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../features/ai/index.ts';
-import { SCORE_DEFAULTS, IMPROV_CONFIG } from '../core/config.ts';
+import { SCORE_DEFAULTS, IMPROV_CONFIG, BEND_AMOUNT_LABELS } from '../core/config.ts';
 import type { Tuning } from '../core/types/index.ts';
 import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
 
@@ -207,8 +207,7 @@ export function initEventListeners(): void {
             const labels: Record<string, string> = { hammerOn: '击弦H', pullOff: '勾弦P', slide: '滑弦S', bend: '推弦B', vibrato: '揉弦~' };
             suffix += ` (${labels[tech] || tech})`;
             if (tech === 'bend') {
-                const amountLabels: Record<number, string> = { 0.25: '1/4', 0.5: '1/2', 1: 'Full' };
-                suffix += ` ${amountLabels[uiStore.bendAmount] || uiStore.bendAmount}`;
+                suffix += ` ${BEND_AMOUNT_LABELS[uiStore.bendAmount] || uiStore.bendAmount}`;
                 if (uiStore.bendRelease) suffix += ' 释放';
             } else if (note.targetFret !== undefined) {
                 suffix += ` →${note.targetFret}品`;

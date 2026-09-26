@@ -6,6 +6,7 @@
  */
 
 import type { TabScore } from '../types/index.ts';
+import { STRING_NAMES } from '../types/index.ts';
 import { forEachSlot } from './measureUtils.ts';
 
 /** 将乐谱导出为纯文本 ASCII tab 格式 */
@@ -57,7 +58,8 @@ export function exportToAsciiTab(score: TabScore): string {
         }
     }
 
-    const stringNames = ['e', 'B', 'G', 'D', 'A', 'E'];
+    // 弦名取自 core/types 的单一来源；下标 0-5 对应 1-6 弦（1 弦在最上）
+    const stringNames = [1, 2, 3, 4, 5, 6].map(n => STRING_NAMES[n]);
     for (let s = 0; s < 6; s++) {
         lines.push(`${stringNames[s]}|${stringLines[s].join('-')}|`);
     }

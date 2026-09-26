@@ -39,6 +39,17 @@ export const STRUM_INTERVAL_MS = 12;
 /** 琶音每弦间隔（毫秒），同 {@link STRUM_INTERVAL_MS} */
 export const ARPEGGIO_INTERVAL_MS = 40;
 
+/**
+ * 推弦幅度档位 → 显示标签（0.25=1/4 音，0.5=1/2 音，1=全音）。
+ *
+ * canvas 画推弦弧线与状态栏提示共用；新增档位只在这里加。
+ */
+export const BEND_AMOUNT_LABELS: Record<number, string> = {
+    0.25: '1/4',
+    0.5: '1/2',
+    1: 'Full',
+};
+
 // ============================================================
 // AI 即兴生成配置
 // ============================================================

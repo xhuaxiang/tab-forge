@@ -3,18 +3,16 @@
  * 吉他六线谱扒谱工具核心数据类型
  */
 
-/** 音符时值枚举 */
-export type NoteDuration = 1 | 0.5 | 0.25 | 0.125 | 0.0625 | 0.03125;
+/**
+ * 合法的音符时值（相对值），由长到短。
+ *
+ * 这是时值合法集合的**唯一来源**：`NoteDuration` 类型、AI 输出的时值校验都从这里派生，
+ * 别再各处内联一份 `[1, 0.5, ...]`。时值的中文名见 `core/utils/duration.ts` 的 `durationName`。
+ */
+export const NOTE_DURATIONS = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125] as const;
 
-/** 音符时值名称映射 */
-export const DURATION_NAMES: Record<number, string> = {
-    1: '全音符',
-    0.5: '二分音符',
-    0.25: '四分音符',
-    0.125: '八分音符',
-    0.0625: '十六分音符',
-    0.03125: '三十二分音符',
-};
+/** 音符时值枚举 */
+export type NoteDuration = (typeof NOTE_DURATIONS)[number];
 
 /** 单个音符（某弦某品） */
 export interface Note {
@@ -155,6 +153,28 @@ export const NOTE_FREQUENCIES: Record<string, number> = {
     'G#7': 3322.44, 'A7': 3520.00, 'A#7': 3729.31, 'B7': 3951.07,
 };
 
+/**
+ * 自然音名 → 半音号（C=0 … B=11）。
+ *
+ * 「音名 ↔ 半音」这个事实的**唯一来源**：`SEMITONE_BY_NOTE_NAME` 由它展开，
+ * `core/utils/scoreMapping.ts` 的 `noteNameToMidi` 也查这张表，别再各写一份。
+ */
+export const NATURAL_SEMITONE: Record<string, number> = {
+    C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
+};
+
+/** 音名（含等音拼写，如 Db / C#）→ 半音号 0-11 */
+export const SEMITONE_BY_NOTE_NAME: Record<string, number> = {
+    ...NATURAL_SEMITONE,
+    'C#': 1, Db: 1, 'D#': 3, Eb: 3, 'F#': 6, Gb: 6,
+    'G#': 8, Ab: 8, 'A#': 10, Bb: 10,
+};
+
+/** 半音号 0-11 → 音名（统一用升号拼写，下标即半音号） */
+export const NOTE_NAMES_SHARP = [
+    'C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B',
+];
+
 /** 标准六线谱的弦名称映射 (1弦~6弦) */
 export const STRING_NAMES: Record<number, string> = {
     1: 'e',   // 高音E
@@ -189,14 +209,7 @@ export function getNoteFromFret(tuning: Tuning, stringNum: number, fret: number)
     const noteName = match[1];
     const octave = parseInt(match[2]);
 
-    // 半音阶索引映射
-    const chromaticScale: Record<string, number> = {
-        'C': 0, 'C#': 1, 'Db': 1, 'D': 2, 'D#': 3, 'Eb': 3,
-        'E': 4, 'F': 5, 'F#': 6, 'Gb': 6, 'G': 7, 'G#': 8,
-        'Ab': 8, 'A': 9, 'A#': 10, 'Bb': 10, 'B': 11,
-    };
-
-    const noteIndex = chromaticScale[noteName];
+    const noteIndex = SEMITONE_BY_NOTE_NAME[noteName];
     if (noteIndex === undefined) return '';
 
     // 计算新音符
@@ -204,8 +217,7 @@ export function getNoteFromFret(tuning: Tuning, stringNum: number, fret: number)
     const newOctave = octave + Math.floor(newIndex / 12);
     const semitone = newIndex % 12;
 
-    const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-    return `${noteNames[semitone]}${newOctave}`;
+    return `${NOTE_NAMES_SHARP[semitone]}${newOctave}`;
 }
 
 /**

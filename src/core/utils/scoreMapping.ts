@@ -13,6 +13,7 @@
 
 import { model } from '@coderline/alphatab';
 import type { NoteDuration } from '../types/index.ts';
+import { NATURAL_SEMITONE } from '../types/index.ts';
 
 export type AppTechnique = 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
 
@@ -20,17 +21,13 @@ export type AppTechnique = 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 
 // 音名 → MIDI 音号
 // ============================================================
 
-/** 音名基音 → 半音（C=0 … B=11） */
-const BASE_SEMITONE: Record<string, number> = {
-    C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
-};
-
 /** 音名（如 'E4'、'Eb4'、'D#4'）→ MIDI 音号；解析失败返回 0 */
 export function noteNameToMidi(noteName: string): number {
     const m = noteName.trim().match(/^([A-Ga-g])([#b]?)(\d{1,2})$/);
     if (!m) return 0;
+    // 基音查 core/types 的共享表（单一来源），升降号仍走算术，罕见拼写（E#/Cb）行为不变
     const letter = m[1].toUpperCase();
-    let semi = BASE_SEMITONE[letter];
+    let semi = NATURAL_SEMITONE[letter];
     if (m[2] === '#') semi += 1;
     else if (m[2] === 'b') semi -= 1;
     const octave = parseInt(m[3], 10);

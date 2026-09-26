@@ -6,13 +6,7 @@
  */
 
 import { drawText } from '../draw/text.ts';
-
-/** 推弦幅度标签映射 */
-const BEND_LABELS: Record<number, string> = {
-    0.25: '1/4',
-    0.5: '1/2',
-    1: 'Full',
-};
+import { BEND_AMOUNT_LABELS } from '../../../core/config.ts';
 
 /** 推弦颜色 */
 const BEND_COLOR = '#4fc3f7';
@@ -78,7 +72,7 @@ export function renderBend(
     }
 
     // 幅度标签
-    const label = BEND_LABELS[bendAmount] || `${bendAmount}`;
+    const label = BEND_AMOUNT_LABELS[bendAmount] || `${bendAmount}`;
     const labelX = bendRelease ? endX + 6 : endX + 4;
     const labelY = bendRelease ? y - 4 : y - arcHeight * 0.5 - 2;
     drawText(ctx, label, labelX, labelY, {

@@ -6,6 +6,7 @@
  */
 
 import type { Note, NoteDuration } from '../../core/types/index.ts';
+import { NOTE_DURATIONS } from '../../core/types/index.ts';
 
 /** AI 返回的原始音符结构（来自 JSON.parse，取值一律按不可信处理） */
 interface RawNote {
@@ -30,8 +31,8 @@ interface RawResponse {
     measures?: RawMeasure[];
 }
 
-/** 合法的时值集合 */
-const VALID_DURATIONS = new Set([1, 0.5, 0.25, 0.125, 0.0625, 0.03125]);
+/** 合法的时值集合（来源：core/types 的 NOTE_DURATIONS，别在此另写一份） */
+const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 
 /**
  * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
@@ -50,7 +51,7 @@ function isAITechnique(t: string): t is AITechnique {
 /** 规范化时值为最近的有效枚举值 */
 function clampDuration(d: number | undefined): NoteDuration {
     if (!d || !VALID_DURATIONS.has(d)) {
-        const arr = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125];
+        const arr = NOTE_DURATIONS;
         const closest = arr.reduce((prev, curr) =>
             Math.abs(curr - (d ?? 0.25)) < Math.abs(prev - (d ?? 0.25)) ? curr : prev
         );

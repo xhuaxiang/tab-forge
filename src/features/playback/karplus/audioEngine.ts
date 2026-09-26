@@ -6,7 +6,7 @@
  */
 
 import type { TabScore, Note, Tuning, Measure } from '../../../core/types/index.ts';
-import { getNoteFromFret, getNoteFrequency } from '../../../core/types/index.ts';
+import { getNoteFromFret, getNoteFrequency, STANDARD_TUNING } from '../../../core/types/index.ts';
 import { GuitarEngine } from './guitarEngine.ts';
 import { buildSchedule } from './scheduling.ts';
 
@@ -25,7 +25,7 @@ export class AudioEngine {
     private state: PlaybackState = 'idle';
     private startTime: number = 0;
     private bpm: number = 120;
-    private tuning: Tuning = { string1: 'E4', string2: 'B3', string3: 'G3', string4: 'D3', string5: 'A2', string6: 'E2' };
+    private tuning: Tuning = { ...STANDARD_TUNING };
     private callbacks: PlaybackCallbacks = {};
     private timerId: ReturnType<typeof setTimeout> | null = null;
     private measures: Measure[] = [];
