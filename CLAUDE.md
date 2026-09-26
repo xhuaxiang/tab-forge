@@ -31,6 +31,10 @@
 **新增 `core/utils/` 函数时**
 签名里只应出现 `core/types` 的类型、原始值，以及第三方库的类型/纯函数（例如 alphaTab 的 `model` 类型）。若它需要读 store 或碰 DOM，则它不属于 `utils`，应放到 `features/` 下。
 
+**工具是通用的，别按「哪边用」拆**
+成对的换算（弦号双向、时值双向…）放在一起、**共用一份实现**，不要因为一端是自研、另一端是 alphaTab 就分成两节或两个文件——分开写只会各自漂移。
+`canvas ↮ alphaTab`、`karplus ↮ soundfont` 这条管的是**实现**互不混入，管不到 `core/utils/`：那里的函数两边都可以 import。
+
 **改已经在 store 里的数据时**
 先 `Grep` 找 `scoreStore` / `uiStore` 里对应的动作，调它；找不到就先加一个动作，不要在调用处改字段。
 
@@ -55,6 +59,7 @@
 ## 不可机检的硬约束
 
 1. **依赖方向单向**：事件/DOM → `app/` → store 动作 → `onChange` → 渲染/播放。
+   - **例外：`uiStore` 不设 `onChange`**。它装的是 UI 临时态（技法、推弦幅度、和弦品位、播放状态），状态由按钮自身反映，没有「数据变了要重渲染」的外部观察者；`scoreStore` 才有 `setOnChange` / `setOnSelectChange`。给 `uiStore` 加通知是**可选**的严格化，不是欠债——别当 bug 顺手补。
 2. **两种实现互不混入**：`canvas/` 与 `alphaTab/` 互不导入；`playback/karplus/` 与 `playback/soundfont/` 互不导入。类型契约可经各自 `index.ts` 共享，**实现**不得互导。
 3. **双构建都成立**：新代码要在 dist/ 与 dist-web/ 都能跑；扩展 API 用兼容判断（`typeof chrome !== 'undefined'` 已有先例），静态资源放 `public/`。
 
@@ -88,6 +93,10 @@
 
 - ES6+ 优先，看使用场景。
 - 业务代码用字面量联合类型，不自造 `enum`（alphaTab 等库的枚举照用，那是消费第三方）。
+
+## Commit 规范
+
+- `type: 中文描述`；type 用 `feat` / `fix` / `refactor` / `docs` / `test` / `chore` / `ci`，必要时带范围写成 `type(scope):`（如 `docs(CLAUDE.md)`），提交内容一句话概括，不要写文章。
 
 ## 加新功能时，按这条链过一遍
 
