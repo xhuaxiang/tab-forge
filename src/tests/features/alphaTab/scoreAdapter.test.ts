@@ -10,11 +10,11 @@ import { describe, it, expect } from 'vitest';
 import * as alphaTab from '@coderline/alphatab';
 import type { Note, Measure, TabScore } from '../../../core/types/index.ts';
 import { STANDARD_TUNING } from '../../../core/types/index.ts';
+import { tabScoreToAlphaTabScore } from '../../../features/alphaTab/scoreAdapter.ts';
 import {
-    tabScoreToAlphaTabScore,
     noteNameToMidi,
     appDurationToAlpha,
-} from '../../../features/alphaTab/scoreAdapter.ts';
+} from '../../../core/utils/scoreMapping.ts';
 
 function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
     return { string: 1, fret: 0, ...partial };

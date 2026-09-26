@@ -7,5 +7,6 @@
  * 消费方直接 import 那条路径（见 app/eventHandlers.ts 的动态 import）。
  */
 
-export { tabScoreToAlphaTabScore, noteNameToMidi } from './scoreAdapter.ts';
+export { tabScoreToAlphaTabScore } from './scoreAdapter.ts';
+export { noteNameToMidi } from '../../core/utils/scoreMapping.ts';
 export { AlphaTabRenderer } from './alphaTabRenderer.ts';

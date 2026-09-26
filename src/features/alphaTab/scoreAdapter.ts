@@ -10,48 +10,15 @@
  */
 
 import * as alphaTab from '@coderline/alphatab';
-import type { NoteDuration, TabScore, Measure } from '../../core/types/index.ts';
+import type { TabScore, Measure } from '../../core/types/index.ts';
 import { forEachSlot } from '../../core/utils/measureUtils.ts';
+import {
+    noteNameToMidi,
+    appDurationToAlpha,
+    appStringToAlphaString,
+} from '../../core/utils/scoreMapping.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../core/config.ts';
 import { applyTechniques, type FlatEntry } from './techniqueAdapter.ts';
-
-/** 音名基音 → 半音（C=0 … B=11） */
-const BASE_SEMITONE: Record<string, number> = {
-    C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11,
-};
-
-/** 音名（如 'E4'、'Eb4'、'D#4'）→ MIDI 音号；解析失败返回 0 */
-export function noteNameToMidi(noteName: string): number {
-    const m = noteName.trim().match(/^([A-Ga-g])([#b]?)(\d{1,2})$/);
-    if (!m) return 0;
-    const letter = m[1].toUpperCase();
-    let semi = BASE_SEMITONE[letter];
-    if (m[2] === '#') semi += 1;
-    else if (m[2] === 'b') semi -= 1;
-    const octave = parseInt(m[3], 10);
-    return (octave + 1) * 12 + semi;
-}
-
-/** 应用时值（相对值）→ alphaTab Duration 枚举值 */
-export function appDurationToAlpha(d: NoteDuration): alphaTab.model.Duration {
-    switch (d) {
-        case 1: return alphaTab.model.Duration.Whole;
-        case 0.5: return alphaTab.model.Duration.Half;
-        case 0.25: return alphaTab.model.Duration.Quarter;
-        case 0.125: return alphaTab.model.Duration.Eighth;
-        case 0.0625: return alphaTab.model.Duration.Sixteenth;
-        case 0.03125: return alphaTab.model.Duration.ThirtySecond;
-        default: return alphaTab.model.Duration.Quarter;
-    }
-}
-
-/**
- * 应用弦号 → alphaTab 弦号。
- * 应用 1=高音E(最顶线)..6=低音E；alphaTab 1=最底弦。故取 7 - n。
- */
-export function appStringToAlphaString(appString: number): number {
-    return 7 - appString;
-}
 
 /**
  * 把 TabScore 转换为 alphaTab Score。
