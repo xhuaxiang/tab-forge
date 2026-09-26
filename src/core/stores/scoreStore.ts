@@ -6,7 +6,7 @@
  */
 
 import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
-import { locateSlotAt, measureTotalBeats, canAddToMeasure, createEmptyMeasure } from '../utils/measureUtils.ts';
+import { locateSlotAt, measureTotalBeats, canAddToMeasure, createEmptyMeasure, parseTimeSignature } from '../utils/measureUtils.ts';
 import { applyNoteChange, muteNoteGroup } from '../utils/measureEdit.ts';
 import { SCORE_DEFAULTS } from '../config.ts';
 
@@ -99,10 +99,7 @@ export const scoreStore = {
     getActiveMeasure(): Measure {
         const { score } = this;
         if (score.measures.length === 0) {
-            const m = createEmptyMeasure(0);
-            const [num, den] = score.timeSignature.split('/').map(Number);
-            m.timeSignatureNumerator = num;
-            m.timeSignatureDenominator = den;
+            const m = createEmptyMeasure(0, score.timeSignature);
             score.measures.push(m);
             this.selectedMeasure = null;
             return m;
@@ -113,10 +110,7 @@ export const scoreStore = {
     /** 添加新小节（追加到末尾；不自动选中，默认仍向末尾小节添加） */
     addMeasure(): number {
         const i = this.score.measures.length;
-        const m = createEmptyMeasure(i);
-        const [num, den] = this.score.timeSignature.split('/').map(Number);
-        m.timeSignatureNumerator = num;
-        m.timeSignatureDenominator = den;
+        const m = createEmptyMeasure(i, this.score.timeSignature);
         this.score.measures.push(m);
         this._notify();
         return i + 1;
@@ -301,10 +295,10 @@ export const scoreStore = {
     /** 设置全局拍号并同步到所有小节 */
     setTimeSignature(sig: string): void {
         this.score.timeSignature = sig;
-        const [num, den] = sig.split('/').map(Number);
+        const { numerator, denominator } = parseTimeSignature(sig);
         for (const m of this.score.measures) {
-            m.timeSignatureNumerator = num;
-            m.timeSignatureDenominator = den;
+            m.timeSignatureNumerator = numerator;
+            m.timeSignatureDenominator = denominator;
         }
         this._notify();
     },

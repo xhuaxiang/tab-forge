@@ -29,6 +29,18 @@ export const DEFAULT_RENDER_MODE = 'alphaTab';
 export const ALPHATAB_DISPLAY_SCALE = 0.75;
 
 /**
+ * alphaTab 轨道的默认音量（0-16，16=最大）与声像（0-16，8=居中）。
+ *
+ * 由 scoreAdapter 写进 `PlaybackInformation`，只影响 SoundFont 引擎。
+ */
+export const ALPHATAB_DEFAULT_VOLUME = 15;
+export const ALPHATAB_DEFAULT_BALANCE = 8;
+
+/** 乐谱无标题时的轨道名兜底（alphaTab 轨道/短名） */
+export const DEFAULT_TRACK_NAME = 'Guitar';
+export const DEFAULT_TRACK_NAME_SHORT = 'G';
+
+/**
  * 扫弦每弦间隔（毫秒）
  *
  * 渲染侧（alphaTab scoreAdapter）与播放侧（karplus scheduling）共用同一个值，

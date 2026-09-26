@@ -140,12 +140,29 @@ export function locateSlotAt(measure: Measure, beatOffset: number): SlotLocation
     return { kind: 'end', index: notes.length };
 }
 
-/** 创建空白小节 */
-export function createEmptyMeasure(index: number): Measure {
+/**
+ * 解析拍号字符串（如 `'4/4'`、`'6/8'`）→ 分子/分母。
+ *
+ * 拍号在数据里是「全局字符串 + 每小节两个数字」两种形态，这是两者之间
+ * 唯一的换算处（此前在 scoreStore 里内联了三遍）。
+ */
+export function parseTimeSignature(sig: string): { numerator: number; denominator: number } {
+    const [numerator, denominator] = sig.split('/').map(Number);
+    return { numerator, denominator };
+}
+
+/**
+ * 创建空白小节。
+ *
+ * @param timeSignature 拍号字符串；省略时用 4/4。传了就用它填每小节的分子/分母
+ *                      （小节的拍号字段必须与全局拍号一致，别再手写 4/4）。
+ */
+export function createEmptyMeasure(index: number, timeSignature: string = '4/4'): Measure {
+    const { numerator, denominator } = parseTimeSignature(timeSignature);
     return {
         index,
         notes: [],
-        timeSignatureNumerator: 4,
-        timeSignatureDenominator: 4,
+        timeSignatureNumerator: numerator,
+        timeSignatureDenominator: denominator,
     };
 }

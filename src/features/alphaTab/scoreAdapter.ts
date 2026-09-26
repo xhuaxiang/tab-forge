@@ -11,13 +11,20 @@
 
 import * as alphaTab from '@coderline/alphatab';
 import type { TabScore, Measure } from '../../core/types/index.ts';
-import { forEachSlot } from '../../core/utils/measureUtils.ts';
+import { forEachSlot, createEmptyMeasure } from '../../core/utils/measureUtils.ts';
 import {
     noteNameToMidi,
     appDurationToAlpha,
     appStringToAlphaString,
 } from '../../core/utils/scoreMapping.ts';
-import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../core/config.ts';
+import {
+    STRUM_INTERVAL_MS,
+    ARPEGGIO_INTERVAL_MS,
+    ALPHATAB_DEFAULT_VOLUME,
+    ALPHATAB_DEFAULT_BALANCE,
+    DEFAULT_TRACK_NAME,
+    DEFAULT_TRACK_NAME_SHORT,
+} from '../../core/config.ts';
 import { applyTechniques, type FlatEntry } from './techniqueAdapter.ts';
 
 /**
@@ -35,9 +42,10 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
 
     // 空谱兜底：至少生成一个小节，避免 alphaTab 渲染/MIDI 对空谱（0 bar / 0 track）报错
     // （渲染器对空谱会走空状态提示而不调用本函数，这里兜底给播放等其他路径）
+    // 拍号跟随乐谱自身的 timeSignature，不要在这里另写 4/4
     const measures: Measure[] = score.measures.length > 0
         ? score.measures
-        : [{ index: 0, notes: [], timeSignatureNumerator: 4, timeSignatureDenominator: 4 }];
+        : [createEmptyMeasure(0, score.timeSignature)];
 
     // 先加入所有 MasterBar（Staff.addBar 按 bars.length-1 关联同序 masterBar）
     for (const m of measures) {
@@ -54,14 +62,14 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
     }
 
     const track = new at.model.Track();
-    track.name = score.title || 'Guitar';
-    track.shortName = score.title ? score.title.slice(0, 2) : 'G';
+    track.name = score.title || DEFAULT_TRACK_NAME;
+    track.shortName = score.title ? score.title.slice(0, 2) : DEFAULT_TRACK_NAME_SHORT;
     const playback = new at.model.PlaybackInformation();
     playback.program = 25; // General MIDI: Acoustic Steel Guitar
     playback.primaryChannel = 0;
     playback.secondaryChannel = 1;
-    playback.volume = 15;
-    playback.balance = 8;
+    playback.volume = ALPHATAB_DEFAULT_VOLUME;
+    playback.balance = ALPHATAB_DEFAULT_BALANCE;
     track.playbackInfo = playback;
 
     const staff = new at.model.Staff();
