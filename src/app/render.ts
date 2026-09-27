@@ -19,7 +19,20 @@ import type { AlphaTabRenderer } from '../features/alphaTab/alphaTabRenderer.ts'
 // 渲染器实例与切换
 // ============================================================
 
-export type RenderMode = 'canvas' | 'alphaTab';
+/**
+ * 渲染方式取值（唯一来源）。
+ *
+ * index.html 的 `data-render` 属性用的是这套值——HTML 改了就静默失效（点了没反应、
+ * 不报错），所以启动时会用 `warnOnDomValueDrift()` 自检一遍（见 app/eventHandlers.ts）。
+ */
+export const RENDER_MODES = ['canvas', 'alphaTab'] as const;
+
+export type RenderMode = (typeof RENDER_MODES)[number];
+
+/** 把 DOM 上取到的字符串收敛成 RenderMode（不合法时返回 false，调用方决定回落） */
+export function isRenderMode(v: string | null | undefined): v is RenderMode {
+    return v != null && (RENDER_MODES as readonly string[]).includes(v);
+}
 
 let canvasRenderer: TabCanvasRenderer | null = null;
 let alphaTabRenderer: AlphaTabRenderer | null = null;

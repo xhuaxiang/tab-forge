@@ -14,6 +14,14 @@ export const NOTE_DURATIONS = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125] as const;
 /** 音符时值枚举 */
 export type NoteDuration = (typeof NOTE_DURATIONS)[number];
 
+/**
+ * 播放状态（两个播放引擎共用）。
+ *
+ * 放在 core/types 而不是某个引擎里：它不是 Karplus 专有——SoundFont 侧走同一套
+ * 回调契约，`uiStore` 也要存它；而 core 不能依赖 features，所以类型只能住在这里。
+ */
+export type PlaybackState = 'idle' | 'playing' | 'paused' | 'stopped';
+
 /** 单个音符（某弦某品） */
 export interface Note {
     /** 弦号 (1=高音E, 6=低音E) */
@@ -32,9 +40,14 @@ export interface Note {
     dynamics?: 'soft' | 'accent';
     /** 演奏技法: hammerOn(击弦), pullOff(勾弦), slide(滑弦), bend(推弦), vibrato(揉弦) */
     technique?: 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
-    /** 技法目标品位（击/勾/滑到达的品位；推弦时表示推弦幅度半音数，1=全音Full） */
+    /** 技法目标品位（击弦/勾弦/滑弦到达的品位）。推弦幅度不用它，用 bendAmount */
     targetFret?: number;
-    /** 推弦幅度（半音数）: 0.25=1/4, 0.5=1/2, 1=Full。仅 technique='bend' 时有效 */
+    /**
+     * 推弦幅度，**以全音为单位**：0.25=1/4 全音、0.5=半个全音、1=全音（=2 个半音）。
+     * 仅 technique='bend' 时有效。
+     * ⚠️ 不是半音数——这里写错会让 AI 把幅度写小一半（alphaTab 侧 ×4 转四分之一音、
+     * Karplus 侧 ×2 转半音，都按全音算）。
+     */
     bendAmount?: number;
     /** 推弦后是否释放回来。仅 technique='bend' 时有效 */
     bendRelease?: boolean;
@@ -49,6 +62,9 @@ export interface Note {
     /** 扫弦方向（仅在chordGroup组的第一个音符上记录） */
     strum?: 'up' | 'down';
 }
+
+/** 应用层技法：算上「无技法」。`Note.technique` 是它的子集，别再各写一份列表 */
+export type AppTechnique = 'none' | NonNullable<Note['technique']>;
 
 /** 单个小节 */
 export interface Measure {

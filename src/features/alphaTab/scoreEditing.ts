@@ -14,11 +14,12 @@ import type { Note, NoteDuration } from '../../core/types/index.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { $, setStatus, getSearchSelectValue } from '../../app/dom.ts';
-import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, type AppTechnique } from '../../core/utils/scoreMapping.ts';
+import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique } from '../../core/utils/scoreMapping.ts';
+import type { AppTechnique } from '../../core/types/index.ts';
 import { durationName } from '../../core/utils/duration.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 
-export type { AppTechnique } from '../../core/utils/scoreMapping.ts';
+export type { AppTechnique } from '../../core/types/index.ts';
 
 export interface ScoreClickHit {
     beat: model.Beat | null;

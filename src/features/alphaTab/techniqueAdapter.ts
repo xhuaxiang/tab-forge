@@ -61,7 +61,8 @@ export function applyTechniques(flat: FlatEntry[]): void {
                 break;
             }
             case 'bend': {
-                // app bendAmount 单位是半音；alphaTab BendPoint.value 单位是四分之一音（半音×4）
+                // app bendAmount 以**全音**为单位；alphaTab BendPoint.value 以四分之一音为单位
+                // （1 全音 = 4 个四分之一音，故 ×4；Karplus 侧转半音是 ×2，两边同源）
                 const semitones = appNote.bendAmount ?? 1;
                 const value = Math.round(semitones * 4);
                 // ⚠️ 必须走 addBendPoint()，不能直接赋值 bendPoints 数组：

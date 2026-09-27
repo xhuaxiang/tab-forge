@@ -25,6 +25,24 @@ export const SCORE_DEFAULTS = {
 /** 默认渲染器（RenderMode 的取值之一，见 app/render.ts） */
 export const DEFAULT_RENDER_MODE = 'alphaTab';
 
+/**
+ * 播放引擎取值（唯一来源）。
+ *
+ * 与 index.html 的 `#engineSelect` option value 对应——HTML 改了就静默回落到默认引擎，
+ * 所以启动时会自检（见 app/eventHandlers.ts 的 `warnOnDomValueDrift`）。
+ */
+export const PLAYBACK_ENGINES = ['ks', 'alphatab'] as const;
+
+export type PlaybackEngine = (typeof PLAYBACK_ENGINES)[number];
+
+/** 默认播放引擎：SoundFont（GM 采样，支持推弦/揉弦与力度；合成器是物理合成、无表情） */
+export const DEFAULT_PLAYBACK_ENGINE: PlaybackEngine = 'alphatab';
+
+/** 把 DOM 上取到的字符串收敛成 PlaybackEngine（不合法时返回 false，调用方决定回落） */
+export function isPlaybackEngine(v: string | null | undefined): v is PlaybackEngine {
+    return v != null && (PLAYBACK_ENGINES as readonly string[]).includes(v);
+}
+
 /** alphaTab 整体显示缩放（含字体），适配紧凑布局 */
 export const ALPHATAB_DISPLAY_SCALE = 0.75;
 

@@ -11,8 +11,11 @@
  *   否则 AI 发的技法会被忽略（该处已加 console.warn 留痕，但仍然是漏的）。
  */
 
+/** 契约块的首个标题：stripContract 靠它定位旧存档里的契约段，改标题只改这一处 */
+export const NOTE_CONTRACT_HEADING = '## 音符对象格式';
+
 /** 音符对象格式 + 顶层输出格式 */
-export const NOTE_CONTRACT = `## 音符对象格式
+export const NOTE_CONTRACT = `${NOTE_CONTRACT_HEADING}
 每个音符是一个 JSON 对象，字段如下：
 {
   "string": 数字,    // 弦号 1-6（1=高音E最细, 6=低音E最粗）
@@ -21,7 +24,7 @@ export const NOTE_CONTRACT = `## 音符对象格式
   "isRest": 布尔,    // 是否为休止符（可选）
   "technique": "hammerOn" | "pullOff" | "slide" | "bend" | "vibrato" | null,  // 技法（可选）
   "targetFret": 数字, // 击弦/勾弦/滑弦的目标品位（可选，仅这几样需要）
-  "bendAmount": 数字, // 推弦幅度（半音）: 0.25=1/4音, 0.5=1/2音, 1=全音（仅 technique="bend" 时用）
+  "bendAmount": 数字, // 推弦幅度，以全音为单位: 0.25=1/4全音, 0.5=半音, 1=全音（仅 technique="bend" 时用）
   "bendRelease": 布尔, // 推弦后是否释放回原音（仅 technique="bend" 时用）
   "dynamics": "soft" | "accent" | null, // 力度：accent=重音（强拍/句首），soft=轻音（弱拍/经过音），不写=普通（可选）
   "tieToNext": 布尔,  // 是否延音到下一拍（可选）

@@ -4,13 +4,15 @@
  * 管理编辑器的 UI 状态：技法、和弦输入、琶音等。
  */
 
+import type { AppTechnique, PlaybackState } from '../types/index.ts';
+
 export const uiStore = {
     /** 当前技法 */
-    currentTechnique: 'none' as 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato',
+    currentTechnique: 'none' as AppTechnique,
     /** 延音按钮是否激活 */
     tieActive: false,
 
-    /** 推弦幅度（半音数）: 0.25=1/4, 0.5=1/2, 1=Full */
+    /** 推弦幅度（以全音为单位）: 0.25=1/4 全音, 0.5=半音, 1=全音。单位与 Note.bendAmount 一致 */
     bendAmount: 1 as number,
     /** 推弦后是否释放回来 */
     bendRelease: false,
@@ -24,14 +26,14 @@ export const uiStore = {
     currentStrum: '' as '' | 'up' | 'down',
 
     // 播放状态
-    playbackState: 'idle' as 'idle' | 'playing' | 'paused' | 'stopped',
+    playbackState: 'idle' as PlaybackState,
 
     // ============================================================
     // Actions
     // ============================================================
 
     /** 设置技法 */
-    setTechnique(tech: 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato'): void {
+    setTechnique(tech: AppTechnique): void {
         this.currentTechnique = tech;
     },
 
@@ -42,7 +44,7 @@ export const uiStore = {
         this.tieActive = active;
     },
 
-    /** 设置推弦幅度（半音数） */
+    /** 设置推弦幅度（以全音为单位，见 Note.bendAmount） */
     setBendAmount(amount: number): void {
         this.bendAmount = amount;
     },

@@ -16,7 +16,7 @@
  * 原实现保留在 git 历史中；恢复与否待定——目前拍号靠容量说明里的通用规则兜。
  */
 
-import { NOTE_CONTRACT } from './noteContract.ts';
+import { NOTE_CONTRACT, NOTE_CONTRACT_HEADING } from './noteContract.ts';
 import { IMPROV_CONFIG, getHint } from '../../core/config.ts';
 
 // ---- 专业性描述（调音色改这里）----
@@ -25,8 +25,11 @@ import { IMPROV_CONFIG, getHint } from '../../core/config.ts';
 const PERSONA = `你是一位精通吉他即兴演奏的 AI 音乐助手。
 你需要为六线谱（Tablature）生成即兴独奏音符，输出必须为合法 JSON。`;
 
+/** 专业性描述的首个标题：stripContract 靠它切出可编辑段，改标题只改这一处 */
+export const EXPERT_RULES_HEADING = '## 节奏多样性';
+
 /** 演奏要求：节奏 / 和声织体 / 乐句 / 技法（风格中立的底盘；风格特性见 IMPROV_CONFIG.styles[].hint） */
-const EXPERT_RULES = `## 节奏多样性
+const EXPERT_RULES = `${EXPERT_RULES_HEADING}
 - 时值只能取 0.03125 / 0.0625 / 0.125 / 0.25 / 0.5 / 1 六个值；填其它数会被系统就近改写，节奏直接错位。
 - 本系统不支持三连音；要摇摆感，就用"长-短"成对（0.25 接 0.125，约 2:1）与切分来暗示。
 - 每小节的 duration 总和要等于该小节容量（拍号分子 ÷ 分母：4/4 = 1.0，3/4 = 0.75，6/8 = 0.75）；不足时系统会按容量把音符重排，乐句边界会错位。
@@ -46,7 +49,7 @@ const EXPERT_RULES = `## 节奏多样性
 - 分解和弦 / 琶音：同一个 chordGroup 里放 3-4 个音，并在该组第一个音上加 "arpeggio": "up" 或 "down"，系统会按该方向依次拨出；整拍齐扫时改用 "strum": "up" 或 "down"。arpeggio / strum 只有挂在带 chordGroup 的音上才生效。
 
 ## 演奏法
-- 五种技法都可用：hammerOn / pullOff（同一根弦上相差 1-2 品的相邻音，给 targetFret）、slide（同弦换把，给 targetFret）、bend（推弦：给 bendAmount —— 0.25=1/4 音、0.5=1/2 音、1=全音；推上去再放回来加 "bendRelease": true）、vibrato（揉弦）。
+- 五种技法都可用：hammerOn / pullOff（同一根弦上相差 1-2 品的相邻音，给 targetFret）、slide（同弦换把，给 targetFret）、bend（推弦：给 bendAmount，**以全音为单位** —— 0.25=1/4 全音、0.5=半音、1=全音；推上去再放回来加 "bendRelease": true）、vibrato（揉弦）。
 - 技法用来连接乐句、点缀重音，不要每个音都挂；音必须落在 0-24 品内，越界会被整条丢弃。
 - **推弦与揉弦是味道的关键**：蓝调里用 bend 把 b3→3、b5→5 抹上去，用 vibrato 让长音"唱"起来；缺了这两样，句子会显得平。
 
@@ -73,8 +76,8 @@ export function composeSystemPrompt(expertPrompt?: string): string {
 }
 
 /** 数据结构块的起止标记：读取旧版整段自定义提示词时用来把这块剥掉 */
-const CONTRACT_START = '## 音符对象格式';
-const EDITABLE_START = '## 节奏多样性';
+const CONTRACT_START = NOTE_CONTRACT_HEADING;
+const EDITABLE_START = EXPERT_RULES_HEADING;
 
 /**
  * 从旧版自定义提示词里剥掉内嵌的数据结构块。

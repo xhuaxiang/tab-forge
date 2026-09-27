@@ -33,6 +33,19 @@ interface RawMeasure {
     notes?: RawNote[];
 }
 
+/**
+ * 编译期护栏：`RawNote` 的字段必须都是 `Note` 也有的字段。
+ *
+ * 两份清单要手工同步，容易漂（`bendAmount` / `bendRelease` 就曾在 Note 里有、
+ * RawNote 里没有 → AI 发了也落不了地，且不报错）。`Note` 一旦改名或删字段，
+ * 这里直接编译失败，比运行时静默丢字段好。
+ *
+ * ⚠️ 反向不成立、也不该成立：`Note.chordName` 是 UI/派生字段，AI 不写；
+ * 且 RawNote 的类型刻意比 Note 宽松（不可信输入），所以**不能合并成一个类型**。
+ */
+type _AssertTrue<T extends true> = T;
+export type _RawNoteFieldsAreNoteFields = _AssertTrue<keyof RawNote extends keyof Note ? true : false>;
+
 interface RawResponse {
     measures?: RawMeasure[];
 }

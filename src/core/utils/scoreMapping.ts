@@ -12,10 +12,11 @@
  */
 
 import { model } from '@coderline/alphatab';
-import type { NoteDuration } from '../types/index.ts';
+import type { NoteDuration, AppTechnique } from '../types/index.ts';
 import { NATURAL_SEMITONE } from '../types/index.ts';
 
-export type AppTechnique = 'none' | 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
+// 技法取值只有一份：core/types 的 AppTechnique（由 Note.technique 派生）
+export type { AppTechnique } from '../types/index.ts';
 
 // ============================================================
 // 音名 → MIDI 音号

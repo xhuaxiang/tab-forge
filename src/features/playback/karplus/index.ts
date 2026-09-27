@@ -13,7 +13,9 @@
  */
 
 export { AudioEngine, currentAudioEngine } from './audioEngine.ts';
-export type { PlaybackState, PlaybackCallbacks } from './audioEngine.ts';
+export type { PlaybackCallbacks } from './audioEngine.ts';
+// 类型契约来自 core/types（不是 Karplus 专有）：转出给 soundfont 侧与 playback/index 用
+export type { PlaybackState } from '../../../core/types/index.ts';
 export { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 export type { KSParams, KSBufferData } from './karplusStrong.ts';
 export { GuitarEngine } from './guitarEngine.ts';

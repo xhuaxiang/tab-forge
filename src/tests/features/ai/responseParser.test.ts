@@ -352,3 +352,35 @@ describe('和弦与延音字段', () => {
         expect(note).not.toHaveProperty('tieToNext');
     });
 });
+
+describe('全字段往返（防「字段加了但解析器忘了收」）', () => {
+    it('AI 能写的字段一个都不丢', () => {
+        // 这条用「所有字段塞进一个音符」的方式做往返：漏收任何一个字段，
+        // 下面的 toEqual 就会不通过。同类的静默丢字段已经真实发生过一次
+        // （bendAmount / bendRelease 在 Note 里有、解析器里没有）。
+        const note = parseOne({
+            string: 3, fret: 7, duration: 0.25,
+            technique: 'bend', targetFret: 5, bendAmount: 0.5, bendRelease: true,
+            dynamics: 'accent', tieToNext: true, chordGroup: 2,
+            strum: 'down',
+        });
+        expect(note).toEqual({
+            string: 3, fret: 7, duration: 0.25,
+            technique: 'bend', targetFret: 5, bendAmount: 0.5, bendRelease: true,
+            dynamics: 'accent', tieToNext: true, chordGroup: 2,
+            strum: 'down',
+        });
+    });
+
+    it('没有字段被漏掉：结果里有值的字段数 == 输入里给了值的字段数', () => {
+        const raw = {
+            string: 2, fret: 5, duration: 0.5,
+            technique: 'vibrato', dynamics: 'soft', tieToNext: true,
+            chordGroup: 4, arpeggio: 'up',
+        };
+        const note = parseOne(raw) as unknown as Record<string, unknown>;
+        const inputKeys = Object.keys(raw).sort();
+        const outputKeys = Object.keys(note).sort();
+        expect(outputKeys).toEqual(inputKeys);
+    });
+});

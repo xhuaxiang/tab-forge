@@ -9,15 +9,16 @@ import type { Note } from '../core/types/index.ts';
 import { TUNING_PRESETS } from '../core/types/index.ts';
 import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
 import { $, setStatus } from './dom.ts';
-import { setRenderMode } from './render.ts';
+import { setRenderMode, isRenderMode } from './render.ts';
 import { canAddToMeasure } from '../core/utils/measureUtils.ts';
 import { durationName } from '../core/utils/duration.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
 import { uiStore } from '../core/stores/uiStore.ts';
 import { initChordGrid, CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../features/ai/index.ts';
-import { SCORE_DEFAULTS, IMPROV_CONFIG, BEND_AMOUNT_LABELS } from '../core/config.ts';
+import { SCORE_DEFAULTS, IMPROV_CONFIG, BEND_AMOUNT_LABELS, PLAYBACK_ENGINES, DEFAULT_PLAYBACK_ENGINE, isPlaybackEngine } from '../core/config.ts';
 import type { Tuning } from '../core/types/index.ts';
+import { RENDER_MODES } from './render.ts';
 import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
 
 // ============================================================
@@ -32,7 +33,32 @@ function closeAllSelects(): void {
 // 事件绑定入口
 // ============================================================
 
+/**
+ * 启动自检：HTML 里写着的取值必须与 TS 常量对得上。
+ *
+ * 这类耦合断掉时是**静默失效**（下拉选了没反应、回落到别的引擎/渲染器），
+ * 比直接报错难查得多——所以在启动时把它变成一条明确的控制台告警。
+ */
+function warnOnDomValueDrift(): void {
+    const engineSel = $('engineSelect') as HTMLSelectElement | null;
+    const domEngines = engineSel ? Array.from(engineSel.options).map(o => o.value) : [];
+    for (const v of PLAYBACK_ENGINES) {
+        if (!domEngines.includes(v)) {
+            console.warn(`[TabForge] #engineSelect 缺少取值 "${v}"，与 PLAYBACK_ENGINES 不同步：该引擎无法选中`);
+        }
+    }
+    const domModes = Array.from(document.querySelectorAll('[data-render]'))
+        .map(el => el.getAttribute('data-render'));
+    for (const m of RENDER_MODES) {
+        if (!domModes.includes(m)) {
+            console.warn(`[TabForge] [data-render] 缺少取值 "${m}"，与 RENDER_MODES 不同步：该渲染器无法切换`);
+        }
+    }
+}
+
 export function initEventListeners(): void {
+    warnOnDomValueDrift();
+
     // ============================================================
     // DOM 初始化
     // ============================================================
@@ -403,9 +429,9 @@ export function initEventListeners(): void {
                 stopBtn.setAttribute('disabled', '');
             },
         };
-        // 默认 SoundFont（alphatab）：它按 GM 采样发声、支持推弦/揉弦与力度，
-        // 合成器（ks）是物理合成、无表情且不处理推弦音高，作为备选
-        const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'alphatab';
+        // 取值不合法（HTML 与 PLAYBACK_ENGINES 漂了）就回落到默认引擎，而不是静默变成别的
+        const engineValue = ($('engineSelect') as HTMLSelectElement | null)?.value;
+        const engine = isPlaybackEngine(engineValue) ? engineValue : DEFAULT_PLAYBACK_ENGINE;
         if (engine === 'alphatab') {
             try {
                 const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
@@ -467,7 +493,7 @@ export function initEventListeners(): void {
     document.querySelectorAll('#rendererSwitch button').forEach(btn => {
         btn.addEventListener('click', async () => {
             const mode = btn.getAttribute('data-render');
-            if (mode !== 'canvas' && mode !== 'alphaTab') return;
+            if (!isRenderMode(mode)) return;
             document.querySelectorAll('#rendererSwitch button').forEach(b => {
                 b.classList.toggle('active', b === btn);
             });
