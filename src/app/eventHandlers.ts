@@ -403,7 +403,9 @@ export function initEventListeners(): void {
                 stopBtn.setAttribute('disabled', '');
             },
         };
-        const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'ks';
+        // 默认 SoundFont（alphatab）：它按 GM 采样发声、支持推弦/揉弦与力度，
+        // 合成器（ks）是物理合成、无表情且不处理推弦音高，作为备选
+        const engine = ($('engineSelect') as HTMLSelectElement | null)?.value ?? 'alphatab';
         if (engine === 'alphatab') {
             try {
                 const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
