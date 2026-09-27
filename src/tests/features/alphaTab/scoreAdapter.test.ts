@@ -152,13 +152,24 @@ describe('tabScoreToAlphaTabScore', () => {
         const n = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
         expect(n.bendType).toBe(alphaTab.model.BendType.Bend);
         expect(n.bendPoints!.map((p) => [p.offset, p.value])).toEqual([[0, 0], [60, 4]]);
+        // maxBendPoint 必须被填上：渲染器读 note.maxBendPoint.value，
+        // 为 null 会让整个谱面渲染抛 "Cannot read properties of null (reading 'value')"
+        expect(n.maxBendPoint?.value).toBe(4);
+        // Bend 走 2 点形态（渲染与 MIDI 都只读 [0][1]）
+        expect(n.bendPoints).toHaveLength(2);
 
         const sc2 = tabScoreToAlphaTabScore(makeScore([measure([
             note({ duration: 0.25, technique: 'bend', bendAmount: 0.5, bendRelease: true }),
         ])]));
         const n2 = sc2.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
         expect(n2.bendType).toBe(alphaTab.model.BendType.BendRelease);
-        expect(n2.bendPoints!.map((p) => [p.offset, p.value])).toEqual([[0, 0], [30, 2], [60, 0]]);
+        // ⚠️ BendRelease 必须是**4 个**点：TabBendGlyph 无条件读 bendPoints[3]，
+        // 3 点会让整个谱面渲染抛异常。中间点重复是 alphaTab 自己的规范形态
+        // （它的 finish() 遇到 3 点输入也会把中间点复制一份补成 4 点）。
+        expect(n2.bendPoints!.map((p) => [p.offset, p.value])).toEqual([[0, 0], [30, 2], [30, 2], [60, 0]]);
+        expect(n2.bendPoints).toHaveLength(4);
+        // 回落点的 value 是 0，最大值必须取峰值 2（不是末点 0）
+        expect(n2.maxBendPoint?.value).toBe(2);
     });
 
     it('vibrato → VibratoType.Slight', () => {
@@ -218,5 +229,19 @@ describe('tabScoreToAlphaTabScore', () => {
         expect(beats).toHaveLength(1);
         expect(beats[0].notes).toHaveLength(0);
         expect(beats[0].duration).toBe(alphaTab.model.Duration.Whole);
+    });
+});
+
+describe('力度 dynamics → alphaTab', () => {
+    it('accent → FF，soft → P，不写则保持 alphaTab 默认', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([
+            note({ duration: 0.25, dynamics: 'accent' }),
+            note({ duration: 0.25, dynamics: 'soft' }),
+            note({ duration: 0.25 }),
+        ])]));
+        const notes = sc.tracks[0].staves[0].bars[0].voices[0].beats.map(b => b.notes[0]);
+        expect(notes[0].dynamics).toBe(alphaTab.model.DynamicValue.FF);
+        expect(notes[1].dynamics).toBe(alphaTab.model.DynamicValue.P);
+        expect(notes[2].dynamics).toBe(new alphaTab.model.Note().dynamics);
     });
 });

@@ -19,8 +19,11 @@ export const NOTE_CONTRACT = `## 音符对象格式
   "fret": 数字,      // 品位 0-24（0=空弦）
   "duration": 数字,  // 时值: 1=全音符, 0.5=二分, 0.25=四分, 0.125=八分, 0.0625=十六分, 0.03125=三十二分
   "isRest": 布尔,    // 是否为休止符（可选）
-  "technique": "hammerOn" | "pullOff" | "slide" | null,  // 技法（可选）
-  "targetFret": 数字, // 技法目标品位（可选，仅当有时才需要）
+  "technique": "hammerOn" | "pullOff" | "slide" | "bend" | "vibrato" | null,  // 技法（可选）
+  "targetFret": 数字, // 击弦/勾弦/滑弦的目标品位（可选，仅这几样需要）
+  "bendAmount": 数字, // 推弦幅度（半音）: 0.25=1/4音, 0.5=1/2音, 1=全音（仅 technique="bend" 时用）
+  "bendRelease": 布尔, // 推弦后是否释放回原音（仅 technique="bend" 时用）
+  "dynamics": "soft" | "accent" | null, // 力度：accent=重音（强拍/句首），soft=轻音（弱拍/经过音），不写=普通（可选）
   "tieToNext": 布尔,  // 是否延音到下一拍（可选）
   "chordGroup": 数字, // 同一和弦内的音符共享相同数字，单音不需要（可选）
   "arpeggio": "up" | "down" | null,  // 琶音方向（可选）
@@ -33,4 +36,19 @@ export const NOTE_CONTRACT = `## 音符对象格式
     { "notes": [ 音符对象, ... ] },
     ...
   ]
-}`;
+}
+
+## 示例（4/4 一小节：分解和弦起句 → 单音 → 推弦 → 重音收束）
+{
+  "measures": [
+    { "notes": [
+      { "string": 1, "fret": 5, "duration": 0.25, "chordGroup": 1, "arpeggio": "up", "dynamics": "accent" },
+      { "string": 2, "fret": 5, "duration": 0.25, "chordGroup": 1 },
+      { "string": 3, "fret": 5, "duration": 0.25, "chordGroup": 1 },
+      { "string": 2, "fret": 8, "duration": 0.25, "technique": "bend", "bendAmount": 1 },
+      { "string": 1, "fret": 8, "duration": 0.25, "dynamics": "soft" },
+      { "string": 3, "fret": 7, "duration": 0.25, "dynamics": "accent" }
+    ]}
+  ]
+}
+上面三个共享 chordGroup: 1 的音构成**一个**拍位（只占 0.25，不是三个 0.25），arpeggio 写在组首。`;

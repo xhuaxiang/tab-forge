@@ -14,7 +14,7 @@
 
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot } from '../../../core/utils/measureUtils.ts';
-import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS } from '../../../core/config.ts';
+import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
 /** 单条播放事件 */
 export interface ScheduledEvent {
@@ -73,6 +73,9 @@ export function buildSchedule(
             // 和弦音量补偿：多个音符同时播放时适当降低避免削波
             // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
             const chordVolume = 0.5 / (1 + (notes.length - 1) * 0.25);
+            // 力度：每个音各按自己的 dynamics 缩放（重音抬、轻音压）——律动感就靠这个对比
+            const volumeOf = (n: Note): number =>
+                chordVolume * (n.dynamics ? DYNAMICS_VOLUME_FACTOR[n.dynamics] : 1);
 
             const arpeggio = notes.length > 1 ? notes[0].arpeggio : undefined;
             const strum = notes.length > 1 ? notes[0].strum : undefined;
@@ -92,7 +95,7 @@ export function buildSchedule(
                         note,
                         delayMs: cursorMs + i * STRUM_INTERVAL_MS,
                         duration: durSec,
-                        volume: chordVolume,
+                        volume: volumeOf(note),
                     });
                 }
             } else if (arpeggio) {
@@ -109,14 +112,14 @@ export function buildSchedule(
                         note,
                         delayMs: cursorMs + i * ARPEGGIO_INTERVAL_MS,
                         duration: durSec,
-                        volume: chordVolume,
+                        volume: volumeOf(note),
                     });
                 }
             } else {
                 // 普通和弦或单音：同时播放
                 for (const note of notes) {
                     if (note.isRest || (note.tieToNext && !note.technique)) continue;
-                    events.push({ note, delayMs: cursorMs, duration: durSec, volume: chordVolume });
+                    events.push({ note, delayMs: cursorMs, duration: durSec, volume: volumeOf(note) });
                 }
             }
 

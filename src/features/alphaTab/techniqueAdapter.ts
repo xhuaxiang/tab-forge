@@ -64,21 +64,30 @@ export function applyTechniques(flat: FlatEntry[]): void {
                 // app bendAmount 单位是半音；alphaTab BendPoint.value 单位是四分之一音（半音×4）
                 const semitones = appNote.bendAmount ?? 1;
                 const value = Math.round(semitones * 4);
+                // ⚠️ 必须走 addBendPoint()，不能直接赋值 bendPoints 数组：
+                // alphaTab 的 `maxBendPoint` 只在 addBendPoint 里维护，渲染器会读
+                // `note.maxBendPoint.value`（alphaTab.js 的 _maxBendValue 计算），
+                // 绕过 API 会让它保持 null 并抛
+                // 「Cannot read properties of null (reading 'value')」——整个谱面渲染失败。
+                // 顺序：先定 bendType（addBendPoint 只在 None 时才改成 Custom，不会覆盖它）。
+                const addPoints = (points: Array<[number, number]>): void => {
+                    for (const [offset, v] of points) {
+                        alphaNote.addBendPoint(new alphaTab.model.BendPoint(offset, v));
+                    }
+                };
                 if (appNote.bendRelease) {
-                    // 推上去再放回来：0 → 峰 → 0（时间轴单位为百分比）
+                    // 推上去再放回来：0 → 峰 → 峰 → 0（时间轴单位为百分比）
+                    // ⚠️ 必须是**四个**点：alphaTab 的 BendRelease 规范形态就是 4 点
+                    // （它的 finish() 遇到 3 点输入会把中间点复制一份补成 4 点），
+                    // 而推弦绘制 TabBendGlyph 会无条件读 bendPoints[3]，给 3 点会抛
+                    // 「Cannot read properties of undefined (reading 'value')」。
+                    // 偏移取 0 / MaxPosition/2 / MaxPosition = 0 / 30 / 60。
                     alphaNote.bendType = alphaTab.model.BendType.BendRelease;
-                    alphaNote.bendPoints = [
-                        new alphaTab.model.BendPoint(0, 0),
-                        new alphaTab.model.BendPoint(30, value),
-                        new alphaTab.model.BendPoint(60, 0),
-                    ];
+                    addPoints([[0, 0], [30, value], [30, value], [60, 0]]);
                 } else {
                     // 只推不释：0 → 峰
                     alphaNote.bendType = alphaTab.model.BendType.Bend;
-                    alphaNote.bendPoints = [
-                        new alphaTab.model.BendPoint(0, 0),
-                        new alphaTab.model.BendPoint(60, value),
-                    ];
+                    addPoints([[0, 0], [60, value]]);
                 }
                 break;
             }

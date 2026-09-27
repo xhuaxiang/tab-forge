@@ -20,8 +20,11 @@ import { getEditableSystemPrompt, saveCustomSystemPrompt } from './systemPromptE
 import { getApiKey, debugGenerate } from './aiService.ts';
 import { setStatus } from '../../app/dom.ts';
 
-/** 从 AI 面板控件读取当前生成选项 */
-function readCurrentOptions(): GenerationOptions {
+/**
+ * 从 AI 面板控件读取当前生成选项。
+ * @param overrides 调试面板内的临时选择（风格/密度下拉），不写回 AI 面板
+ */
+function readCurrentOptions(overrides: Partial<GenerationOptions> = {}): GenerationOptions {
     const num = document.getElementById('aiNumMeasures') as HTMLSelectElement | null;
     const scale = document.getElementById('aiScaleType') as HTMLSelectElement | null;
     const style = document.getElementById('aiStyle') as HTMLSelectElement | null;
@@ -34,7 +37,30 @@ function readCurrentOptions(): GenerationOptions {
         scaleType: scale?.value || IMPROV_CONFIG.scaleTypes[0].value,
         style: style?.value || IMPROV_CONFIG.styles[0].value,
         density: density?.value || IMPROV_CONFIG.densities[1].value,
+        ...overrides,
     };
+}
+
+/** 当前调试面板里选中的风格/密度（未选则回落 AI 面板的值） */
+function readPanelOverrides(modal: HTMLElement): Partial<GenerationOptions> {
+    const style = (modal.querySelector('#pdStyle') as HTMLSelectElement | null)?.value;
+    const density = (modal.querySelector('#pdDensity') as HTMLSelectElement | null)?.value;
+    return {
+        ...(style ? { style } : {}),
+        ...(density ? { density } : {}),
+    };
+}
+
+/** 用 IMPROV_CONFIG 填充一个下拉（与 AI 面板同源，不另写选项表） */
+function fillSelect(sel: HTMLSelectElement, options: ReadonlyArray<{ value: string; label: string }>, current: string): void {
+    sel.innerHTML = '';
+    for (const o of options) {
+        const opt = document.createElement('option');
+        opt.value = o.value;
+        opt.textContent = o.label;
+        if (o.value === current) opt.selected = true;
+        sel.appendChild(opt);
+    }
 }
 
 /** 打开 Prompt 调试弹窗 */
@@ -53,7 +79,8 @@ function buildModal(initialSystem: string, initialUser: string): void {
         <div class="modal-content" style="max-width:720px; max-height:88vh; overflow-y:auto;">
             <h3>🧪 Prompt 调试</h3>
             <p style="font-size:12px;color:var(--text-muted);margin:2px 0 8px;line-height:1.5;">
-                改上面两段提示词 → 点「▶ 用上方提示词生成」→ 出谱并自动关窗。
+                改上面两段提示词 → 点「▶ 用上方提示词生成」→ 谱面写入乐谱，本窗口**不关**，
+                下方显示 AI 原始响应，方便核对模型到底发了什么。
                 找到合适组合后回写进代码：① → <code>src/features/ai/promptBuilder.ts</code>，
                 ② → <code>buildUserPrompt</code> 函数。
             </p>
@@ -65,6 +92,12 @@ function buildModal(initialSystem: string, initialUser: string): void {
                 点「保存系统提示词」后对所有生成生效（存本地，覆盖代码默认）。
             </p>
             <textarea class="modal-textarea" id="pdSystem" style="min-height:140px;font-size:13px;line-height:1.6;color:var(--text-primary);"></textarea>
+
+            <div style="display:flex;gap:8px;align-items:center;margin:8px 0 2px;">
+                <span style="font-size:12px;color:var(--text-muted);">试风格/密度：</span>
+                <select id="pdStyle" class="compact-select" style="width:auto;"></select>
+                <select id="pdDensity" class="compact-select" style="width:auto;"></select>
+            </div>
 
             <div style="font-size:13px;color:var(--text-secondary);margin:8px 0 2px;">② 用户提示词（User Prompt）</div>
             <p style="font-size:11px;color:var(--text-muted);margin:0 0 4px;line-height:1.5;">
@@ -78,6 +111,7 @@ function buildModal(initialSystem: string, initialUser: string): void {
                 <button id="pdSave">💾 保存系统提示词</button>
                 <button id="pdReset">↺ 恢复默认系统提示词</button>
                 <button id="pdRegen">⟳ 重新生成用户提示词</button>
+                <button id="pdCopyRaw">📋 复制原始响应</button>
             </div>
 
             <div id="pdResult" style="font-size:11px;color:var(--text-muted);margin-top:8px;min-height:40px;white-space:pre-wrap;word-break:break-word;"></div>
@@ -95,7 +129,23 @@ function buildModal(initialSystem: string, initialUser: string): void {
     systemTa.value = initialSystem;
     userTa.value = initialUser;
 
+    // 风格/密度：初值跟随 AI 面板，切换即按同一套文案重建 user prompt
+    // （文案来自 core/config.ts，与正式生成走的是同一个 buildUserPrompt —— 不在这里另写一份）
+    const styleSel = byId<HTMLSelectElement>('pdStyle');
+    const densitySel = byId<HTMLSelectElement>('pdDensity');
+    const baseOptions = readCurrentOptions();
+    fillSelect(styleSel, IMPROV_CONFIG.styles, baseOptions.style);
+    fillSelect(densitySel, IMPROV_CONFIG.densities, baseOptions.density);
+    const rebuildUser = (): void => {
+        userTa.value = buildUserPrompt(readCurrentOptions(readPanelOverrides(modal)));
+    };
+    styleSel.addEventListener('change', rebuildUser);
+    densitySel.addEventListener('change', rebuildUser);
+
     const close = (): void => { document.body.removeChild(modal); };
+
+    /** 最近一次 AI 原始响应，供「复制原始响应」取用 */
+    let lastRaw = '';
     modal.querySelector('#pdClose')?.addEventListener('click', close);
     modal.addEventListener('click', (e) => { if (e.target === modal) close(); });
 
@@ -116,9 +166,11 @@ function buildModal(initialSystem: string, initialUser: string): void {
             resultEl.textContent = `⚠️ 解析出 0 个有效音符，未写入乐谱。\n\n——— AI 原始响应 ———\n${res.raw}`;
         } else {
             const written = scoreStore.loadNotes(res.notes, readCurrentOptions().numMeasures);
-            // 成功：应用乐谱后自动关窗展示谱面
+            lastRaw = res.raw;
             setStatus(`✅ 已生成 ${written} 个音符`, 'success');
-            close();
+            // 不自动关窗：调试面板的价值就在于能当场核对模型到底发了什么。
+            // 谱面已经写入（loadNotes 里统一渲染），关窗即可查看。
+            resultEl.textContent = `✅ 写入 ${written} 个音符\n\n——— AI 原始响应（可选中复制）———\n${res.raw}`;
         }
     });
 
@@ -137,7 +189,19 @@ function buildModal(initialSystem: string, initialUser: string): void {
 
     // 用当前乐谱 + 面板选项重新渲染用户提示词（丢弃手改）
     modal.querySelector('#pdRegen')?.addEventListener('click', () => {
-        userTa.value = buildUserPrompt(readCurrentOptions());
+        rebuildUser();
         resultEl.textContent = '⟳ 已按当前乐谱/选项重新生成用户提示词。';
+    });
+
+    // 复制原始响应：定位「模型没写和声」这类问题时，要的就是这段原文
+    modal.querySelector('#pdCopyRaw')?.addEventListener('click', () => {
+        if (!lastRaw) {
+            resultEl.textContent = '⚠️ 还没有响应可复制，先点「▶ 用上方提示词生成」跑一次。';
+            return;
+        }
+        void navigator.clipboard?.writeText(lastRaw).then(
+            () => { resultEl.textContent = `📋 已复制原始响应（${lastRaw.length} 字符）。`; },
+            () => { resultEl.textContent = '⚠️ 剪贴板不可用，请手动选中上面的原文复制。'; },
+        );
     });
 }

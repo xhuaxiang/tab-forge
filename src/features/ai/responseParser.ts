@@ -17,6 +17,12 @@ interface RawNote {
     /** 合法取值见 AI_TECHNIQUES；来自 AI 输出，故按 string 校验而非直接信联合类型 */
     technique?: string | null;
     targetFret?: number;
+    /** 推弦幅度（半音），仅 technique='bend' 时用 */
+    bendAmount?: number;
+    /** 推弦后是否释放，仅 technique='bend' 时用 */
+    bendRelease?: boolean;
+    /** 力度，合法取值见 VALID_DYNAMICS */
+    dynamics?: string | null;
     tieToNext?: boolean;
     chordGroup?: number;
     arpeggio?: 'up' | 'down' | null;
@@ -37,15 +43,27 @@ const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 /**
  * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
  *
- * Note.technique 全集有 5 个值（core/types/index.ts），其中 bend / vibrato 只由
- * 编辑器 UI 内部产生、AI 不写入，故不在此列。
+ * 这是 `Note.technique` 的全集（core/types/index.ts）：五种都给 AI。
+ * bend / vibrato 是 blues、jazz 味道的主要载体（推弦哭腔、揉弦呼吸），
+ * 早先只开放三种时，那两种风格无论提示词怎么写都出不来。
  * ⚠️ 往 noteContract.ts 加技法时务必同步这一行，否则 AI 发来的技法会落不进去。
  */
-const AI_TECHNIQUES = ['hammerOn', 'pullOff', 'slide'] as const;
+const AI_TECHNIQUES = ['hammerOn', 'pullOff', 'slide', 'bend', 'vibrato'] as const;
 type AITechnique = (typeof AI_TECHNIQUES)[number];
 
 function isAITechnique(t: string): t is AITechnique {
     return (AI_TECHNIQUES as readonly string[]).includes(t);
+}
+
+/** AI 允许输出的力度取值（`Note.dynamics` 的全集） */
+const VALID_DYNAMICS = ['soft', 'accent'] as const;
+type AIDynamics = (typeof VALID_DYNAMICS)[number];
+
+/** 合法的推弦幅度（半音）：1/4 音、1/2 音、全音 */
+const VALID_BEND_AMOUNTS = [0.25, 0.5, 1];
+
+function isAIDynamics(v: string): v is AIDynamics {
+    return (VALID_DYNAMICS as readonly string[]).includes(v);
 }
 
 /** 规范化时值为最近的有效枚举值 */
@@ -81,11 +99,22 @@ function sanitizeNote(raw: RawNote): Note | null {
     const note: Note = { string, fret, duration };
 
     if (raw.tieToNext) note.tieToNext = true;
+    if (raw.dynamics && isAIDynamics(raw.dynamics)) {
+        note.dynamics = raw.dynamics;
+    }
     if (raw.technique) {
         if (isAITechnique(raw.technique)) {
             note.technique = raw.technique;
             if (raw.targetFret !== undefined && raw.targetFret >= 0 && raw.targetFret <= 24) {
                 note.targetFret = raw.targetFret;
+            }
+            // 推弦幅度/释放只对 bend 有意义：非法幅度回落到全音，避免画出一条无意义的曲线
+            if (raw.technique === 'bend') {
+                const amount = raw.bendAmount;
+                note.bendAmount = (typeof amount === 'number' && VALID_BEND_AMOUNTS.includes(amount))
+                    ? amount
+                    : 1;
+                if (raw.bendRelease) note.bendRelease = true;
             }
         } else {
             // 契约漂移的显式信号：AI 发了 noteContract 未暴露的技法（很可能是漏扩白名单）。

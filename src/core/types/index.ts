@@ -24,6 +24,12 @@ export interface Note {
     duration: NoteDuration;
     /** 延音/技法标记（true=标记为延音或技法音符，渲染弧线/技法符号） */
     tieToNext?: boolean;
+    /**
+     * 力度：'accent'=重音（强拍/句首，音量上调）、'soft'=轻音（弱拍/经过音，音量下调）。
+     * 不写 = 普通力度。播放侧两个引擎都读它（Karplus 调音量、alphaTab 走 dynamics），
+     * 这是「律动感」的主要来源——全曲等响听起来就是机械练习。
+     */
+    dynamics?: 'soft' | 'accent';
     /** 演奏技法: hammerOn(击弦), pullOff(勾弦), slide(滑弦), bend(推弦), vibrato(揉弦) */
     technique?: 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
     /** 技法目标品位（击/勾/滑到达的品位；推弦时表示推弦幅度半音数，1=全音Full） */

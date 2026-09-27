@@ -238,24 +238,39 @@ describe('技法 technique', () => {
         expect(high).not.toHaveProperty('targetFret');
     });
 
-    it('noteContract 未暴露的 bend → 音符保留但无 technique，且 console.warn 一次', () => {
-        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    it('bend 是合法技法：保留 technique，并按 bendAmount 校验', () => {
+        const note = parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'bend', bendAmount: 0.5 });
+        expect(note).toEqual({ string: 1, fret: 3, duration: 0.25, technique: 'bend', bendAmount: 0.5 });
 
-        const note = parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'bend', targetFret: 5 });
-
-        expect(note).toEqual({ string: 1, fret: 3, duration: 0.25 });
-        expect(note).not.toHaveProperty('technique');
-        expect(note).not.toHaveProperty('targetFret');
-        expect(warn).toHaveBeenCalledTimes(1);
-        expect(warn.mock.calls[0][0]).toContain('bend');
-
-        warn.mockRestore();
+        const full = parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'bend', bendAmount: 1, bendRelease: true });
+        expect(full).toEqual({ string: 1, fret: 3, duration: 0.25, technique: 'bend', bendAmount: 1, bendRelease: true });
     });
 
-    it('未知技法（vibrato / 乱码）同样丢弃技法但保留音符', () => {
+    it('bendAmount 非法（0.3 / 缺席 / 非数字）→ 回落到全音 1，技法仍保留', () => {
+        for (const bad of [{ bendAmount: 0.3 }, {}, { bendAmount: 'big' }]) {
+            const note = parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'bend', ...bad });
+            expect(note?.technique).toBe('bend');
+            expect(note?.bendAmount).toBe(1);
+        }
+    });
+
+    it('bendAmount / bendRelease 只在 technique=bend 时才写入', () => {
+        const note = parseOne({
+            string: 1, fret: 3, duration: 0.25,
+            technique: 'slide', bendAmount: 1, bendRelease: true,
+        });
+        expect(note).toEqual({ string: 1, fret: 3, duration: 0.25, technique: 'slide' });
+    });
+
+    it('vibrato 是合法技法', () => {
+        expect(parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'vibrato' }))
+            .toEqual({ string: 1, fret: 3, duration: 0.25, technique: 'vibrato' });
+    });
+
+    it('未知技法（tapping / 乱码）丢弃技法但保留音符，且 console.warn', () => {
         const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-        expect(parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'vibrato' }))
+        expect(parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'tapping' }))
             .toEqual({ string: 1, fret: 3, duration: 0.25 });
         expect(parseOne({ string: 1, fret: 3, duration: 0.25, technique: 'nonsense' }))
             .toEqual({ string: 1, fret: 3, duration: 0.25 });
@@ -273,6 +288,25 @@ describe('技法 technique', () => {
         expect(warn).not.toHaveBeenCalled();
 
         warn.mockRestore();
+    });
+});
+
+describe('力度 dynamics', () => {
+    it('accent / soft 被保留', () => {
+        expect(parseOne({ string: 1, fret: 3, duration: 0.25, dynamics: 'accent' })?.dynamics).toBe('accent');
+        expect(parseOne({ string: 1, fret: 3, duration: 0.25, dynamics: 'soft' })?.dynamics).toBe('soft');
+    });
+
+    it('非法力度取值不写入（也不报错）', () => {
+        for (const bad of ['loud', 'fff', '', 3]) {
+            const note = parseOne({ string: 1, fret: 3, duration: 0.25, dynamics: bad });
+            expect(note).toEqual({ string: 1, fret: 3, duration: 0.25 });
+        }
+    });
+
+    it('dynamics 为 null → 不写字段', () => {
+        expect(parseOne({ string: 1, fret: 3, duration: 0.25, dynamics: null }))
+            .toEqual({ string: 1, fret: 3, duration: 0.25 });
     });
 });
 

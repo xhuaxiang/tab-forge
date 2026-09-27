@@ -101,6 +101,12 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
                 return;
             }
 
+            // 力度：设在 Beat 上（addNote 会把它带给组内每个音符）。
+            // 注意必须在 addNote 之前设——写完之后再改 note.dynamics 会被 alphaTab 的
+            // finish() 按 Beat 的力度重置回默认，等于白设。
+            if (first.dynamics === 'accent') beat.dynamics = at.model.DynamicValue.FF;
+            else if (first.dynamics === 'soft') beat.dynamics = at.model.DynamicValue.P;
+
             // 扫弦/琶音方向 → BrushType（方向映射见实现说明；琶音与直觉相反，需听感验证）
             if (first.strum === 'down') beat.brushType = at.model.BrushType.BrushDown;
             else if (first.strum === 'up') beat.brushType = at.model.BrushType.BrushUp;
@@ -124,6 +130,7 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
                 a.string = appStringToAlphaString(n.string);
                 a.fret = n.fret ?? 0;
                 beat.addNote(a);
+                // 力度必须在 addNote 之后设：addNote 会用 beat.dynamics 覆盖 note.dynamics
                 flat.push({ appNote: n, alphaNote: a, alphaString: a.string });
             }
 

@@ -137,3 +137,34 @@ describe('buildSchedule', () => {
         expect(s.totalDurationMs).toBeCloseTo(100 + 2000 + 2000, 0);
     });
 });
+
+describe('力度 dynamics → 音量', () => {
+    it('accent 抬音量、soft 压音量，普通音保持基准', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.25, dynamics: 'accent' }),
+            note({ duration: 0.25, dynamics: 'soft' }),
+            note({ duration: 0.25 }),
+        ])], BPM);
+        const [accent, soft, plain] = s.events;
+        expect(accent.volume).toBeGreaterThan(plain.volume);
+        expect(soft.volume).toBeLessThan(plain.volume);
+    });
+
+    it('有 dynamics 的音符仍按和弦人数先做音量补偿（两个系数相乘）', () => {
+        const single = buildSchedule([measure([note({ duration: 0.25, dynamics: 'accent' })])], BPM);
+        const chord = buildSchedule([measure([
+            note({ duration: 0.25, dynamics: 'accent', chordGroup: 1 }),
+            note({ duration: 0.25, dynamics: 'accent', chordGroup: 1, string: 2 }),
+        ])], BPM);
+        // 双音的和弦补偿更低，所以同是 accent，和弦里的音量应小于单音
+        expect(chord.events[0].volume).toBeLessThan(single.events[0].volume);
+    });
+
+    it('accent 与 soft 的差距足够大（太小就听不出重音）', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.25, dynamics: 'accent' }),
+            note({ duration: 0.25, dynamics: 'soft' }),
+        ])], BPM);
+        expect(s.events[0].volume / s.events[1].volume).toBeGreaterThan(1.8);
+    });
+});
