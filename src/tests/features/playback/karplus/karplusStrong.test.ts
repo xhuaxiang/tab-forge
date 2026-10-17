@@ -5,14 +5,36 @@
  * 输出契约、能量衰减、闷音、滤波器参数、AudioBuffer 包装。
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from '../../../../features/playback/karplus/karplusStrong.ts';
 
 // BaseAudioContext 为 DOM 全局类型，测试中只用一个最小伪造对象验证包装逻辑
 
 const SR = 44100;
 
+/**
+ * 固定种子的线性同余 PRNG。
+ *
+ * Karplus-Strong 的激励与微颤使用 Math.random，不固定种子时
+ * 能量比会在阈值附近浮动（实测 0.19–0.62），导致偶发失败。
+ */
+function seededRandom(seed: number): () => number {
+    let s = seed >>> 0;
+    return () => {
+        s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+        return s / 0x100000000;
+    };
+}
+
 describe('generateStringData', () => {
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('返回带 sampleRate 的 Float32Array 数据', () => {
         const ks = generateStringData({ frequency: 110, duration: 0.5, sampleRate: SR, string: 6 });
         expect(ks.data).toBeInstanceOf(Float32Array);
