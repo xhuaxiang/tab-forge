@@ -724,12 +724,16 @@ describe('beginBatch / endBatch', () => {
         expect(onChange).toHaveBeenCalledTimes(1);
     });
 
-    it('endBatch 不会把深度压到负数', () => {
+    it('未 beginBatch 时 endBatch 不会把深度压到负数，也不触发通知', () => {
+        const onChange = vi.fn();
+        scoreStore.onChange = onChange;
+
         scoreStore.endBatch();
         expect(scoreStore._batchDepth).toBe(0);
 
         scoreStore.endBatch();
         expect(scoreStore._batchDepth).toBe(0);
+        expect(onChange).not.toHaveBeenCalled();
     });
 });
 

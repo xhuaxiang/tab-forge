@@ -54,9 +54,10 @@ export const scoreStore = {
         this._batchDepth++;
     },
 
-    /** 结束批量变更，归零时通知一次 */
+    /** 结束批量变更，归零时通知一次；未 beginBatch 时为空操作 */
     endBatch(): void {
-        this._batchDepth = Math.max(0, this._batchDepth - 1);
+        if (this._batchDepth === 0) return;
+        this._batchDepth--;
         if (this._batchDepth === 0) this._notify();
     },
 
