@@ -2,10 +2,10 @@
  * scoreControls — 调弦 / BPM / 调性 / 拍号
  */
 
-import { TUNING_PRESETS } from '../core/types/index.ts';
-import { $, setStatus } from './dom.ts';
-import { scoreStore } from '../core/stores/scoreStore.ts';
-import { SCORE_DEFAULTS } from '../core/config.ts';
+import { TUNING_PRESETS } from '../../core/types/index.ts';
+import { $, setStatus } from '../dom.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { SCORE_DEFAULTS } from '../../core/config.ts';
 
 export function initScoreControls(): void {
     // --- 调弦 ---

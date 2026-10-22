@@ -6,7 +6,7 @@
  * 由 render.ts 负责刷新渲染器高亮）。DOM 自身由 refreshMeasureNav 从 store 重建。
  */
 
-import { scoreStore } from '../core/stores/scoreStore.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
 
 let inited = false;
 

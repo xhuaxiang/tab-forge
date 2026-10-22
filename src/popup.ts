@@ -5,8 +5,8 @@
  * 不包含具体业务逻辑，只做组装和启动。
  */
 
-import { $, setStatus } from './app/dom.ts';
-import { render, getCanvasRenderer, setRenderMode, renderHighlight } from './app/render.ts';
+import { setStatus } from './app/dom.ts';
+import { initRenderer, render, renderHighlight } from './app/render/render.ts';
 import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 
@@ -24,21 +24,9 @@ function init(): void {
     scoreStore.setOnSelectChange(() => {
         renderHighlight();
     });
-    // 默认 alphaTab 渲染
-    void setRenderMode('alphaTab', true);
+    // 挂载 alphaTab 渲染器
+    void initRenderer();
 
-    const container = $('tabContent')!;
-    const ro = new ResizeObserver(() => {
-        const w = container.clientWidth || 748;
-        const h = container.clientHeight || 320;
-        const cr = getCanvasRenderer();
-        if (cr) {
-            cr.setSize(w, h);
-            render();
-        }
-    });
-    ro.observe(container);
-    
     setStatus('就绪 — 点击「+ 小节」开始创建吉他六线谱', 'info');
 }
 

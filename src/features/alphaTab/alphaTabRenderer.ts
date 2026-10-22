@@ -1,7 +1,7 @@
 /**
  * alphaTabRenderer — alphaTab 专业谱面渲染（懒加载）
  *
- * 用 AlphaTabApi 把 TabScore 渲染成六线谱/五线谱，与自研 Canvas 渲染器互为备选。
+ * 用 AlphaTabApi 把 TabScore 渲染成六线谱/五线谱。
  * - 主线程渲染（useWorkers=false）：绕开 worker 打包/通信与懒加载占位问题
  * - 播放走独立引擎（audioEngine / alphaTabPlayer），这里禁用 alphaTab 自带播放器
  * - mount 是异步（动态 import alphaTab）

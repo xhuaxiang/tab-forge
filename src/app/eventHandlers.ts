@@ -8,17 +8,15 @@
 import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
 import { $, setStatus } from './dom.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
-import { initChordGrid } from './chordInput.ts';
+import { initChordGrid } from './input/chordInput.ts';
 import { PLAYBACK_ENGINES } from '../core/config.ts';
-import { RENDER_MODES } from './render.ts';
-import { initSearchSelects } from './searchSelect.ts';
-import { initNoteInput } from './noteInput.ts';
-import { initMeasureControls } from './measureControls.ts';
-import { initAIForm } from './aiForm.ts';
-import { syncScoreDefaultsToUI } from './formSync.ts';
-import { initScoreControls } from './scoreControls.ts';
-import { initPlaybackControls } from './playbackControls.ts';
-import { initRenderControls } from './renderControls.ts';
+import { initSearchSelects } from './input/searchSelect.ts';
+import { initNoteInput } from './input/noteInput.ts';
+import { initMeasureControls } from './controls/measureControls.ts';
+import { initAIForm } from './controls/aiForm.ts';
+import { syncScoreDefaultsToUI } from './controls/formSync.ts';
+import { initScoreControls } from './controls/scoreControls.ts';
+import { initPlaybackControls } from './playback/playbackControls.ts';
 
 /**
  * 启动自检：HTML 里写着的取值必须与 TS 常量对得上。
@@ -32,13 +30,6 @@ function warnOnDomValueDrift(): void {
     for (const v of PLAYBACK_ENGINES) {
         if (!domEngines.includes(v)) {
             console.warn(`[TabForge] #engineSelect 缺少取值 "${v}"，与 PLAYBACK_ENGINES 不同步：该引擎无法选中`);
-        }
-    }
-    const domModes = Array.from(document.querySelectorAll('[data-render]'))
-        .map(el => el.getAttribute('data-render'));
-    for (const m of RENDER_MODES) {
-        if (!domModes.includes(m)) {
-            console.warn(`[TabForge] [data-render] 缺少取值 "${m}"，与 RENDER_MODES 不同步：该渲染器无法切换`);
         }
     }
 }
@@ -81,7 +72,6 @@ export function initEventListeners(): void {
     syncScoreDefaultsToUI();
     initScoreControls();
     initPlaybackControls();
-    initRenderControls();
 
     // --- Tab 导航 ---
     document.querySelectorAll('.tab-nav button').forEach(btn => {

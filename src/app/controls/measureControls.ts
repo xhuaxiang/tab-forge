@@ -2,8 +2,8 @@
  * measureControls — 小节增删与清空
  */
 
-import { $, setStatus } from './dom.ts';
-import { scoreStore } from '../core/stores/scoreStore.ts';
+import { $, setStatus } from '../dom.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
 
 export function initMeasureControls(): void {
     // --- 小节操作 ---

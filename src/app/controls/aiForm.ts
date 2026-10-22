@@ -2,10 +2,10 @@
  * aiForm — AI 即兴生成表单事件绑定
  */
 
-import { $, setStatus } from './dom.ts';
-import { scoreStore } from '../core/stores/scoreStore.ts';
-import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../features/ai/index.ts';
-import { IMPROV_CONFIG } from '../core/config.ts';
+import { $, setStatus } from '../dom.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../../features/ai/index.ts';
+import { IMPROV_CONFIG } from '../../core/config.ts';
 
 /** 从 IMPROV_CONFIG 生成即兴选项下拉（小节数/音阶/风格/密度），单一来源 */
 function initImprovConfig(): void {

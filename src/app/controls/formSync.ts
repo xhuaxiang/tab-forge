@@ -2,9 +2,9 @@
  * formSync — 把默认值同步到页面控件
  */
 
-import { TUNING_PRESETS } from '../core/types/index.ts';
-import type { Tuning } from '../core/types/index.ts';
-import { SCORE_DEFAULTS } from '../core/config.ts';
+import { TUNING_PRESETS } from '../../core/types/index.ts';
+import type { Tuning } from '../../core/types/index.ts';
+import { SCORE_DEFAULTS } from '../../core/config.ts';
 
 /** 把 SCORE_DEFAULTS 同步到页面控件（调性/BPM/调弦/预设），单一来源 */
 export function syncScoreDefaultsToUI(): void {

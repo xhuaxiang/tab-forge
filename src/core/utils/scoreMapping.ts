@@ -3,8 +3,6 @@
  *
  * 按**换算主题**成组，不按「哪边用」分节：同一个换算的两个方向（弦号、时值）
  * 放在一起、共用一份实现——分开写只会各自漂移。
- * 工具是通用的：`canvas ↮ alphaTab`、`karplus ↮ soundfont` 管的是**实现**
- * 互不混入，管不到本文件，两边都可以 import。
  *
  * 与 scoreEditing 分离，保证在 Node 测试环境下可导入。
  * 签名只用 core/types 的类型、原始值与 alphaTab 的 model 类型/枚举

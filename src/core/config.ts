@@ -22,9 +22,6 @@ export const SCORE_DEFAULTS = {
 // 渲染 / 播放可调参数
 // ============================================================
 
-/** 默认渲染器（RenderMode 的取值之一，见 app/render.ts） */
-export const DEFAULT_RENDER_MODE = 'alphaTab';
-
 /**
  * 播放引擎取值（唯一来源）。
  *
@@ -82,7 +79,7 @@ export const DYNAMICS_VOLUME_FACTOR: Record<'soft' | 'accent', number> = {
 /**
  * 推弦幅度档位 → 显示标签（0.25=1/4 音，0.5=1/2 音，1=全音）。
  *
- * canvas 画推弦弧线与状态栏提示共用；新增档位只在这里加。
+ * 状态栏提示用；新增档位只在这里加。
  */
 export const BEND_AMOUNT_LABELS: Record<number, string> = {
     0.25: '1/4',

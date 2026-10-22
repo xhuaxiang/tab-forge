@@ -2,9 +2,9 @@
  * playbackControls — 播放 / 停止 / 录音
  */
 
-import { $, setStatus } from './dom.ts';
-import { scoreStore } from '../core/stores/scoreStore.ts';
-import { DEFAULT_PLAYBACK_ENGINE, isPlaybackEngine } from '../core/config.ts';
+import { $, setStatus } from '../dom.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { DEFAULT_PLAYBACK_ENGINE, isPlaybackEngine } from '../../core/config.ts';
 
 export function initPlaybackControls(): void {
     // --- 播放 ---
@@ -12,7 +12,7 @@ export function initPlaybackControls(): void {
         if (scoreStore.score.measures.length === 0) { setStatus('无内容', 'error'); return; }
         const playBtn = $('playBtn')!;
         const stopBtn = $('stopBtn')!;
-        const callbacks: import('../features/playback/index.ts').PlaybackCallbacks = {
+        const callbacks: import('../../features/playback/index.ts').PlaybackCallbacks = {
             onStateChange: (s) => {
                 playBtn.textContent = s === 'playing' ? '⏸ 暂停' : (s === 'paused' ? '▶ 继续' : '▶ 播放');
                 stopBtn.toggleAttribute('disabled', s === 'stopped');
@@ -29,7 +29,7 @@ export function initPlaybackControls(): void {
         const engine = isPlaybackEngine(engineValue) ? engineValue : DEFAULT_PLAYBACK_ENGINE;
         if (engine === 'alphatab') {
             try {
-                const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
+                const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
                 alphaTabPlayer.setCallbacks(callbacks);
                 await alphaTabPlayer.play(scoreStore.score);
                 return;
@@ -38,15 +38,15 @@ export function initPlaybackControls(): void {
                 setStatus('SoundFont 播放失败，已回退合成器', 'error');
             }
         }
-        const audioEngine = (await import('../features/playback/karplus/index.ts')).currentAudioEngine;
+        const audioEngine = (await import('../../features/playback/karplus/index.ts')).currentAudioEngine;
         audioEngine.setCallbacks(callbacks);
         await audioEngine.play(scoreStore.score);
     });
 
     $('stopBtn')?.addEventListener('click', async () => {
-        const { currentAudioEngine } = await import('../features/playback/karplus/index.ts');
+        const { currentAudioEngine } = await import('../../features/playback/karplus/index.ts');
         currentAudioEngine.stop();
-        const { alphaTabPlayer } = await import('../features/playback/soundfont/index.ts');
+        const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
         alphaTabPlayer.stop();
         setStatus('已停止', 'info');
     });

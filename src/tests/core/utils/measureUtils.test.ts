@@ -9,8 +9,6 @@ import { describe, it, expect } from 'vitest';
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot, measureTotalBeats, canAddToMeasure, locateSlotAt } from '../../../core/utils/measureUtils.ts';
 import {
-    measureToSlotCount,
-    buildSlotEntries,
     forEachSlotGroup,
     createEmptyMeasure,
 } from '../../../core/utils/measureUtils.ts';
@@ -21,6 +19,11 @@ function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
 
 function measure(notes: Note[], num = 4, den = 4): Measure {
     return { index: 0, notes, timeSignatureNumerator: num, timeSignatureDenominator: den };
+}
+
+/** 生成 count 个四分音符（单音，各自成组） */
+function quarters(count: number): Note[] {
+    return Array.from({ length: count }, () => note({ duration: 0.25 }));
 }
 
 describe('forEachSlot', () => {
@@ -117,120 +120,6 @@ describe('locateSlotAt', () => {
         const loc = locateSlotAt(m, 0.125 + 0.125);
         expect(loc.kind).toBe('slot');
         if (loc.kind === 'slot') expect(loc.index).toBe(2);
-    });
-});
-
-/** 生成 count 个四分音符（单音，各自成组） */
-function quarters(count: number): Note[] {
-    return Array.from({ length: count }, () => note({ duration: 0.25 }));
-}
-
-describe('measureToSlotCount', () => {
-    it('空小节计 0 个拍位', () => {
-        expect(measureToSlotCount(measure([]), 0.25)).toBe(0);
-    });
-
-    it('单音各自成组，按 duration / beatUnit 折算后累加', () => {
-        const m = measure([
-            note({ duration: 0.5 }),
-            note({ duration: 0.25 }),
-            note({ duration: 0.125 }),
-        ]);
-        expect(measureToSlotCount(m, 0.125)).toBe(4 + 2 + 1);
-    });
-
-    it('同 chordGroup 合并后只计组首一次时值', () => {
-        const m = measure([
-            note({ duration: 0.25, chordGroup: 1 }),
-            note({ duration: 0.25, chordGroup: 1, string: 2 }),
-            note({ duration: 0.25, chordGroup: 1, string: 3 }),
-        ]);
-        expect(measureToSlotCount(m, 0.25)).toBe(1);
-    });
-
-    it('休止符与单音一样按时值计入', () => {
-        const m = measure([note({ duration: 0.25, isRest: true }), note({ duration: 0.25 })]);
-        expect(measureToSlotCount(m, 0.25)).toBe(2);
-    });
-
-    it('4/4 恰好占满 4 拍 → 4 个拍位', () => {
-        expect(measureToSlotCount(measure(quarters(4)), 0.25)).toBe(4);
-    });
-
-    it('超出拍号容量不做截断，按实际内容求和', () => {
-        expect(measureToSlotCount(measure(quarters(5)), 0.25)).toBe(5);
-    });
-
-    it('beatUnit = 1（全音符）时四分音符折算为 0 个拍位', () => {
-        const m = measure([note({ duration: 1 }), note({ duration: 0.25 })]);
-        expect(measureToSlotCount(m, 1)).toBe(1);
-    });
-
-    it('duration 恰为 beatUnit 一半时按 Math.round 进位为 1', () => {
-        expect(measureToSlotCount(measure([note({ duration: 0.25 })]), 0.5)).toBe(1);
-    });
-
-    it('结果只取决于内容，与拍号无关（3/4 同样按内容累加）', () => {
-        expect(measureToSlotCount(measure(quarters(3), 3, 4), 0.25)).toBe(3);
-    });
-});
-
-describe('buildSlotEntries', () => {
-    it('空小节返回空数组', () => {
-        expect(buildSlotEntries(measure([]))).toEqual([]);
-    });
-
-    it('单音条目只含 notes / duration / isRest 三个字段', () => {
-        const n = note({ duration: 0.25, string: 3, fret: 5 });
-        const entries = buildSlotEntries(measure([n]));
-        expect(entries).toHaveLength(1);
-        expect(Object.keys(entries[0]).sort()).toEqual(['duration', 'isRest', 'notes']);
-        expect(entries[0].duration).toBe(0.25);
-        expect(entries[0].isRest).toBeUndefined();
-        expect(entries[0].notes).toHaveLength(1);
-        expect(entries[0].notes[0]).toBe(n);
-    });
-
-    it('休止符条目的 isRest 为 true，duration 取休止时值', () => {
-        const entries = buildSlotEntries(measure([note({ duration: 0.5, isRest: true })]));
-        expect(entries).toHaveLength(1);
-        expect(entries[0].isRest).toBe(true);
-        expect(entries[0].duration).toBe(0.5);
-    });
-
-    it('和弦条目带 arpeggio / strum 字段，duration 取组首，不含 isRest 字段', () => {
-        const a = note({ duration: 0.25, chordGroup: 1, arpeggio: 'up', strum: 'down' });
-        const b = note({ duration: 0.25, chordGroup: 1, string: 2, fret: 1 });
-        const entries = buildSlotEntries(measure([a, b]));
-        expect(entries).toHaveLength(1);
-        expect(Object.keys(entries[0]).sort()).toEqual(['arpeggio', 'duration', 'notes', 'strum']);
-        expect(entries[0].notes).toEqual([a, b]);
-        expect(entries[0].notes).toHaveLength(2);
-        expect(entries[0].duration).toBe(0.25);
-        expect(entries[0].arpeggio).toBe('up');
-        expect(entries[0].strum).toBe('down');
-        expect('isRest' in entries[0]).toBe(false);
-    });
-
-    it('条目顺序与 forEachSlot 分组一致，notes 为切片且元素引用不变', () => {
-        const m = measure([
-            note({ duration: 0.25, chordGroup: 1 }),
-            note({ duration: 0.25, chordGroup: 1, string: 2 }),
-            note({ duration: 0.5 }),
-            note({ duration: 0.25, isRest: true }),
-        ]);
-        const slotSizes: number[] = [];
-        forEachSlot(m, g => slotSizes.push(g.length));
-        expect(slotSizes).toEqual([2, 1, 1]);
-
-        const entries = buildSlotEntries(m);
-        expect(entries.map(e => e.notes.length)).toEqual(slotSizes);
-        expect(entries.map(e => e.duration)).toEqual([0.25, 0.5, 0.25]);
-        // 各组首音对应原 notes 的下标 0 / 2 / 3，且为同一对象引用（仅数组是切片）
-        expect(entries[0].notes[0]).toBe(m.notes[0]);
-        expect(entries[1].notes[0]).toBe(m.notes[2]);
-        expect(entries[2].notes[0]).toBe(m.notes[3]);
-        expect(entries[0].notes).not.toBe(m.notes);
     });
 });
 

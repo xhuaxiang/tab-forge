@@ -2,15 +2,15 @@
  * noteInput — 音符/和弦录入相关事件绑定
  */
 
-import type { Note } from '../core/types/index.ts';
-import { $, setStatus } from './dom.ts';
-import { canAddToMeasure } from '../core/utils/measureUtils.ts';
-import { durationName } from '../core/utils/duration.ts';
-import { scoreStore } from '../core/stores/scoreStore.ts';
-import { uiStore } from '../core/stores/uiStore.ts';
+import type { Note } from '../../core/types/index.ts';
+import { $, setStatus } from '../dom.ts';
+import { canAddToMeasure } from '../../core/utils/measureUtils.ts';
+import { durationName } from '../../core/utils/duration.ts';
+import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { uiStore } from '../../core/stores/uiStore.ts';
 import { CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
-import { BEND_AMOUNT_LABELS } from '../core/config.ts';
-import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../features/alphaTab/scoreEditing.ts';
+import { BEND_AMOUNT_LABELS } from '../../core/config.ts';
+import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
 
 export function initNoteInput(): void {
     // ============================================================

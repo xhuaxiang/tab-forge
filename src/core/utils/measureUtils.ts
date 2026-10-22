@@ -67,42 +67,6 @@ export function canAddToMeasure(measure: Measure, duration: number): boolean {
 }
 
 /**
- * 计算小节展开后的拍位数量
- */
-export function measureToSlotCount(measure: Measure, beatUnit: number): number {
-    let totalSlots = 0;
-    forEachSlot(measure, (notes) => {
-        totalSlots += Math.round(notes[0].duration / beatUnit);
-    });
-    return totalSlots;
-}
-
-/**
- * 构建拍位条目列表（SlotEntry[]）
- * 用于 layout.ts 的布局计算
- */
-export function buildSlotEntries(measure: Measure): import('../types/canvas.ts').SlotEntry[] {
-    const entries: import('../types/canvas.ts').SlotEntry[] = [];
-    forEachSlot(measure, (notes) => {
-        if (notes.length === 1) {
-            entries.push({
-                notes,
-                duration: notes[0].duration,
-                isRest: notes[0].isRest,
-            });
-        } else {
-            entries.push({
-                notes,
-                duration: notes[0].duration,
-                arpeggio: notes[0].arpeggio,
-                strum: notes[0].strum,
-            });
-        }
-    });
-    return entries;
-}
-
-/**
  * 定位某个拍偏移（拍数，全音符=1）落在哪个 slot。
  *
  * 与 forEachSlot 相同的遍历逻辑，但返回 slot 在 measure.notes 里的原始边界，
