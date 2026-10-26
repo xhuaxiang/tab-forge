@@ -14,19 +14,25 @@
  */
 
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
+import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
 
 export interface NoteOptions {
     frequency?: number;
     duration?: number;
     volume?: number;
     string?: number;
+    /** 制音/死音：极短、只剩打击感 */
     mute?: boolean;
+    /** 手掌闷音：短促、暗，但仍保留音高 */
+    palmMute?: boolean;
     onEnd?: () => void;
 }
 
 interface ActiveNote {
     source: AudioBufferSourceNode | null;
     gain: GainNode;
+    /** 琴体低通：技法连接时手掌闷音要把它压暗 */
+    bodyFilter: BiquadFilterNode | null;
     nodes: AudioNode[];
     startTime: number;
     duration: number;
@@ -65,6 +71,7 @@ export class GuitarEngine {
             volume = 0.5,
             string: stringNum,
             mute = false,
+            palmMute = false,
             onEnd = null,
         } = options;
 
@@ -89,6 +96,7 @@ export class GuitarEngine {
             sampleRate: ctx.sampleRate,
             string: stringNum,
             mute,
+            palmMute,
             // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音
             sustain: duration,
         });
@@ -106,14 +114,22 @@ export class GuitarEngine {
         const preset = getBodyFilterPreset(stringNum);
         const bodyFilter = ctx.createBiquadFilter();
         bodyFilter.type = 'lowpass';
-        bodyFilter.frequency.value = mute ? 1000 : preset.lowpassFreq;
+        bodyFilter.frequency.value = mute
+            ? 1000
+            : palmMute
+                ? Math.min(preset.lowpassFreq, KARPLUS_ARTICULATION.palmMuteLowpassFreq)
+                : preset.lowpassFreq;
         bodyFilter.Q.value = 0.5;
 
         const resonance = ctx.createBiquadFilter();
         resonance.type = 'peaking';
         resonance.frequency.value = preset.resonanceFreq;
         resonance.Q.value = (stringNum ?? 3) <= 2 ? 1.5 : 1.0;
-        resonance.gain.value = mute ? 2.0 : preset.resonanceGain;
+        resonance.gain.value = mute
+            ? 2.0
+            : palmMute
+                ? Math.min(preset.resonanceGain, KARPLUS_ARTICULATION.palmMuteResonanceGain)
+                : preset.resonanceGain;
 
         source.connect(bodyFilter);
         bodyFilter.connect(resonance);
@@ -126,7 +142,8 @@ export class GuitarEngine {
         const allNodes: AudioNode[] = [source, bodyFilter, resonance, mixGain];
 
         // ---- 3) 混响（单延迟线） ----
-        if (!mute) {
+        // 手掌闷音要干、要收紧，不加混响
+        if (!mute && !palmMute) {
             const delay = ctx.createDelay(0.1);
             delay.delayTime.value = 0.025;
             const delayGain = ctx.createGain();
@@ -146,6 +163,7 @@ export class GuitarEngine {
         this.activeNotes.set(noteId, {
             source,
             gain: mixGain,
+            bodyFilter,
             nodes: allNodes,
             startTime: now,
             duration: soundDur,
@@ -263,6 +281,39 @@ export class GuitarEngine {
 
         lfo.start(now);
         note.nodes.push(lfo, lfoGain);
+    }
+
+    /**
+     * 对已发声的音符施加奏法收尾。
+     *
+     * 技法连接（击弦/勾弦/滑弦/推弦/揉弦）只调制上一个音的播放速率、不重新拨弦，
+     * 所以闷音/断音无法通过重新生成缓冲区实现，只能直接写在当前音的包络上。
+     * @param afterSec 从当前时刻起多久开始快速淡出（秒）
+     * @param volumeFactor 起始音量系数（手掌闷音）
+     * @param darken 是否压低琴体低通的截止频率（手掌闷音音色）
+     */
+    dampNote(noteId: symbol, afterSec: number, volumeFactor = 1, darken = false): void {
+        const note = this.activeNotes.get(noteId);
+        if (!note || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        const end = now + Math.max(0.02, afterSec);
+        try {
+            if (darken && note.bodyFilter) {
+                const freq = note.bodyFilter.frequency;
+                freq.cancelScheduledValues(now);
+                freq.setValueAtTime(freq.value, now);
+                freq.exponentialRampToValueAtTime(
+                    Math.max(200, KARPLUS_ARTICULATION.palmMuteLowpassFreq),
+                    now + 0.03,
+                );
+            }
+            const gain = note.gain.gain;
+            const level = Math.max(0.001, gain.value * volumeFactor);
+            gain.cancelScheduledValues(now);
+            gain.setValueAtTime(level, now);
+            gain.setValueAtTime(level, end);
+            gain.exponentialRampToValueAtTime(0.001, end + 0.03);
+        } catch {}
     }
 
     // ============================================================

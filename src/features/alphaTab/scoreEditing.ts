@@ -10,11 +10,12 @@
  */
 
 import type { model } from '@coderline/alphatab';
-import type { Note, NoteDuration } from '../../core/types/index.ts';
+import type { Note, NoteDuration, NoteArticulation, AppHarmonic } from '../../core/types/index.ts';
+import { NOTE_ARTICULATIONS } from '../../core/types/index.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { $, setStatus, getSearchSelectValue } from '../../app/dom.ts';
-import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique } from '../../core/utils/scoreMapping.ts';
+import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, detectArticulations, normalizeHarmonicFret, type DetectedArticulations } from '../../core/utils/scoreMapping.ts';
 import type { AppTechnique } from '../../core/types/index.ts';
 import { durationName } from '../../core/utils/duration.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
@@ -89,6 +90,87 @@ export function setFormTechnique(tech: AppTechnique, opts: { targetFret?: number
     uiStore.setTie(!!opts.tie);
 }
 
+/** 奏法按钮/状态栏用的中文名（noteInput 复用，避免两处各写一份） */
+export const ARTICULATION_LABELS: Record<NoteArticulation, string> = {
+    palmMute: '手掌闷音',
+    deadNote: '制音',
+    letRing: '自由延音',
+    staccato: '断音',
+};
+
+export const HARMONIC_LABELS: Record<AppHarmonic, string> = {
+    natural: '自然泛音',
+    artificial: '人工泛音',
+    pinch: '捏弦泛音',
+};
+
+/** 音符状态栏的奏法简写：PM / X / LR / ST / 泛音:人工泛音@12品 */
+export function formatArticulationSuffix(a: {
+    palmMute?: boolean;
+    deadNote?: boolean;
+    letRing?: boolean;
+    staccato?: boolean;
+    harmonic?: AppHarmonic;
+    harmonicFret?: number;
+}): string {
+    return [
+        a.palmMute ? 'PM' : '',
+        a.deadNote ? 'X' : '',
+        a.letRing ? 'LR' : '',
+        a.staccato ? 'ST' : '',
+        a.harmonic
+            ? `泛音:${HARMONIC_LABELS[a.harmonic]}${a.harmonic !== 'natural' && a.harmonicFret ? `@${a.harmonicFret}品` : ''}`
+            : '',
+    ].filter(Boolean).join(' ');
+}
+
+/** 人工/捏弦泛音需要触弦点，自然泛音不需要；按当前选择显隐输入框 */
+export function updateHarmonicUI(): void {
+    const fretInput = $('harmonicFret') as HTMLInputElement | null;
+    if (!fretInput) return;
+    const needsFret = uiStore.currentHarmonic === 'artificial' || uiStore.currentHarmonic === 'pinch';
+    fretInput.style.display = needsFret ? '' : 'none';
+}
+
+/** 设置完整奏法/泛音状态（按钮 + 下拉 + 触弦点） */
+export function setFormArticulations(a: DetectedArticulations): void {
+    // 制音与泛音互斥（制音优先）：与 getArticulationFields / sanitizeNote 同一条规则，
+    // 否则谱面里两者兼有的音符会在表单里「都选上」，落库时却被静默丢掉泛音。
+    const harmonic = a.deadNote ? undefined : a.harmonic;
+
+    for (const name of NOTE_ARTICULATIONS) {
+        const active = a[name];
+        document.querySelector(`.artic-btn[data-artic="${name}"]`)?.classList.toggle('active', active);
+        uiStore.setArticulation(name, active);
+    }
+
+    uiStore.setHarmonic(harmonic ?? '');
+    const sel = $('harmonicSelect') as HTMLSelectElement | null;
+    if (sel) sel.value = harmonic ?? '';
+    if (a.harmonicFret !== undefined) {
+        uiStore.setHarmonicFret(a.harmonicFret);
+    }
+    const fretInput = $('harmonicFret') as HTMLInputElement | null;
+    if (fretInput) fretInput.value = String(uiStore.harmonicFret);
+    updateHarmonicUI();
+}
+
+/** 当前表单奏法 → Note 的可选字段（供单音与和弦录入共用） */
+export function getArticulationFields(): Pick<Note, 'palmMute' | 'deadNote' | 'letRing' | 'staccato' | 'harmonic' | 'harmonicFret'> {
+    const a = uiStore.currentArticulations;
+    // 制音与泛音互斥：制音是压住琴弦的打击音，泛音要求节点处自由振动
+    const harmonic = a.deadNote ? undefined : (uiStore.currentHarmonic || undefined);
+    return {
+        palmMute: a.palmMute || undefined,
+        deadNote: a.deadNote || undefined,
+        letRing: a.letRing || undefined,
+        staccato: a.staccato || undefined,
+        harmonic,
+        // 表外触弦点（如 6 品）先规范化：alphaTab 会按 12 品发声，存值必须与之一致
+        harmonicFret: harmonic && harmonic !== 'natural' ? normalizeHarmonicFret(uiStore.harmonicFret) : undefined,
+    };
+}
+
 export function isTieActive(): boolean {
     return document.querySelector('.tech-btn[data-tech="tie"]')?.classList.contains('active') ?? false;
 }
@@ -133,6 +215,7 @@ export function buildNoteFromForm(prevFretCheck = true): { note: Note | null; er
         targetFret: isSingleNoteTech ? undefined : targetFret,
         bendAmount: tech === 'bend' ? uiStore.bendAmount : undefined,
         bendRelease: tech === 'bend' ? uiStore.bendRelease : undefined,
+        ...getArticulationFields(),
     };
     return { note };
 }
@@ -289,8 +372,11 @@ function loadAlphaNoteIntoForm(note: model.Note, beat: model.Beat): void {
         tie: note.isTieOrigin || note.isTieDestination,
     });
 
-    const suffix = t.tech === 'none' ? '' : ` (${t.tech})`;
-    setStatus(`已载入: 第${appString}弦 ${note.fret}品 ${durationName(dur)}${suffix}`, 'info');
+    const arts = detectArticulations(note);
+    setFormArticulations(arts);
+
+    const suffix = [t.tech === 'none' ? '' : t.tech, formatArticulationSuffix(arts)].filter(Boolean).join(' ');
+    setStatus(`已载入: 第${appString}弦 ${note.fret}品 ${durationName(dur)}${suffix ? ` (${suffix})` : ''}`, 'info');
 }
 
 // ============================================================

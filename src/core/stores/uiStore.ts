@@ -4,13 +4,26 @@
  * 管理编辑器的 UI 状态：技法、和弦输入、琶音等。
  */
 
-import type { AppTechnique, PlaybackState } from '../types/index.ts';
+import type { AppTechnique, AppHarmonic, NoteArticulation, PlaybackState } from '../types/index.ts';
+import { DEFAULT_HARMONIC_FRET, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../config.ts';
 
 export const uiStore = {
     /** 当前技法 */
     currentTechnique: 'none' as AppTechnique,
     /** 延音按钮是否激活 */
     tieActive: false,
+
+    /** 当前奏法开关（与 currentTechnique 正交，可同时开启） */
+    currentArticulations: {
+        palmMute: false,
+        deadNote: false,
+        letRing: false,
+        staccato: false,
+    },
+    /** 当前泛音类型（'' = 无） */
+    currentHarmonic: '' as '' | AppHarmonic,
+    /** 人工/捏弦泛音的触弦点（品位差） */
+    harmonicFret: DEFAULT_HARMONIC_FRET as number,
 
     /** 推弦幅度（以全音为单位）: 0.25=1/4 全音, 0.5=半音, 1=全音。单位与 Note.bendAmount 一致 */
     bendAmount: 1 as number,
@@ -35,6 +48,24 @@ export const uiStore = {
     /** 设置技法 */
     setTechnique(tech: AppTechnique): void {
         this.currentTechnique = tech;
+    },
+
+    /** 设置单个奏法开关 */
+    setArticulation(name: NoteArticulation, active: boolean): void {
+        this.currentArticulations[name] = active;
+    },
+
+    /** 设置泛音类型（'' = 关闭） */
+    setHarmonic(harmonic: '' | AppHarmonic): void {
+        this.currentHarmonic = harmonic;
+    },
+
+    /** 设置人工/捏弦泛音的触弦点（相对按弦位置的品位差，夹到 1-24） */
+    setHarmonicFret(fret: number): void {
+        const rounded = Math.round(fret);
+        this.harmonicFret = Number.isFinite(rounded)
+            ? Math.min(HARMONIC_FRET_MAX, Math.max(HARMONIC_FRET_MIN, rounded))
+            : DEFAULT_HARMONIC_FRET;
     },
 
     // 设置型动作：延音/推弦的状态来源是 DOM（按钮 class）与表单回填，

@@ -12,14 +12,18 @@
  * 包装为 AudioBuffer 由 toAudioBuffer() 负责（浏览器环境）。
  */
 
+import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
+
 export interface KSParams {
     frequency: number;
     duration: number;
     sampleRate: number;
     /** 弦号 (1-6)，影响衰减和音色 */
     string?: number;
-    /** 闷音 */
+    /** 闷音（制音/死音） */
     mute?: boolean;
+    /** 手掌闷音：比正常音更快衰减、更暗，但不至于像制音那样只剩打击感 */
+    palmMute?: boolean;
     /** 记谱时值（秒）。KS 衰减按此时值缩放：短音快速收干、长音自然延音 */
     sustain?: number;
 }
@@ -37,7 +41,7 @@ export interface KSBufferData {
  * 不依赖 Web Audio API，返回裸 Float32Array。
  */
 export function generateStringData(params: KSParams): KSBufferData {
-    const { frequency, duration, sampleRate, string: stringNum, mute, sustain } = params;
+    const { frequency, duration, sampleRate, string: stringNum, mute, palmMute, sustain } = params;
 
     // 频率无效时返回 1 采样的静音数据（调用方也可自行短路）
     if (frequency <= 0) {
@@ -64,14 +68,25 @@ export function generateStringData(params: KSParams): KSBufferData {
     }
 
     // ---- 第2步：反馈循环（延迟线 + 低通 + 衰减） ----
-    // 衰减按音符"记谱时值"缩放：到槽位结束时衰减到约 10%。
-    // 短音快速收干、长音自然延音，音符之间能分得开。
+    // 原本打算按"记谱时值"缩放衰减，但下面的旧公式把周期数当成了采样点数，
+    // 实际收干速度几乎不随时值变化（已知老债，本次不改；新写法见 palmMuteDecay）。
     const ringDuration = Math.max(0.06, sustain ?? duration); // 至少保留 60ms 琴身主体
     // 低音弦不再额外拉长延音(原 1.15),降低低音"突出感"；高音弦仍稍短
     const sustainFactor = isLow ? 1.0 : (isHigh ? 0.9 : 1.0);
+    // 衰减在反馈循环里**每经过一个延迟线周期**生效一次，周期数 ≈ 时长 × 采样率 / 延迟线长度。
+    // 正常音沿用旧公式（见上，实际不随时值缩放）；手掌闷音按 palmMuteDecaySec 内
+    // 衰到 palmMuteDecayTarget 计算，用延迟线长度换算每个周期的衰减量，
+    // 避免低频/高频弦的闷音时长漂移。
+    const normalDecay = Math.pow(0.03, 1 / (sampleRate * ringDuration * sustainFactor));
+    const palmMuteDecay = Math.pow(
+        KARPLUS_ARTICULATION.palmMuteDecayTarget,
+        1 / (KARPLUS_ARTICULATION.palmMuteDecaySec * sampleRate / delaySamples),
+    );
     const decay = mute
-        ? 0.6 // 闷音：极快衰减（≈1ms）
-        : Math.pow(0.03, 1 / (sampleRate * ringDuration * sustainFactor));
+        ? 0.6 // 制音/死音：极快衰减（≈1ms）
+        : palmMute
+            ? palmMuteDecay
+            : normalDecay;
 
     if (mute) {
         // 闷音：快速衰减 + 两级平均
@@ -82,11 +97,13 @@ export function generateStringData(params: KSParams): KSBufferData {
         }
     } else {
         // 正常琴弦：不同弦用不同低通量——低音弦多低通（更暖更原声），高音弦少低通（更亮）。
-        const [w1, w2, w3] = isLow
-            ? [0.55, 0.25, 0.2]   // 低音：三点低通，圆润原声
-            : isHigh
-                ? [0.7, 0.2, 0.1] // 高音：稍加低通，亮而不尖
-                : [0.7, 0.3, 0];  // 中音：适中
+        const [w1, w2, w3] = palmMute
+            ? [0.5, 0.32, 0.18]   // 手掌闷音：更强低通，闷而短
+            : isLow
+                ? [0.55, 0.25, 0.2]   // 低音：三点低通，圆润原声
+                : isHigh
+                    ? [0.7, 0.2, 0.1] // 高音：稍加低通，亮而不尖
+                    : [0.7, 0.3, 0];  // 中音：适中
         for (let i = delaySamples; i < totalSamples; i++) {
             const s1 = data[i - delaySamples];
             const s2 = (i - delaySamples - 1 >= 0) ? data[i - delaySamples - 1] : s1;

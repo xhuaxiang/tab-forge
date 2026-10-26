@@ -11,6 +11,14 @@ import { uiStore } from '../../../core/stores/uiStore.ts';
 beforeEach(() => {
     uiStore.currentTechnique = 'none';
     uiStore.tieActive = false;
+    uiStore.currentArticulations = {
+        palmMute: false,
+        deadNote: false,
+        letRing: false,
+        staccato: false,
+    };
+    uiStore.currentHarmonic = '';
+    uiStore.harmonicFret = 12;
     uiStore.bendAmount = 1;
     uiStore.bendRelease = false;
     uiStore.currentChordFrets = [-1, -1, -1, -1, -1, -1];
@@ -179,5 +187,63 @@ describe('setBendRelease', () => {
 
         uiStore.setBendRelease(false);
         expect(uiStore.bendRelease).toBe(false);
+    });
+});
+
+describe('setArticulation', () => {
+    it('四个奏法开关各自独立写入，互不影响', () => {
+        uiStore.setArticulation('palmMute', true);
+        uiStore.setArticulation('staccato', true);
+
+        expect(uiStore.currentArticulations).toEqual({
+            palmMute: true,
+            deadNote: false,
+            letRing: false,
+            staccato: true,
+        });
+    });
+
+    it('可以单独关闭某个开关', () => {
+        uiStore.setArticulation('letRing', true);
+        uiStore.setArticulation('letRing', false);
+
+        expect(uiStore.currentArticulations.letRing).toBe(false);
+    });
+});
+
+describe('setHarmonic', () => {
+    it('设置 / 清空泛音类型', () => {
+        uiStore.setHarmonic('natural');
+        expect(uiStore.currentHarmonic).toBe('natural');
+
+        uiStore.setHarmonic('pinch');
+        expect(uiStore.currentHarmonic).toBe('pinch');
+
+        uiStore.setHarmonic('');
+        expect(uiStore.currentHarmonic).toBe('');
+    });
+});
+
+describe('setHarmonicFret', () => {
+    it('直接赋值触弦点', () => {
+        uiStore.setHarmonicFret(7);
+        expect(uiStore.harmonicFret).toBe(7);
+
+        uiStore.setHarmonicFret(5);
+        expect(uiStore.harmonicFret).toBe(5);
+    });
+
+    it('越界夹到 1-24，非法值回落默认 12', () => {
+        uiStore.setHarmonicFret(30);
+        expect(uiStore.harmonicFret).toBe(24);
+
+        uiStore.setHarmonicFret(0);
+        expect(uiStore.harmonicFret).toBe(1);
+
+        uiStore.setHarmonicFret(-5);
+        expect(uiStore.harmonicFret).toBe(1);
+
+        uiStore.setHarmonicFret(Number.NaN);
+        expect(uiStore.harmonicFret).toBe(12);
     });
 });

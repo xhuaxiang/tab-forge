@@ -2,15 +2,16 @@
  * noteInput — 音符/和弦录入相关事件绑定
  */
 
-import type { Note } from '../../core/types/index.ts';
+import type { Note, AppHarmonic, NoteArticulation } from '../../core/types/index.ts';
+import { NOTE_ARTICULATIONS } from '../../core/types/index.ts';
 import { $, setStatus } from '../dom.ts';
 import { canAddToMeasure } from '../../core/utils/measureUtils.ts';
 import { durationName } from '../../core/utils/duration.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
-import { BEND_AMOUNT_LABELS } from '../../core/config.ts';
-import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
+import { BEND_AMOUNT_LABELS, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
+import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
 
 export function initNoteInput(): void {
     // ============================================================
@@ -29,6 +30,58 @@ export function initNoteInput(): void {
             updateTechniqueUI(tech as AppTechnique);
         });
     });
+
+    // ============================================================
+    // 奏法开关 / 泛音（与技法栏正交，可同时生效）
+    // ============================================================
+
+    document.querySelectorAll<HTMLElement>('.artic-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const name = btn.dataset.artic as NoteArticulation | undefined;
+            if (!name || !(NOTE_ARTICULATIONS as readonly string[]).includes(name)) return;
+            const active = !btn.classList.contains('active');
+            btn.classList.toggle('active', active);
+            uiStore.setArticulation(name, active);
+
+            // 制音与泛音互斥：开启制音时关掉泛音
+            if (name === 'deadNote' && active) {
+                uiStore.setHarmonic('');
+                const sel = $('harmonicSelect') as HTMLSelectElement | null;
+                if (sel) sel.value = '';
+                updateHarmonicUI();
+            }
+            setStatus(`${ARTICULATION_LABELS[name]}: ${active ? '开' : '关'}`, 'info');
+        });
+    });
+
+    const harmonicSel = $('harmonicSelect') as HTMLSelectElement | null;
+    harmonicSel?.addEventListener('change', () => {
+        const harmonic = harmonicSel.value as '' | AppHarmonic;
+        uiStore.setHarmonic(harmonic);
+
+        // 泛音与制音互斥：选泛音时关掉制音
+        if (harmonic) {
+            const deadBtn = document.querySelector<HTMLElement>('.artic-btn[data-artic="deadNote"]');
+            deadBtn?.classList.remove('active');
+            uiStore.setArticulation('deadNote', false);
+        }
+        updateHarmonicUI();
+        setStatus(harmonic ? `泛音: ${HARMONIC_LABELS[harmonic]}` : '泛音: 关闭', 'info');
+    });
+
+    const harmonicFretInput = $('harmonicFret') as HTMLInputElement | null;
+    harmonicFretInput?.addEventListener('input', () => {
+        const fret = parseInt(harmonicFretInput.value, 10);
+        if (!isNaN(fret) && fret >= HARMONIC_FRET_MIN && fret <= HARMONIC_FRET_MAX) {
+            uiStore.setHarmonicFret(fret);
+        } else {
+            // 清空/非法输入：回写成 store 的值，避免界面空着而数据还留着旧值
+            harmonicFretInput.value = String(uiStore.harmonicFret);
+        }
+    });
+    // 默认值由 store（config）提供，index.html 不硬编码，避免两处漂移
+    if (harmonicFretInput) harmonicFretInput.value = String(uiStore.harmonicFret);
+    updateHarmonicUI();
 
     // --- 添加音符（新增/追加时退出原位编辑态） ---
     $('addNoteBtn')?.addEventListener('click', () => {
@@ -67,6 +120,10 @@ export function initNoteInput(): void {
                 suffix += ` →${note.targetFret}品`;
             }
         }
+
+        const artLabels = formatArticulationSuffix(note);
+        if (artLabels) suffix += ` (${artLabels})`;
+
         setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · 第${stringNum}弦 ${fret}品 ${durationName(note.duration)}${suffix}`, 'success');
     });
 
@@ -191,6 +248,9 @@ export function initNoteInput(): void {
         const matched = CHORD_PRESETS.find(p => p.frets.every((f, i) => f === uiStore.currentChordFrets[i]));
         const chordName = matched ? matched.name : '';
 
+        // 奏法开关对整个和弦生效（闷音扫弦、泛音和弦等）
+        const articulationFields = getArticulationFields();
+
         // 按顺序添加和弦中的每个音符，共享 chordGroup
         active.forEach((n, i) => {
             const note: Note = {
@@ -201,6 +261,7 @@ export function initNoteInput(): void {
                 chordName: i === 0 ? chordName : undefined,
                 arpeggio: i === 0 ? (uiStore.currentArpeggio || undefined) : undefined,
                 strum: i === 0 ? (uiStore.currentStrum || undefined) : undefined,
+                ...articulationFields,
             };
             scoreStore.addNote(note);
         });

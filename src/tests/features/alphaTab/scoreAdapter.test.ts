@@ -245,3 +245,55 @@ describe('力度 dynamics → alphaTab', () => {
         expect(notes[2].dynamics).toBe(new alphaTab.model.Note().dynamics);
     });
 });
+
+describe('奏法与泛音 → alphaTab', () => {
+    it('palmMute / deadNote / letRing / staccato 写到音符上，并聚合到 Beat', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([
+            note({ duration: 0.25, palmMute: true }),
+            note({ duration: 0.25, deadNote: true }),
+            note({ duration: 0.25, letRing: true }),
+            note({ duration: 0.25, staccato: true }),
+        ])]));
+        const beats = sc.tracks[0].staves[0].bars[0].voices[0].beats;
+        const notes = beats.map(b => b.notes[0]);
+
+        expect(notes[0].isPalmMute).toBe(true);
+        expect(notes[1].isDead).toBe(true);
+        expect(notes[2].isLetRing).toBe(true);
+        expect(notes[3].isStaccato).toBe(true);
+
+        // alphaTab 在 Beat.finish() 里由组内音符聚合这两个 Beat 级标记
+        expect(beats[0].isPalmMute).toBe(true);
+        expect(beats[2].isLetRing).toBe(true);
+    });
+
+    it('自然泛音：harmonicType=Natural，harmonicValue 取 fret 作节点', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([
+            note({ duration: 0.25, fret: 12, harmonic: 'natural' }),
+        ])]));
+        const n = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+        expect(n.harmonicType).toBe(alphaTab.model.HarmonicType.Natural);
+        expect(n.harmonicValue).toBe(12);
+    });
+
+    it('人工/捏弦泛音：harmonicValue 取 harmonicFret，缺省 12', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([
+            note({ duration: 0.25, fret: 3, harmonic: 'artificial', harmonicFret: 7 }),
+            note({ duration: 0.25, fret: 5, harmonic: 'artificial' }),
+            note({ duration: 0.25, fret: 8, harmonic: 'pinch', harmonicFret: 5 }),
+        ])]));
+        const notes = sc.tracks[0].staves[0].bars[0].voices[0].beats.map(b => b.notes[0]);
+        expect(notes[0].harmonicType).toBe(alphaTab.model.HarmonicType.Artificial);
+        expect(notes[0].harmonicValue).toBe(7);
+        expect(notes[1].harmonicType).toBe(alphaTab.model.HarmonicType.Artificial);
+        expect(notes[1].harmonicValue).toBe(12);
+        expect(notes[2].harmonicType).toBe(alphaTab.model.HarmonicType.Pinch);
+        expect(notes[2].harmonicValue).toBe(5);
+    });
+
+    it('不写泛音时保持 HarmonicType.None', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([note({ duration: 0.25 })])]));
+        const n = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+        expect(n.harmonicType).toBe(alphaTab.model.HarmonicType.None);
+    });
+});

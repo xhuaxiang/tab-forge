@@ -19,6 +19,12 @@ import {
     alphaDurationToAppDuration,
     alphaDurationToWholeNote,
     beatOffsetInMeasure,
+    appHarmonicToAlpha,
+    deltaFretToHarmonicValue,
+    harmonicValueToSemitones,
+    harmonicValueToDeltaFret,
+    normalizeHarmonicFret,
+    detectArticulations,
 } from '../../../core/utils/scoreMapping.ts';
 
 /** 手工拼一个 voice：按给定 Duration 顺序追加 beat（addBeat 会回填 beat.voice） */
@@ -212,5 +218,114 @@ describe('beatOffsetInMeasure', () => {
             expect(beatOffsetInMeasure(v.beats[i])).toBe(running);
             running += alphaDurationToWholeNote(durations[i]);
         }
+    });
+});
+
+describe('泛音映射', () => {
+    it('应用泛音 → alphaTab HarmonicType', () => {
+        expect(appHarmonicToAlpha('natural')).toBe(model.HarmonicType.Natural);
+        expect(appHarmonicToAlpha('artificial')).toBe(model.HarmonicType.Artificial);
+        expect(appHarmonicToAlpha('pinch')).toBe(model.HarmonicType.Pinch);
+    });
+
+    it('触弦点 → harmonicValue（含 alphaTab 的非整数特例）', () => {
+        const cases: Array<[number, number]> = [
+            [2, 2.4], [3, 3.2], [4, 4], [5, 5], [7, 7], [8, 8.2],
+            [9, 9], [10, 9.6], [12, 12], [14, 14.7], [15, 14.7],
+            [16, 16], [17, 17], [19, 19], [21, 21.7], [22, 21.7], [24, 24],
+        ];
+        for (const [deltaFret, value] of cases) {
+            expect(deltaFretToHarmonicValue(deltaFret)).toBe(value);
+        }
+        // 不支持的触弦点回落到 12（与 alphaTab 私有实现一致）
+        expect(deltaFretToHarmonicValue(1)).toBe(12);
+        expect(deltaFretToHarmonicValue(6)).toBe(12);
+    });
+
+    it('harmonicValue → 升高半音数（按 alphaTab 的发声区间）', () => {
+        const cases: Array<[number, number]> = [
+            [2.4, 36], [3.2, 31], [4, 28], [5, 24], [7, 19], [8.2, 36],
+            [9, 28], [9.6, 34], [12, 12], [14.7, 34], [16, 28],
+            [17, 36], [19, 19], [21.7, 36], [24, 24],
+            [0, 0], [13, 0], [25, 0],
+        ];
+        for (const [value, semitones] of cases) {
+            expect(harmonicValueToSemitones(value), `value=${value}`).toBe(semitones);
+        }
+    });
+
+    it('harmonicValueToSemitones 与 alphaTab 的 Note.harmonicPitch 一致（库升级护栏）', () => {
+        const n = new model.Note();
+        n.string = 1; // isStringed 才返回非 0
+        n.harmonicType = model.HarmonicType.Artificial;
+        const values = [2.4, 2.7, 3.2, 8.2, 9.6, 14.7, 21.7];
+        for (let i = 0; i <= 96; i++) values.push(i * 0.25);
+        for (const value of values) {
+            n.harmonicValue = value;
+            expect(harmonicValueToSemitones(value), `value=${value}`).toBe(n.harmonicPitch);
+        }
+    });
+
+    it('normalizeHarmonicFret：支持的节点原样保留，表外值落到 12，15/22 归到等价音高的 14/21', () => {
+        for (const fret of [2, 3, 4, 5, 7, 8, 9, 10, 12, 14, 16, 17, 19, 24]) {
+            expect(normalizeHarmonicFret(fret), `fret=${fret}`).toBe(fret);
+        }
+        for (const fret of [0, 1, 6, 11, 13, 18, 20, 23, 25, -3]) {
+            expect(normalizeHarmonicFret(fret), `fret=${fret}`).toBe(12);
+        }
+        expect(normalizeHarmonicFret(15)).toBe(14);
+        expect(normalizeHarmonicFret(22)).toBe(21);
+    });
+
+    it('harmonicValue → 触弦点：常见值可回填，14.7/21.7 回到 14/21', () => {
+        expect(harmonicValueToDeltaFret(2.4)).toBe(2);
+        expect(harmonicValueToDeltaFret(3.2)).toBe(3);
+        expect(harmonicValueToDeltaFret(8.2)).toBe(8);
+        expect(harmonicValueToDeltaFret(9.6)).toBe(10);
+        expect(harmonicValueToDeltaFret(14.7)).toBe(14);
+        expect(harmonicValueToDeltaFret(21.7)).toBe(21);
+        expect(harmonicValueToDeltaFret(12)).toBe(12);
+    });
+
+    it('detectArticulations：四个开关与三种泛音都能回读', () => {
+        const n = new model.Note();
+        n.isPalmMute = true;
+        n.isDead = true;
+        n.isLetRing = true;
+        n.isStaccato = true;
+        n.harmonicType = model.HarmonicType.Natural;
+        expect(detectArticulations(n)).toEqual({
+            palmMute: true,
+            deadNote: true,
+            letRing: true,
+            staccato: true,
+            harmonic: 'natural',
+        });
+
+        const artificial = new model.Note();
+        artificial.harmonicType = model.HarmonicType.Artificial;
+        artificial.harmonicValue = deltaFretToHarmonicValue(7);
+        expect(detectArticulations(artificial)).toEqual({
+            palmMute: false,
+            deadNote: false,
+            letRing: false,
+            staccato: false,
+            harmonic: 'artificial',
+            harmonicFret: 7,
+        });
+
+        const pinch = new model.Note();
+        pinch.harmonicType = model.HarmonicType.Pinch;
+        pinch.harmonicValue = deltaFretToHarmonicValue(5);
+        expect(detectArticulations(pinch)).toMatchObject({ harmonic: 'pinch', harmonicFret: 5 });
+    });
+
+    it('无奏法/无泛音时回读为全 false 且不带 harmonic 字段', () => {
+        expect(detectArticulations(new model.Note())).toEqual({
+            palmMute: false,
+            deadNote: false,
+            letRing: false,
+            staccato: false,
+        });
     });
 });

@@ -363,12 +363,16 @@ describe('全字段往返（防「字段加了但解析器忘了收」）', () =
             technique: 'bend', targetFret: 5, bendAmount: 0.5, bendRelease: true,
             dynamics: 'accent', tieToNext: true, chordGroup: 2,
             strum: 'down',
+            palmMute: true, letRing: true, staccato: true,
+            harmonic: 'artificial', harmonicFret: 7,
         });
         expect(note).toEqual({
             string: 3, fret: 7, duration: 0.25,
             technique: 'bend', targetFret: 5, bendAmount: 0.5, bendRelease: true,
             dynamics: 'accent', tieToNext: true, chordGroup: 2,
             strum: 'down',
+            palmMute: true, letRing: true, staccato: true,
+            harmonic: 'artificial', harmonicFret: 7,
         });
     });
 
@@ -377,10 +381,91 @@ describe('全字段往返（防「字段加了但解析器忘了收」）', () =
             string: 2, fret: 5, duration: 0.5,
             technique: 'vibrato', dynamics: 'soft', tieToNext: true,
             chordGroup: 4, arpeggio: 'up',
+            palmMute: true, deadNote: true, letRing: true, staccato: true,
         };
         const note = parseOne(raw) as unknown as Record<string, unknown>;
         const inputKeys = Object.keys(raw).sort();
         const outputKeys = Object.keys(note).sort();
         expect(outputKeys).toEqual(inputKeys);
+    });
+});
+
+describe('奏法开关与泛音', () => {
+    it('palmMute / deadNote / letRing / staccato 原样保留', () => {
+        const note = parseOne({
+            string: 1, fret: 3, duration: 0.25,
+            palmMute: true, deadNote: true, letRing: true, staccato: true,
+        });
+        expect(note).toMatchObject({
+            palmMute: true,
+            deadNote: true,
+            letRing: true,
+            staccato: true,
+        });
+    });
+
+    it('未写或 false 的奏法开关不写入 Note', () => {
+        const note = parseOne({ string: 1, fret: 3, duration: 0.25, palmMute: false });
+        expect(note).not.toHaveProperty('palmMute');
+        expect(note).not.toHaveProperty('deadNote');
+        expect(note).not.toHaveProperty('letRing');
+        expect(note).not.toHaveProperty('staccato');
+    });
+
+    it('自然泛音：harmonic=natural，不写 harmonicFret（节点是 fret）', () => {
+        const note = parseOne({ string: 1, fret: 12, duration: 0.25, harmonic: 'natural', harmonicFret: 5 });
+        expect(note?.harmonic).toBe('natural');
+        expect(note).not.toHaveProperty('harmonicFret');
+    });
+
+    it('人工/捏弦泛音：保留 harmonicFret；缺省/非法值回落到 12', () => {
+        expect(parseOne({
+            string: 1, fret: 3, duration: 0.25,
+            harmonic: 'artificial', harmonicFret: 7,
+        })).toMatchObject({ harmonic: 'artificial', harmonicFret: 7 });
+
+        expect(parseOne({
+            string: 1, fret: 3, duration: 0.25,
+            harmonic: 'pinch', harmonicFret: 5,
+        })).toMatchObject({ harmonic: 'pinch', harmonicFret: 5 });
+
+        for (const bad of [undefined, -1, 0, 25, 5.5, '7']) {
+            const note = parseOne({
+                string: 1, fret: 3, duration: 0.25,
+                harmonic: 'artificial', harmonicFret: bad,
+            });
+            expect(note?.harmonic).toBe('artificial');
+            expect(note?.harmonicFret).toBe(12);
+        }
+    });
+
+    it('表外节点规范化：6 品按 12 品发声，15/22 归到等价音高的 14/21', () => {
+        const artificial = (harmonicFret: number) => parseOne({
+            string: 1, fret: 3, duration: 0.25, harmonic: 'artificial', harmonicFret,
+        });
+        expect(artificial(6)?.harmonicFret).toBe(12);
+        expect(artificial(11)?.harmonicFret).toBe(12);
+        expect(artificial(15)?.harmonicFret).toBe(14);
+        expect(artificial(22)?.harmonicFret).toBe(21);
+    });
+
+    it('未知泛音类型 → 丢弃泛音但保留音符', () => {
+        const note = parseOne({ string: 1, fret: 3, duration: 0.25, harmonic: 'feedback' });
+        expect(note).toEqual({ string: 1, fret: 3, duration: 0.25 });
+        expect(note).not.toHaveProperty('harmonic');
+    });
+
+    it('deadNote 与 harmonic 同时出现 → 制音优先，泛音被丢弃', () => {
+        const note = parseOne({
+            string: 1, fret: 3, duration: 0.25,
+            deadNote: true, harmonic: 'natural',
+        });
+        expect(note?.deadNote).toBe(true);
+        expect(note).not.toHaveProperty('harmonic');
+    });
+
+    it('只写 harmonicFret、不写 harmonic → 忽略触弦点', () => {
+        const note = parseOne({ string: 1, fret: 3, duration: 0.25, harmonicFret: 7 });
+        expect(note).not.toHaveProperty('harmonicFret');
     });
 });

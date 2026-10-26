@@ -87,6 +87,44 @@ export const BEND_AMOUNT_LABELS: Record<number, string> = {
     1: 'Full',
 };
 
+/** 人工/捏弦泛音的默认触弦点：相对按弦位置的品位差，12 = 高八度；常用 5 / 7 / 12 */
+export const DEFAULT_HARMONIC_FRET = 12;
+
+/** 人工/捏弦泛音触弦点的合法范围（相对按弦位置的品位差） */
+export const HARMONIC_FRET_MIN = 1;
+export const HARMONIC_FRET_MAX = 24;
+
+/**
+ * P0 奏法在 Karplus 引擎里的近似参数。
+ *
+ * SoundFont 侧由 alphaTab 的 MIDI 生成器处理，不读这里；
+ * 这些值只决定合成器听起来是否像那么回事，别当成乐理规则。
+ */
+export const KARPLUS_ARTICULATION = {
+    /** 手掌闷音的最长发声（秒） */
+    palmMuteMaxSec: 0.18,
+    /** 制音/死音的最长发声（秒） */
+    deadNoteMaxSec: 0.08,
+    /** Let Ring 额外延长（秒） */
+    letRingExtraSec: 0.8,
+    /** 断音时值缩短系数 */
+    staccatoDurationFactor: 0.5,
+    /** 手掌闷音音量系数 */
+    palmMuteVolumeFactor: 0.7,
+    /** 制音音量系数 */
+    deadNoteVolumeFactor: 0.5,
+    /** 泛音音量系数 */
+    harmonicVolumeFactor: 0.9,
+    /** 手掌闷音在 palmMuteDecaySec 内衰减到该比例（仅 Karplus） */
+    palmMuteDecayTarget: 0.15,
+    /** 手掌闷音衰减时长（秒，仅 Karplus） */
+    palmMuteDecaySec: 0.12,
+    /** 手掌闷音的低通截止上限（Hz；再高也不超过琴体预设） */
+    palmMuteLowpassFreq: 1800,
+    /** 手掌闷音的共振增益上限（不超过琴体预设） */
+    palmMuteResonanceGain: 2.0,
+} as const;
+
 // ============================================================
 // AI 即兴生成配置
 // ============================================================

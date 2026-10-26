@@ -91,6 +91,23 @@ describe('generateStringData', () => {
             rms(normal.data, idx, idx + SR * 0.05),
         );
     });
+
+    it('手掌闷音比正常音衰减更快，但不像制音那样只剩瞬态', () => {
+        const normal = generateStringData({ frequency: 220, duration: 1, sampleRate: SR, string: 4 });
+        const palm = generateStringData({ frequency: 220, duration: 1, sampleRate: SR, string: 4, palmMute: true });
+        const rms = (d: Float32Array, from: number, to: number) => {
+            let sum = 0;
+            let n = 0;
+            for (let i = from; i < to; i++) { sum += d[i] * d[i]; n++; }
+            return Math.sqrt(sum / n);
+        };
+        const idx = Math.round(SR * 0.1);
+        expect(rms(palm.data, idx, idx + SR * 0.02)).toBeLessThan(
+            rms(normal.data, idx, idx + SR * 0.02),
+        );
+        // 制音在第一瞬间就掉到接近 0；手掌闷音应保留可听的琴弦能量
+        expect(rms(palm.data, 0, Math.round(SR * 0.02))).toBeGreaterThan(0.01);
+    });
 });
 
 describe('getBodyFilterPreset', () => {

@@ -27,6 +27,12 @@ export const NOTE_CONTRACT = `${NOTE_CONTRACT_HEADING}
   "bendAmount": 数字, // 推弦幅度，以全音为单位: 0.25=1/4全音, 0.5=半音, 1=全音（仅 technique="bend" 时用）
   "bendRelease": 布尔, // 推弦后是否释放回原音（仅 technique="bend" 时用）
   "dynamics": "soft" | "accent" | null, // 力度：accent=重音（强拍/句首），soft=轻音（弱拍/经过音），不写=普通（可选）
+  "palmMute": 布尔,   // 手掌闷音 PM（可选，可与技法叠加）
+  "deadNote": 布尔,   // 制音/死音 X，有弦号与品位但发沉闷打击音（可选，与泛音互斥）
+  "letRing": 布尔,    // 延音 Let Ring，让当前音继续响（可选）
+  "staccato": 布尔,   // 断音 Staccato，缩短发声（可选）
+  "harmonic": "natural" | "artificial" | "pinch" | null, // 泛音（可选）
+  "harmonicFret": 数字, // 人工/捏弦泛音的触弦点：相对按弦位置的品位差（12 = 高八度），常用 5/7/12；省略按 12。natural 忽略此字段
   "tieToNext": 布尔,  // 是否延音到下一拍（可选）
   "chordGroup": 数字, // 同一和弦内的音符共享相同数字，单音不需要（可选）
   "arpeggio": "up" | "down" | null,  // 琶音方向（可选）

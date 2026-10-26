@@ -16,6 +16,8 @@ import {
     noteNameToMidi,
     appDurationToAlpha,
     appStringToAlphaString,
+    appHarmonicToAlpha,
+    deltaFretToHarmonicValue,
 } from '../../core/utils/scoreMapping.ts';
 import {
     STRUM_INTERVAL_MS,
@@ -24,6 +26,7 @@ import {
     ALPHATAB_DEFAULT_BALANCE,
     DEFAULT_TRACK_NAME,
     DEFAULT_TRACK_NAME_SHORT,
+    DEFAULT_HARMONIC_FRET,
 } from '../../core/config.ts';
 import { applyTechniques, type FlatEntry } from './techniqueAdapter.ts';
 
@@ -129,6 +132,22 @@ export function tabScoreToAlphaTabScore(score: TabScore): alphaTab.model.Score {
                 const a = new at.model.Note();
                 a.string = appStringToAlphaString(n.string);
                 a.fret = n.fret ?? 0;
+
+                // 奏法开关：音符级标记，beat 级聚合（isPalmMute/isLetRing）由 Beat.finish() 完成
+                if (n.palmMute) a.isPalmMute = true;
+                if (n.deadNote) a.isDead = true;
+                if (n.letRing) a.isLetRing = true;
+                if (n.staccato) a.isStaccato = true;
+
+                // 泛音：natural 的节点就是 fret；artificial/pinch 用触弦点（品位差）
+                if (n.harmonic) {
+                    a.harmonicType = appHarmonicToAlpha(n.harmonic);
+                    const deltaFret = n.harmonic === 'natural'
+                        ? (n.fret ?? 0)
+                        : (n.harmonicFret ?? DEFAULT_HARMONIC_FRET);
+                    a.harmonicValue = deltaFretToHarmonicValue(deltaFret);
+                }
+
                 beat.addNote(a);
                 // 力度必须在 addNote 之后设：addNote 会用 beat.dynamics 覆盖 note.dynamics
                 flat.push({ appNote: n, alphaNote: a, alphaString: a.string });

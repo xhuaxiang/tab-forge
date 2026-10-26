@@ -5,8 +5,10 @@
  * 对每个音符做边界校验，过滤非法值以免污染 scoreStore。
  */
 
-import type { Note, NoteDuration } from '../../core/types/index.ts';
-import { NOTE_DURATIONS } from '../../core/types/index.ts';
+import type { Note, NoteDuration, AppHarmonic } from '../../core/types/index.ts';
+import { NOTE_DURATIONS, APP_HARMONICS } from '../../core/types/index.ts';
+import { DEFAULT_HARMONIC_FRET, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
+import { normalizeHarmonicFret } from '../../core/utils/scoreMapping.ts';
 
 /** AI 返回的原始音符结构（来自 JSON.parse，取值一律按不可信处理） */
 interface RawNote {
@@ -23,6 +25,14 @@ interface RawNote {
     bendRelease?: boolean;
     /** 力度，合法取值见 VALID_DYNAMICS */
     dynamics?: string | null;
+    palmMute?: boolean;
+    deadNote?: boolean;
+    letRing?: boolean;
+    staccato?: boolean;
+    /** 泛音类型，合法取值见 APP_HARMONICS（来自 AI 输出，按 string 校验） */
+    harmonic?: string | null;
+    /** 人工/捏弦泛音的触弦点（品位差） */
+    harmonicFret?: number;
     tieToNext?: boolean;
     chordGroup?: number;
     arpeggio?: 'up' | 'down' | null;
@@ -77,6 +87,11 @@ const VALID_BEND_AMOUNTS = [0.25, 0.5, 1];
 
 function isAIDynamics(v: string): v is AIDynamics {
     return (VALID_DYNAMICS as readonly string[]).includes(v);
+}
+
+/** 泛音白名单直接取 core/types 的 APP_HARMONICS，避免与契约各写一份 */
+function isAIHarmonic(v: string): v is AppHarmonic {
+    return (APP_HARMONICS as readonly string[]).includes(v);
 }
 
 /** 规范化时值为最近的有效枚举值 */
@@ -137,6 +152,37 @@ function sanitizeNote(raw: RawNote): Note | null {
             );
         }
     }
+    if (raw.palmMute) note.palmMute = true;
+    if (raw.deadNote) note.deadNote = true;
+    if (raw.letRing) note.letRing = true;
+    if (raw.staccato) note.staccato = true;
+
+    if (raw.harmonic) {
+        if (!isAIHarmonic(raw.harmonic)) {
+            // 与技法白名单同样的漂移信号：契约里写了、解析器没认，音符会静默少一个泛音
+            console.warn(
+                `[TabForge] responseParser: 未知泛音类型 "${raw.harmonic}"，已忽略（核对 noteContract.ts 与 APP_HARMONICS）`
+            );
+        } else if (note.deadNote) {
+            // 契约声明两者互斥；制音优先，保留可听见的打击音
+            console.warn('[TabForge] responseParser: deadNote 与 harmonic 同时出现，已忽略泛音');
+        } else {
+            note.harmonic = raw.harmonic;
+            if (raw.harmonic !== 'natural') {
+                const fret = raw.harmonicFret;
+                const valid = typeof fret === 'number' && Number.isInteger(fret)
+                    && fret >= HARMONIC_FRET_MIN && fret <= HARMONIC_FRET_MAX;
+                // 表外节点（6/11/13…）alphaTab 会按 12 品发声；这里先把存值规范到同一结果，
+                // 否则存的值、谱面、回填值三者不一致（用户填 6，点回来变 12）。
+                const canonical = normalizeHarmonicFret(valid ? fret : DEFAULT_HARMONIC_FRET);
+                if (valid && canonical !== fret) {
+                    console.warn(`[TabForge] responseParser: ${fret} 品不是有效泛音节点，已按 ${canonical} 品发声`);
+                }
+                note.harmonicFret = canonical;
+            }
+        }
+    }
+
     if (raw.chordGroup !== undefined) note.chordGroup = raw.chordGroup;
     if (raw.chordGroup !== undefined && (raw.arpeggio === 'up' || raw.arpeggio === 'down')) {
         note.arpeggio = raw.arpeggio;

@@ -7,6 +7,8 @@
 
 import type { TabScore, Note, Tuning, Measure, PlaybackState } from '../../../core/types/index.ts';
 import { getNoteFromFret, getNoteFrequency, STANDARD_TUNING } from '../../../core/types/index.ts';
+import { DEFAULT_HARMONIC_FRET, KARPLUS_ARTICULATION } from '../../../core/config.ts';
+import { deltaFretToHarmonicValue, harmonicValueToSemitones } from '../../../core/utils/scoreMapping.ts';
 import { GuitarEngine } from './guitarEngine.ts';
 import { buildSchedule } from './scheduling.ts';
 
@@ -54,15 +56,50 @@ export class AudioEngine {
     ): symbol | null {
         const str = note.string ?? 1;
         const noteName = getNoteFromFret(this.tuning, str, note.fret ?? 0);
-        const frequency = getNoteFrequency(noteName);
+        let frequency = getNoteFrequency(noteName);
 
         if (!frequency || !note.string) return null;
+
+        // 泛音：自然泛音从空弦叠加，人工/捏弦从按弦音叠加（半音数由节点品位查表）
+        if (note.harmonic) {
+            const baseName = note.harmonic === 'natural'
+                ? getNoteFromFret(this.tuning, str, 0)
+                : noteName;
+            const baseFrequency = getNoteFrequency(baseName);
+            if (baseFrequency > 0) {
+                const deltaFret = note.harmonic === 'natural'
+                    ? (note.fret ?? 0)
+                    : (note.harmonicFret ?? DEFAULT_HARMONIC_FRET);
+                const semitones = harmonicValueToSemitones(deltaFretToHarmonicValue(deltaFret));
+                frequency = baseFrequency * Math.pow(2, semitones / 12);
+            }
+        }
+
+        // 奏法对发声时值/音量的修正（记谱时值仍用于技法释放的时机）
+        let effectiveDuration = duration;
+        let effectiveVolume = volume ?? 0.5;
+        // 断音优先于自由延音：两者同时开时，断音不应被 +0.8s 抵消
+        if (note.staccato) {
+            effectiveDuration *= KARPLUS_ARTICULATION.staccatoDurationFactor;
+        } else if (note.letRing) {
+            effectiveDuration += KARPLUS_ARTICULATION.letRingExtraSec;
+        }
+        if (note.palmMute) {
+            effectiveDuration = Math.min(effectiveDuration, KARPLUS_ARTICULATION.palmMuteMaxSec);
+            effectiveVolume *= KARPLUS_ARTICULATION.palmMuteVolumeFactor;
+        }
+        if (note.deadNote) {
+            effectiveDuration = Math.min(effectiveDuration, KARPLUS_ARTICULATION.deadNoteMaxSec);
+            effectiveVolume *= KARPLUS_ARTICULATION.deadNoteVolumeFactor;
+        }
+        if (note.harmonic) effectiveVolume *= KARPLUS_ARTICULATION.harmonicVolumeFactor;
 
         // 获取该弦上当前的活跃音符
         const lastNoteId = this.stringNoteMap.get(str) ?? null;
 
-        // 如果有前一音符且当前是技法，用技巧连接
-        if (lastNoteId && note.technique) {
+        // 如果有前一音符且当前是技法，用技巧连接。
+        // 制音/泛音必须重新发声，不能借用前一个音的调制。
+        if (lastNoteId && note.technique && !note.deadNote && !note.harmonic) {
             const ge = this.guitar as any;
             const activeNote = ge.activeNotes?.get(lastNoteId);
             if (activeNote) {
@@ -70,16 +107,13 @@ export class AudioEngine {
                 switch (note.technique) {
                     case 'hammerOn':
                         this.guitar.hammerOn(lastFreq, frequency, lastNoteId);
-                        this.stringNoteMap.set(str, lastNoteId);
-                        return lastNoteId;
+                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
                     case 'pullOff':
                         this.guitar.pullOff(lastFreq, frequency, lastNoteId);
-                        this.stringNoteMap.set(str, lastNoteId);
-                        return lastNoteId;
+                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
                     case 'slide':
                         this.guitar.slideTo(frequency, 0.15, lastNoteId);
-                        this.stringNoteMap.set(str, lastNoteId);
-                        return lastNoteId;
+                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
                     case 'bend': {
                         // 推弦幅度（bendAmount 以全音为单位，转为半音数）
                         const bendSemitones = (note.bendAmount || 1) * 2;
@@ -96,14 +130,12 @@ export class AudioEngine {
                                 this.guitar.bendTo(lastFreq, 0.1, lastNoteId);
                             }, releaseDelayMs);
                         }
-                        this.stringNoteMap.set(str, lastNoteId);
-                        return lastNoteId;
+                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
                     }
                     case 'vibrato':
                         // 揉弦：对当前活跃音符施加 LFO 音高调制
                         this.guitar.vibrato(lastNoteId, 0.015, 5.5);
-                        this.stringNoteMap.set(str, lastNoteId);
-                        return lastNoteId;
+                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
                 }
             }
         }
@@ -115,11 +147,30 @@ export class AudioEngine {
         }
         const noteId = this.guitar.playNote({
             frequency,
-            duration,
-            volume: volume ?? 0.5,
+            duration: effectiveDuration,
+            volume: effectiveVolume,
             string: str,
+            mute: !!note.deadNote,
+            palmMute: !!note.palmMute,
         });
         this.stringNoteMap.set(str, noteId);
+        return noteId;
+    }
+
+    /**
+     * 技法连接（不重新拨弦）后的奏法收尾。
+     * 闷音/断音的时值与音色修正落到当前正在发声的音符上，避免被技法分支静默吞掉。
+     */
+    private finishTechniqueNote(noteId: symbol, note: Note, durationSec: number, str: number): symbol {
+        this.stringNoteMap.set(str, noteId);
+        if (note.palmMute || note.staccato) {
+            this.guitar.dampNote(
+                noteId,
+                durationSec,
+                note.palmMute ? KARPLUS_ARTICULATION.palmMuteVolumeFactor : 1,
+                !!note.palmMute,
+            );
+        }
         return noteId;
     }
 

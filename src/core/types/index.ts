@@ -15,6 +15,24 @@ export const NOTE_DURATIONS = [1, 0.5, 0.25, 0.125, 0.0625, 0.03125] as const;
 export type NoteDuration = (typeof NOTE_DURATIONS)[number];
 
 /**
+ * 应用支持的泛音类型（P0：自然 / 人工 / 捏弦）。
+ *
+ * 与 alphaTab 的 `model.HarmonicType` 对应（映射见 core/utils/scoreMapping.ts），
+ * 也用作 AI 输出校验的白名单——新增类型只改这里，别在别处再抄一份。
+ */
+export const APP_HARMONICS = ['natural', 'artificial', 'pinch'] as const;
+export type AppHarmonic = (typeof APP_HARMONICS)[number];
+
+/**
+ * 可叠加在音符上的奏法开关（与 `technique` 正交，可同时存在）。
+ *
+ * 这些不是一个「选一个」的技法枚举，而是各自独立的布尔标记：
+ * 例如手掌闷音 + 滑弦、断音 + 击弦都可能同时出现。
+ */
+export const NOTE_ARTICULATIONS = ['palmMute', 'deadNote', 'letRing', 'staccato'] as const;
+export type NoteArticulation = (typeof NOTE_ARTICULATIONS)[number];
+
+/**
  * 播放状态（两个播放引擎共用）。
  *
  * 放在 core/types 而不是某个引擎里：它不是 Karplus 专有——SoundFont 侧走同一套
@@ -38,7 +56,10 @@ export interface Note {
      * 这是「律动感」的主要来源——全曲等响听起来就是机械练习。
      */
     dynamics?: 'soft' | 'accent';
-    /** 演奏技法: hammerOn(击弦), pullOff(勾弦), slide(滑弦), bend(推弦), vibrato(揉弦) */
+    /**
+     * 演奏技法: hammerOn(击弦), pullOff(勾弦), slide(滑弦), bend(推弦), vibrato(揉弦)。
+     * 一次只能选一个；闷音/泛音等见下方独立的奏法开关，可与其叠加。
+     */
     technique?: 'hammerOn' | 'pullOff' | 'slide' | 'bend' | 'vibrato';
     /** 技法目标品位（击弦/勾弦/滑弦到达的品位）。推弦幅度不用它，用 bendAmount */
     targetFret?: number;
@@ -51,6 +72,25 @@ export interface Note {
     bendAmount?: number;
     /** 推弦后是否释放回来。仅 technique='bend' 时有效 */
     bendRelease?: boolean;
+
+    // ---- 奏法开关（与 technique 正交，可叠加） ----
+
+    /** 手掌闷音 (Palm Mute)：低音弦短促、干、有推进感 */
+    palmMute?: boolean;
+    /** 制音/死音 (Dead Note，谱面记作 X)：有弦号与品位，但发沉闷的打击音 */
+    deadNote?: boolean;
+    /** 延音 (Let Ring)：不重新拨弦，让当前音继续响 */
+    letRing?: boolean;
+    /** 断音 (Staccato)：缩短发声时值 */
+    staccato?: boolean;
+    /** 泛音类型。natural 用 fret 作触弦节点，artificial/pinch 用 harmonicFret */
+    harmonic?: AppHarmonic;
+    /**
+     * 人工/捏弦泛音的触弦点（品位差），常用 5 / 7 / 12，省略按默认 12。
+     * natural 忽略此字段（节点就是 fret）。
+     */
+    harmonicFret?: number;
+
     /** 休止符 */
     isRest?: boolean;
     /** 和弦分组ID：同一和弦内的音符共享相同ID，单音/休止符为undefined */

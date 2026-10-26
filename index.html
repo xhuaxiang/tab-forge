@@ -141,6 +141,22 @@
                         <button class="bend-release-btn" id="bendReleaseToggle" title="推弦后释放回来">↩ 释放</button>
                     </div>
 
+                    <!-- 奏法开关（与技法独立，可叠加） -->
+                    <div class="articulation-bar">
+                        <button class="artic-btn" data-artic="palmMute" title="手掌闷音 (PM)">PM</button>
+                        <button class="artic-btn" data-artic="deadNote" title="制音/死音 (X)">X</button>
+                        <button class="artic-btn" data-artic="letRing" title="自由延音 (Let Ring)">LR</button>
+                        <button class="artic-btn" data-artic="staccato" title="断音 (Staccato)">ST</button>
+                        <span class="tech-sep"></span>
+                        <select id="harmonicSelect" class="compact-select mini harmonic-select" title="泛音类型">
+                            <option value="">泛音:无</option>
+                            <option value="natural">自然泛音</option>
+                            <option value="artificial">人工泛音</option>
+                            <option value="pinch">捏弦泛音</option>
+                        </select>
+                        <input type="number" id="harmonicFret" class="compact-input mini harmonic-fret" min="1" max="24" title="人工/捏弦泛音的触弦点：相对按弦位置的品位差（12 = 高八度）" style="display:none;">
+                    </div>
+
                     <!-- 操作按钮 -->
                     <div class="action-bar">
                         <button id="addNoteBtn" class="btn btn-primary" style="flex:2;">添加</button>

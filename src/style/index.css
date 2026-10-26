@@ -218,6 +218,23 @@ body {
 .bend-amount-btn.active { background:var(--accent-bend); border-color:var(--accent-bend); color:var(--bg-primary); }
 .bend-release-btn.active { background:var(--color-warning); border-color:var(--color-warning); color:var(--bg-primary); }
 
+/* ===== 奏法开关（闷音/制音/延音/断音 + 泛音） ===== */
+.articulation-bar {
+    display:flex; gap:3px; align-items:center; margin:2px 0; flex-wrap:wrap;
+}
+.artic-btn {
+    min-width:28px; height:22px; padding:0 5px;
+    border:1px solid var(--border-input); border-radius:3px;
+    background:var(--bg-tertiary); color:var(--text-secondary);
+    cursor:pointer; font-size:10px; font-weight:700;
+    display:flex; align-items:center; justify-content:center;
+    transition:all var(--transition-fast);
+}
+.artic-btn:hover { border-color:var(--accent-primary); color:#fff; }
+.artic-btn.active { background:var(--accent-primary); border-color:var(--accent-primary); color:var(--bg-primary); }
+.harmonic-select { width:auto; max-width:92px; }
+.harmonic-fret { width:46px; padding:3px 4px; text-align:center; }
+
 /* ===== 操作按钮栏 ===== */
 .action-bar { display:flex; gap:4px; margin-top:4px; }
 .action-bar .btn { padding:4px 8px; font-size:12px; justify-content:center; }

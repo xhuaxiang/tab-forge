@@ -12,8 +12,10 @@ import { GuitarEngine } from '../../../../features/playback/karplus/guitarEngine
 // ---- 最小 AudioContext mock ----
 class MockParam {
     value: number;
+    /** 记录 setValueAtTime 的调度值（dampNote 断言用；value 最终会被 ramp 覆盖） */
+    scheduled: number[] = [];
     constructor(v = 0) { this.value = v; }
-    setValueAtTime(v: number) { this.value = v; }
+    setValueAtTime(v: number) { this.value = v; this.scheduled.push(v); }
     exponentialRampToValueAtTime(v: number) { this.value = v; }
     cancelScheduledValues() {}
 }
@@ -54,10 +56,12 @@ class MockAudioContext {
     state = 'running';
     destination = new MockNode();
     private sources: MockNode[] = [];
+    private gains: MockNode[] = [];
+    private filters: MockNode[] = [];
 
-    createGain() { return new MockNode(); }
+    createGain() { const n = new MockNode(); this.gains.push(n); return n; }
     createBufferSource() { const n = new MockNode(); this.sources.push(n); return n; }
-    createBiquadFilter() { return new MockNode(); }
+    createBiquadFilter() { const n = new MockNode(); this.filters.push(n); return n; }
     createDelay() { return new MockNode(); }
     createOscillator() { return new MockNode(); }
     createBuffer(channels: number, length: number, sampleRate: number) {
@@ -70,6 +74,12 @@ class MockAudioContext {
     getSourceBuffers(): MockBuffer[] {
         return this.sources.map(s => s.buffer).filter((b): b is MockBuffer => b !== null);
     }
+
+    /** 测试辅助：gains[0]=masterGain，gains[1]=单音的 mixGain */
+    getGains(): MockNode[] { return this.gains; }
+
+    /** 测试辅助：每个音按顺序创建 bodyFilter / resonance */
+    getFilters(): MockNode[] { return this.filters; }
 }
 
 function rms(d: Float32Array): number {
@@ -106,6 +116,36 @@ describe('GuitarEngine.playNote', () => {
         ge.playNote({ frequency: 0, duration: 0.5, string: 1 });
 
         expect(ctx.getSourceBuffers()).toHaveLength(0);
+        ge.dispose();
+    });
+
+    it('手掌闷音：琴体低通被压到 config 上限，且不加混响', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        ge.playNote({ frequency: 82, duration: 0.4, volume: 0.5, string: 6, palmMute: true });
+
+        const bodyFilter = ctx.getFilters()[0];
+        // 6 弦预设 2500Hz，被 palmMuteLowpassFreq=1800 压住
+        expect(bodyFilter.frequency.value).toBe(1800);
+        ge.dispose();
+    });
+
+    it('dampNote：技法连接后把闷音作用到当前发声的音符上', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        const noteId = ge.playNote({ frequency: 220, duration: 0.4, volume: 0.5, string: 4 });
+        const mixGain = ctx.getGains()[1];
+        const before = mixGain.gain.value;
+
+        ge.dampNote(noteId, 0.1, 0.7, true);
+
+        // 第一次 setValueAtTime 是音量系数后的电平，之后 ramp 到 0.001 收尾
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(before * 0.7, 5);
+        expect(ctx.getFilters()[0].frequency.value).toBe(1800);
         ge.dispose();
     });
 });

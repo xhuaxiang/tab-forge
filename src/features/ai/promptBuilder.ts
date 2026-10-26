@@ -52,6 +52,9 @@ const EXPERT_RULES = `${EXPERT_RULES_HEADING}
 - 五种技法都可用：hammerOn / pullOff（同一根弦上相差 1-2 品的相邻音，给 targetFret）、slide（同弦换把，给 targetFret）、bend（推弦：给 bendAmount，**以全音为单位** —— 0.25=1/4 全音、0.5=半音、1=全音；推上去再放回来加 "bendRelease": true）、vibrato（揉弦）。
 - 技法用来连接乐句、点缀重音，不要每个音都挂；音必须落在 0-24 品内，越界会被整条丢弃。
 - **推弦与揉弦是味道的关键**：蓝调里用 bend 把 b3→3、b5→5 抹上去，用 vibrato 让长音"唱"起来；缺了这两样，句子会显得平。
+- 奏法开关与技法正交、可叠加：**palmMute**（手掌闷音，低音弦短促推进）、**deadNote**（制音 X，打击感）、**letRing**（让音延续）、**staccato**（断音）。需要时写 true，不需要就省略。
+- 泛音用 **harmonic**："natural"（自然泛音，节点写在该音的 fret 上，如 12/7/5 品）、"artificial"（人工泛音）、"pinch"（捏弦泛音）。人工/捏弦用 harmonicFret 指定触弦点：**相对按弦位置的品位差**（5/7/12，12 = 高八度；省略按 12）。泛音与 deadNote 互斥，不要同时写。
+- 用法要有节制：palmMute 适合低音弦节奏型与摇滚推进，泛音适合句尾/高点提亮；整段挂满会失去对比。
 
 ## 力度（律动感的来源）
 - 给音符标力度：强拍（第 1、3 拍）与乐句的第一个音用 "dynamics": "accent"，弱拍上的经过音、装饰音用 "dynamics": "soft"；其余不写。
