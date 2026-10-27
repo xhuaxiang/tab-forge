@@ -58,12 +58,16 @@ export function measureTotalBeats(measure: Measure): number {
     return total;
 }
 
+/** 小节容量（以全音符为 1 的拍数），如 4/4 → 1、6/8 → 0.75 */
+export function measureCapacity(measure: Measure): number {
+    return measure.timeSignatureNumerator / measure.timeSignatureDenominator;
+}
+
 /**
  * 检查能否在小节内添加指定时值
  */
 export function canAddToMeasure(measure: Measure, duration: number): boolean {
-    const cap = measure.timeSignatureNumerator * (1 / measure.timeSignatureDenominator);
-    return measureTotalBeats(measure) + duration <= cap + 0.001;
+    return measureTotalBeats(measure) + duration <= measureCapacity(measure) + 0.001;
 }
 
 /**

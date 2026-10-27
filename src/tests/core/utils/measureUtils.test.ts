@@ -7,7 +7,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Measure, Note } from '../../../core/types/index.ts';
-import { forEachSlot, measureTotalBeats, canAddToMeasure, locateSlotAt } from '../../../core/utils/measureUtils.ts';
+import { forEachSlot, measureTotalBeats, measureCapacity, canAddToMeasure, locateSlotAt } from '../../../core/utils/measureUtils.ts';
 import {
     forEachSlotGroup,
     createEmptyMeasure,
@@ -54,6 +54,17 @@ describe('measureTotalBeats', () => {
             note({ duration: 0.25, chordGroup: 1, string: 2 }),
         ]);
         expect(measureTotalBeats(m)).toBeCloseTo(0.25, 5);
+    });
+});
+
+describe('measureCapacity', () => {
+    it('4/4 → 1（全音符）', () => {
+        expect(measureCapacity(measure([]))).toBe(1);
+    });
+
+    it('3/4 与 6/8 → 0.75', () => {
+        expect(measureCapacity(measure([], 3, 4))).toBe(0.75);
+        expect(measureCapacity(measure([], 6, 8))).toBe(0.75);
     });
 });
 
