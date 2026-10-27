@@ -34,6 +34,7 @@
                 </select>
                 <span class="toolbar-sep"></span>
                 <button id="aiImprovBtn" title="AI 即兴生成" class="btn btn-primary">🤖 AI 即兴</button>
+                <button id="localImprovTopBtn" title="本地即兴生成（离线）" class="btn">🎸 本地即兴</button>
                 <button id="clearBtn" title="清空乐谱" class="btn-ghost">🗑 清空</button>
             </div>
 
@@ -224,6 +225,36 @@
                     </div>
                 </div>
                 </div>
+                </div>
+            </details>
+
+            <!-- 折叠面板：本地即兴（规则引擎 + 把位 DP + 风格化，无网络） -->
+            <details class="collapse-section" id="localImprovPanel" open>
+                <summary>🎸 本地即兴生成</summary>
+                <div class="collapse-content">
+                    <div class="collapse-row">
+                        <div class="input-group" style="flex:1;">
+                            <label>小节数</label>
+                            <select id="localNumMeasures" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 从 LOCAL_IMPROV_CONFIG 填充 --></select>
+                        </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>风格</label>
+                            <select id="localStyle" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
+                        </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>音阶类型</label>
+                            <select id="localScaleType" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
+                        </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>音符密度</label>
+                            <select id="localDensity" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
+                        </div>
+                    </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                        使用当前乐谱的调性、拍号与调弦；乐谱为空时回落到默认配置。
+                    </div>
+                    <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;">🎸 生成即兴谱</button>
+                    <div id="localImprovStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
                 </div>
             </details>
 
