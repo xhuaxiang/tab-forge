@@ -6,8 +6,9 @@
  */
 
 import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
-import { locateSlotAt, measureTotalBeats, canAddToMeasure, createEmptyMeasure, parseTimeSignature } from '../utils/measureUtils.ts';
+import { locateSlotAt, measureTotalBeats, measureCapacity, canAddToMeasure, createEmptyMeasure, parseTimeSignature } from '../utils/measureUtils.ts';
 import { applyNoteChange, muteNoteGroup } from '../utils/measureEdit.ts';
+import { nextChordGroupId, validateNoteGroup } from '../utils/noteGroup.ts';
 import { SCORE_DEFAULTS } from '../config.ts';
 
 export const scoreStore = {
@@ -143,6 +144,21 @@ export const scoreStore = {
     },
 
     /**
+     * 批量添加同一拍位的多个音符（多弦录入/和弦）。
+     *
+     * 与逐条 addNote 的区别：只触发一次渲染。与 insertNotesAt 共用
+     * validateNoteGroup（非空 / 弦号齐全 / 同弦不重复），非法整组不写。
+     */
+    addNotes(notes: Note[]): { ok: boolean; reason?: string } {
+        const error = validateNoteGroup(notes);
+        if (error) return { ok: false, reason: error };
+        const measure = this.getActiveMeasure();
+        measure.notes.push(...notes);
+        this._notify();
+        return { ok: true };
+    },
+
+    /**
      * 用拍平音符重建整谱（AI 生成 / Prompt 调试结果导入）。
      * 按 chordGroup 分组成拍位，按拍号容量填满切小节，末尾补足到 minMeasures 小节。
      * @returns 实际写入的音符数
@@ -207,41 +223,58 @@ export const scoreStore = {
 
     /** 在指定小节、指定拍偏移处插入音符（供 alphaTab 点击编辑） */
     insertNoteAt(measureIndex: number, beatOffset: number, note: Note): { ok: boolean; reason?: string } {
+        return this.insertNotesAt(measureIndex, beatOffset, [note]);
+    },
+
+    /**
+     * 在指定小节、指定拍偏移处插入同一拍位的多个音符。
+     *
+     * 原子操作：先完成全部校验再写入，任一根弦冲突/容量不足则整组不写。
+     * 目标拍是休止符 → 整组替换；已有音符 → 合并成同一 chordGroup（时值对齐原拍）。
+     */
+    insertNotesAt(measureIndex: number, beatOffset: number, notes: Note[]): { ok: boolean; reason?: string } {
+        const error = validateNoteGroup(notes);
+        if (error) return { ok: false, reason: error };
         const measure = this.score.measures[measureIndex];
         if (!measure) return { ok: false, reason: '小节不存在' };
 
+        const all = measure.notes;
         const loc = locateSlotAt(measure, beatOffset);
-        const notes = measure.notes;
 
-        // 目标 slot 是休止 → 替换（「空白拍」场景）
-        if ((loc.kind === 'slot' || loc.kind === 'inside') && loc.slot[0].isRest) {
-            const first = loc.slot[0];
-            const replaceIndex = loc.kind === 'slot' ? loc.index : loc.afterIndex - 1;
-            const cap = measure.timeSignatureNumerator * (1 / measure.timeSignatureDenominator);
-            const total = measureTotalBeats(measure);
-            if (total - first.duration + note.duration > cap + 0.001) {
-                return { ok: false, reason: '时值超出小节容量' };
+        // 目标拍是休止 → 整组替换（「空白拍」场景）
+        if (loc.kind === 'slot' || loc.kind === 'inside') {
+            const slot = loc.slot;
+            if (slot[0].isRest) {
+                const first = slot[0];
+                const replaceIndex = loc.kind === 'slot' ? loc.index : loc.afterIndex - 1;
+                const cap = measureCapacity(measure);
+                const total = measureTotalBeats(measure);
+                if (total - first.duration + notes[0].duration > cap + 0.001) {
+                    return { ok: false, reason: '时值超出小节容量' };
+                }
+                const group = notes.length > 1 ? nextChordGroupId(this.score.measures) : undefined;
+                all.splice(replaceIndex, 1, ...normalizeGroup(notes, group));
+                this._notify();
+                return { ok: true };
             }
-            notes.splice(replaceIndex, 1, note);
+
+            // 已有音符 → 合并进该 slot（单音变和弦 / 和弦追加）
+            if (notes.some(n => slot.some(s => s.string === n.string))) {
+                return { ok: false, reason: '该弦已有音符' };
+            }
+            const group = slot[0].chordGroup ?? nextChordGroupId(this.score.measures);
+            for (const s of slot) s.chordGroup = group;
+            const at = loc.kind === 'slot' ? loc.index + slot.length : loc.afterIndex;
+            const inserted = normalizeGroup(notes, group, slot[0].duration).map(withoutGroupMeta);
+            all.splice(at, 0, ...inserted);
             this._notify();
             return { ok: true };
         }
 
-        // 目标 slot 是音符 → 合并进该 slot（单音变和弦 / 和弦追加）
-        if (loc.kind === 'slot') {
-            const r = appendToSlot(measure, loc.index + loc.slot.length, loc.slot, note);
-            if (r.ok) this._notify();
-            return r;
-        }
-        if (loc.kind === 'inside') {
-            const r = appendToSlot(measure, loc.afterIndex, loc.slot, note);
-            if (r.ok) this._notify();
-            return r;
-        }
-
         // 超出所有内容（空小节隐式全音符休止 / 尾部）
-        if (!canAddToMeasure(measure, note.duration)) return { ok: false, reason: '节拍已满' };
-        notes.push(note);
+        if (!canAddToMeasure(measure, notes[0].duration)) return { ok: false, reason: '节拍已满' };
+        const group = notes.length > 1 ? nextChordGroupId(this.score.measures) : undefined;
+        all.push(...normalizeGroup(notes, group));
         this._notify();
         return { ok: true };
     },
@@ -305,18 +338,24 @@ export const scoreStore = {
     },
 };
 
-/** 把音符合并进已有音符 slot（单音→和弦或和弦追加） */
-function appendToSlot(measure: Measure, afterIndex: number, slot: Note[], note: Note): { ok: boolean; reason?: string } {
-    if (slot.some(n => n.string === note.string)) return { ok: false, reason: '该弦已有音符' };
-    if (slot[0].chordGroup !== undefined) {
-        note.chordGroup = slot[0].chordGroup;
-    } else {
-        const g = Date.now();
-        for (const n of slot) n.chordGroup = g;
-        note.chordGroup = g;
-    }
-    // 和弦内音符共享 slot 时值
-    note.duration = slot[0].duration;
-    measure.notes.splice(afterIndex, 0, note);
-    return { ok: true };
+/**
+ * 统一组内时值与 chordGroup，返回副本（不修改入参）。
+ * groupId 为 undefined 时清除分组标记（单弦不应带 chordGroup）。
+ */
+function normalizeGroup(notes: Note[], groupId: number | undefined, duration = notes[0].duration): Note[] {
+    return notes.map(n => {
+        const copy: Note = { ...n, duration };
+        if (groupId === undefined) delete copy.chordGroup;
+        else copy.chordGroup = groupId;
+        return copy;
+    });
+}
+
+/** 和弦内新成员不携带组首装饰字段（chordName/arpeggio/strum 只属于原组首） */
+function withoutGroupMeta(note: Note): Note {
+    const copy = { ...note };
+    delete copy.chordName;
+    delete copy.arpeggio;
+    delete copy.strum;
+    return copy;
 }

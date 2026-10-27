@@ -7,11 +7,12 @@ import { NOTE_ARTICULATIONS } from '../../core/types/index.ts';
 import { $, setStatus } from '../dom.ts';
 import { canAddToMeasure } from '../../core/utils/measureUtils.ts';
 import { durationName } from '../../core/utils/duration.ts';
+import { buildNoteGroup, nextChordGroupId, type NoteGroupMember } from '../../core/utils/noteGroup.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { BEND_AMOUNT_LABELS, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
-import { buildNoteFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
+import { buildNotesFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
 
 export function initNoteInput(): void {
     // ============================================================
@@ -94,19 +95,25 @@ export function initNoteInput(): void {
             setStatus(`节拍已满（${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}）`, 'error');
             return;
         }
-        const built = buildNoteFromForm(true);
-        if (!built.note) {
+        const built = buildNotesFromForm(true);
+        if (built.notes.length === 0) {
             setStatus(built.error ?? '表单值无效', 'error');
             return;
         }
-        const note = built.note;
-        const stringNum = note.string ?? 1;
-        const fret = note.fret ?? 0;
+        const notes = built.notes;
+        const first = notes[0];
+        const stringList = notes.map(n => n.string ?? 1).join(',');
+        const fret = first.fret ?? 0;
         const isTie = isTieActive();
-        const tech = note.technique;
+        const tech = first.technique;
         const hasTech = tech !== undefined;
 
-        scoreStore.addNote(note);
+        // 多弦整组一次写入，只触发一次渲染
+        const added = scoreStore.addNotes(notes);
+        if (!added.ok) {
+            setStatus(added.reason ?? '添加失败', 'error');
+            return;
+        }
 
         let suffix = '';
         if (isTie) suffix = ' (延音)';
@@ -116,15 +123,15 @@ export function initNoteInput(): void {
             if (tech === 'bend') {
                 suffix += ` ${BEND_AMOUNT_LABELS[uiStore.bendAmount] || uiStore.bendAmount}`;
                 if (uiStore.bendRelease) suffix += ' 释放';
-            } else if (note.targetFret !== undefined) {
-                suffix += ` →${note.targetFret}品`;
+            } else if (first.targetFret !== undefined) {
+                suffix += ` →${first.targetFret}品`;
             }
         }
 
-        const artLabels = formatArticulationSuffix(note);
+        const artLabels = formatArticulationSuffix(first);
         if (artLabels) suffix += ` (${artLabels})`;
 
-        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · 第${stringNum}弦 ${fret}品 ${durationName(note.duration)}${suffix}`, 'success');
+        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · 第${stringList}弦 ${fret}品 ${durationName(first.duration)}${suffix}`, 'success');
     });
 
     // --- 休止符 ---
@@ -227,7 +234,7 @@ export function initNoteInput(): void {
         const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
         if (duration <= 0) { setStatus('无效时值', 'error'); return; }
 
-        const active: { string: number; fret: number }[] = [];
+        const active: NoteGroupMember[] = [];
         for (let s = 0; s < 6; s++) {
             if (uiStore.currentChordFrets[s] >= 0 && uiStore.currentChordFrets[s] <= 5) {
                 active.push({ string: s + 1, fret: uiStore.currentChordFrets[s] });
@@ -241,30 +248,30 @@ export function initNoteInput(): void {
             return;
         }
 
-        // 生成唯一和弦分组ID
-        const chordGroup = Date.now();
-
         // 匹配预设和弦名称
         const matched = CHORD_PRESETS.find(p => p.frets.every((f, i) => f === uiStore.currentChordFrets[i]));
         const chordName = matched ? matched.name : '';
+        const hadArpeggio = !!uiStore.currentArpeggio;
 
-        // 奏法开关对整个和弦生效（闷音扫弦、泛音和弦等）
-        const articulationFields = getArticulationFields();
-
-        // 按顺序添加和弦中的每个音符，共享 chordGroup
-        active.forEach((n, i) => {
-            const note: Note = {
-                string: n.string,
-                fret: n.fret,
-                duration,
-                chordGroup,
-                chordName: i === 0 ? chordName : undefined,
-                arpeggio: i === 0 ? (uiStore.currentArpeggio || undefined) : undefined,
-                strum: i === 0 ? (uiStore.currentStrum || undefined) : undefined,
-                ...articulationFields,
-            };
-            scoreStore.addNote(note);
-        });
+        // 单弦不写 chordGroup；多弦整组共享一个 id
+        const chordGroup = active.length > 1
+            ? nextChordGroupId(scoreStore.score.measures)
+            : undefined;
+        const notes = buildNoteGroup(
+            active,
+            { duration, ...getArticulationFields() }, // 奏法对整个和弦生效（闷音扫弦、泛音和弦等）
+            {
+                chordName: chordName || undefined,
+                arpeggio: uiStore.currentArpeggio || undefined,
+                strum: uiStore.currentStrum || undefined,
+            },
+            chordGroup,
+        );
+        const added = scoreStore.addNotes(notes); // 整组一次写入，只触发一次渲染
+        if (!added.ok) {
+            setStatus(added.reason ?? '添加和弦失败', 'error');
+            return;
+        }
 
         uiStore.resetChordFrets();
         uiStore.resetArpeggio();
@@ -276,6 +283,6 @@ export function initNoteInput(): void {
         updateArpeggioButton();
         updateStrumButton();
 
-        setStatus(`已添加和弦: 小节${scoreStore.activeMeasureIndex() + 1} ${chordName ? '(' + chordName + ') ' : ''}${active.length}弦${uiStore.currentArpeggio ? ' 琶音' : ''}`, 'success');
+        setStatus(`已添加和弦: 小节${scoreStore.activeMeasureIndex() + 1} ${chordName ? '(' + chordName + ') ' : ''}${active.length}弦${hadArpeggio ? ' 琶音' : ''}`, 'success');
     });
 }

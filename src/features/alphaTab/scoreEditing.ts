@@ -14,11 +14,12 @@ import type { Note, NoteDuration, NoteArticulation, AppHarmonic } from '../../co
 import { NOTE_ARTICULATIONS } from '../../core/types/index.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
-import { $, setStatus, getSearchSelectValue } from '../../app/dom.ts';
+import { $, setStatus, getSearchSelectValue, getSearchSelectValues, writeSearchSelectValues, syncSearchSelectLimit } from '../../app/dom.ts';
 import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, detectArticulations, normalizeHarmonicFret, type DetectedArticulations } from '../../core/utils/scoreMapping.ts';
 import type { AppTechnique } from '../../core/types/index.ts';
 import { durationName } from '../../core/utils/duration.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
+import { buildNoteGroup, nextChordGroupId, type NoteGroupBase } from '../../core/utils/noteGroup.ts';
 
 export type { AppTechnique } from '../../core/types/index.ts';
 
@@ -31,16 +32,32 @@ export interface ScoreClickHit {
 // 表单辅助（eventHandlers 复用）
 // ============================================================
 
-/** 设置 search-select 组件的选中值 */
+/** 设置 search-select 组件的选中值（多选组件会清除其余选项） */
+export function setSearchSelectValues(id: string, values: number[]): void {
+    const container = document.getElementById(id);
+    if (container) writeSearchSelectValues(container, values);
+}
+
 export function setSearchSelectValue(id: string, value: number): void {
-    const container = document.getElementById(id) as HTMLElement | null;
+    setSearchSelectValues(id, [value]);
+}
+
+/**
+ * 约束弦号选择数量：H/P/S 是双音过渡技法，一次只能落在一根弦上（limit=1）；
+ * 其他技法/普通音符传 null 解除限制。超限时按弦号保留前 N 根。
+ */
+function setStringSelectionLimit(limit: number | null): void {
+    const container = document.getElementById('stringSelect');
     if (!container) return;
-    const val = String(value);
-    container.dataset.value = val;
-    const tv = container.querySelector('.trigger-value');
-    if (tv) tv.textContent = val;
-    container.querySelectorAll<HTMLElement>('.option').forEach(o =>
-        o.classList.toggle('selected', o.dataset.value === val));
+    if (limit === null) delete container.dataset.maxSelected;
+    else container.dataset.maxSelected = String(limit);
+
+    const selected = getSearchSelectValues('stringSelect');
+    if (limit !== null && selected.length > limit) {
+        setSearchSelectValues('stringSelect', selected.slice(0, limit));
+    } else {
+        syncSearchSelectLimit(container);
+    }
 }
 
 /** 设置时值下拉 */
@@ -55,6 +72,10 @@ export function updateTechniqueUI(tech: AppTechnique): void {
     const btn = document.querySelector(`.tech-btn[data-tech="${tech}"]`);
     if (btn) btn.classList.add('active');
     uiStore.setTechnique(tech);
+
+    // H/P/S 只能作用在一根弦上：切换技法时同步限制弦号多选
+    const singleStringTech = tech === 'hammerOn' || tech === 'pullOff' || tech === 'slide';
+    setStringSelectionLimit(singleStringTech ? 1 : null);
 
     const tfRow = (document.getElementById('targetFret') as HTMLElement | null)?.closest('.input-group') as HTMLElement | null;
     const bendOpts = document.getElementById('bendOptions');
@@ -182,33 +203,37 @@ export function getTargetFret(): number | undefined {
     return (isNaN(v) || v < 0 || v > 24) ? undefined : v;
 }
 
-/** 从编辑表单构建 Note（不执行插入/渲染），供 addNoteBtn 与点击插入共用 */
-export function buildNoteFromForm(prevFretCheck = true): { note: Note | null; error?: string } {
-    const stringNum = getSearchSelectValue('stringSelect');
+/** 从编辑表单构建同一拍位的 Note 数组（不执行插入/渲染），供添加与点击插入共用 */
+export function buildNotesFromForm(prevFretCheck = true): { notes: Note[]; error?: string } {
+    const strings = getSearchSelectValues('stringSelect');
     const fret = getSearchSelectValue('fretSelect');
     const durSel = $('inputDuration') as HTMLSelectElement | null;
     const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
-    if (stringNum < 1 || stringNum > 6) return { note: null, error: '弦号 1-6' };
-    if (fret < 0 || fret > 24) return { note: null, error: '品位 0-24' };
-    if (duration <= 0) return { note: null, error: '无效时值' };
+    if (strings.length === 0) return { notes: [], error: '请选择至少一根弦' };
+    if (strings.some(s => s < 1 || s > 6)) return { notes: [], error: '弦号 1-6' };
+    if (fret < 0 || fret > 24) return { notes: [], error: '品位 0-24' };
+    if (duration <= 0) return { notes: [], error: '无效时值' };
 
     const isTie = isTieActive();
     const tech = uiStore.currentTechnique;
     const hasTech = tech !== 'none';
     const targetFret = hasTech ? getTargetFret() : undefined;
 
+    // 防御：H/P/S 是双音过渡技法，一对弦只能有一个目标弦
+    if ((tech === 'hammerOn' || tech === 'pullOff' || tech === 'slide') && strings.length > 1) {
+        return { notes: [], error: '击/勾/滑弦只能选一根弦' };
+    }
+
     if (prevFretCheck && !isTie && hasTech && tech !== 'bend' && tech !== 'vibrato') {
         const measure = scoreStore.getActiveMeasure();
         const prev = measure.notes[measure.notes.length - 1];
         const prevFret = prev?.targetFret || prev?.fret;
-        if (targetFret === prevFret) return { note: null, error: '请选择目标品' };
+        if (targetFret === prevFret) return { notes: [], error: '请选择目标品' };
     }
 
     // 推弦/揉弦是单音符技法，不需要 tieToNext（H/P/S 才是双音符过渡技法）
     const isSingleNoteTech = tech === 'bend' || tech === 'vibrato';
-    const note: Note = {
-        string: stringNum,
-        fret,
+    const base: NoteGroupBase = {
         duration,
         tieToNext: isSingleNoteTech ? isTie : (isTie || hasTech),
         technique: hasTech ? tech : undefined,
@@ -217,7 +242,12 @@ export function buildNoteFromForm(prevFretCheck = true): { note: Note | null; er
         bendRelease: tech === 'bend' ? uiStore.bendRelease : undefined,
         ...getArticulationFields(),
     };
-    return { note };
+
+    const members = strings.map(s => ({ string: s, fret }));
+    const chordGroup = members.length > 1
+        ? nextChordGroupId(scoreStore.score.measures)
+        : undefined;
+    return { notes: buildNoteGroup(members, base, {}, chordGroup) };
 }
 
 // ============================================================
@@ -251,18 +281,21 @@ export function applyEditTarget(): void {
         setStatus('请先在谱面点击一个已有音符', 'info');
         return;
     }
-    const built = buildNoteFromForm(false);
-    if (!built.note) {
+    const built = buildNotesFromForm(false);
+    if (built.notes.length === 0) {
         setStatus(built.error ?? '表单值无效', 'error');
         return;
     }
-    const r = scoreStore.updateNoteAt(t.measureIndex, t.noteIndex, built.note);
+    // 原位编辑只改被点中的那根弦：多选时取目标弦，未包含则沿用表单值强制落到目标弦
+    const note = built.notes.find(n => n.string === t.string)
+        ?? { ...built.notes[0], string: t.string };
+    const r = scoreStore.updateNoteAt(t.measureIndex, t.noteIndex, note);
     if (!r.ok) {
         setStatus(r.reason ?? '修改失败', 'error');
         return;
     }
     clearEditTarget();
-    setStatus(`已修改: 小节${t.measureIndex + 1} · 第${built.note.string}弦 ${built.note.fret}品`, 'success');
+    setStatus(`已修改: 小节${t.measureIndex + 1} · 第${note.string}弦 ${note.fret}品`, 'success');
 }
 
 /** 把编辑目标整拍（单音/和弦）静音为休止符 */
@@ -410,18 +443,19 @@ export function writeInsertTarget(): void {
         setStatus('请先在谱面点击空白拍定位插入点', 'info');
         return;
     }
-    const built = buildNoteFromForm(false);
-    if (!built.note) {
+    const built = buildNotesFromForm(false);
+    if (built.notes.length === 0) {
         setStatus(built.error ?? '表单值无效', 'error');
         return;
     }
-    const result = scoreStore.insertNoteAt(t.measureIndex, t.beatOffset, built.note); // 内部 _notify 自动渲染
+    const result = scoreStore.insertNotesAt(t.measureIndex, t.beatOffset, built.notes); // 内部 _notify 自动渲染
     if (!result.ok) {
         setStatus(result.reason ?? '写入失败', 'error');
         return;
     }
     clearInsertTarget();
-    setStatus(`已写入: 小节${t.measureIndex + 1} · 第${built.note.string}弦 ${built.note.fret}品`, 'success');
+    const stringList = built.notes.map(n => n.string ?? 1).join(',');
+    setStatus(`已写入: 小节${t.measureIndex + 1} · 第${stringList}弦 ${built.notes[0].fret}品`, 'success');
 }
 
 /** 取消插入点 */
