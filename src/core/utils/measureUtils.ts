@@ -58,9 +58,21 @@ export function measureTotalBeats(measure: Measure): number {
     return total;
 }
 
+/**
+ * 拍号字符串 → 小节容量（以全音符为 1 的拍数）。
+ *
+ * 与 `measureCapacity` 共用同一份公式；生成器在还没有 `Measure` 时用它。
+ */
+export function capacityFromTimeSignature(signature: string): number {
+    const { numerator, denominator } = parseTimeSignature(signature);
+    return numerator / denominator;
+}
+
 /** 小节容量（以全音符为 1 的拍数），如 4/4 → 1、6/8 → 0.75 */
 export function measureCapacity(measure: Measure): number {
-    return measure.timeSignatureNumerator / measure.timeSignatureDenominator;
+    return capacityFromTimeSignature(
+        `${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}`,
+    );
 }
 
 /**
