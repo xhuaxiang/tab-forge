@@ -23,6 +23,7 @@ export function makeOptions(
         density: overrides.density ?? defaults.density,
         timeSignature: overrides.timeSignature ?? defaults.timeSignature,
         tuning: overrides.tuning ?? { ...defaults.tuning },
+        progression: overrides.progression ?? [1],
         seed: overrides.seed ?? defaults.seed,
     };
 }

@@ -20,7 +20,11 @@ import {
     SCALE_TYPES,
 } from '../../core/types/improv.ts';
 import type { ImprovSelectOption } from '../../core/config.ts';
-import { IMPROV_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import {
+    IMPROV_CONFIG,
+    LOCAL_IMPROV_CONFIG,
+    LOCAL_PROGRESSIONS,
+} from '../../core/config.ts';
 import {
     generateLocalImprovisation,
     parseImprovDescription,
@@ -71,6 +75,14 @@ function initLocalImprovOptions(): void {
         labelOptions(LOCAL_DENSITIES, IMPROV_CONFIG.densities),
         config.defaults.density,
     );
+    fillSelectOptions(
+        'localProgression',
+        LOCAL_PROGRESSIONS.map(option => ({
+            value: option.value,
+            label: option.label,
+        })),
+        LOCAL_PROGRESSIONS[0].value,
+    );
 }
 
 function readLocalDescription(): string {
@@ -84,6 +96,14 @@ function setSelectValue(id: string, value: string): void {
     }
 }
 
+function matchProgression(
+    steps: ResolvedImprovOptions['progression'],
+): (typeof LOCAL_PROGRESSIONS)[number] | undefined {
+    return LOCAL_PROGRESSIONS.find(option =>
+        option.steps.length === steps.length
+        && option.steps.every((step, index) => step === steps[index]));
+}
+
 /** 把最终选项回写到控件，避免描述覆盖后下拉框还停在旧值 */
 function syncLocalControls(options: ResolvedImprovOptions): void {
     setSelectValue('localNumMeasures', String(options.numMeasures));
@@ -92,6 +112,9 @@ function syncLocalControls(options: ResolvedImprovOptions): void {
     setSelectValue('localDensity', options.density);
     setSelectValue('keySelect', options.key);
     setSelectValue('timeSigSelect', options.timeSignature);
+
+    const progressionValue = matchProgression(options.progression)?.value;
+    if (progressionValue) setSelectValue('localProgression', progressionValue);
 }
 
 function readLocalOptions(
@@ -101,6 +124,8 @@ function readLocalOptions(
     const numValue = (document.getElementById('localNumMeasures') as HTMLSelectElement | null)?.value;
     const parsed = numValue === undefined || numValue === '' ? NaN : Number(numValue);
     const config = LOCAL_IMPROV_CONFIG;
+    const progressionValue = (document.getElementById('localProgression') as HTMLSelectElement | null)?.value;
+    const progression = LOCAL_PROGRESSIONS.find(option => option.value === progressionValue)?.steps;
 
     return {
         numMeasures: Number.isFinite(parsed) ? parsed : undefined,
@@ -116,6 +141,7 @@ function readLocalOptions(
         ),
         timeSignature: scoreStore.score.timeSignature || undefined,
         tuning: { ...scoreStore.score.tuning },
+        progression,
         // 描述里写到的字段优先；没写到的沿用上面的控件/乐谱值。
         ...described,
         seed,
@@ -159,9 +185,11 @@ function handleLocalGenerate(): void {
             : Object.keys(described).length > 0
                 ? ' · 描述已套用'
                 : ' · 描述未命中可识别项';
+        const progressionLabel = matchProgression(result.options.progression)?.label;
         const summary = `✅ ${sounding} 个音符 / ${result.options.numMeasures} 小节 · `
             + `${result.options.key} ${result.options.scaleType} · `
             + `${result.options.style} · ${result.options.timeSignature} · seed ${seed}`
+            + (progressionLabel ? ` · 和弦 ${progressionLabel}` : '')
             + descriptionNote;
         setStatus(`✅ 本地即兴已生成（${result.options.style}）`, 'success');
         if (statusEl) statusEl.textContent = summary;

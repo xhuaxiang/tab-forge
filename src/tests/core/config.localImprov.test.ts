@@ -6,7 +6,11 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { IMPROV_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import {
+    IMPROV_CONFIG,
+    LOCAL_IMPROV_CONFIG,
+    LOCAL_PROGRESSIONS,
+} from '../../core/config.ts';
 import {
     LOCAL_DENSITIES,
     LOCAL_STYLES,
@@ -14,6 +18,10 @@ import {
     SCALE_TYPES,
 } from '../../core/types/improv.ts';
 import { NOTE_DURATIONS, STANDARD_TUNING } from '../../core/types/index.ts';
+import {
+    isProgressionStep,
+    normalizeProgression,
+} from '../../core/utils/improv/harmony.ts';
 import { capacityFromTimeSignature } from '../../core/utils/measureUtils.ts';
 
 describe('LOCAL_IMPROV_CONFIG', () => {
@@ -92,6 +100,28 @@ describe('LOCAL_IMPROV_CONFIG', () => {
             fretMin: 0,
             fretMax: 24,
             palmMuteStrings: [4, 6],
+        });
+    });
+});
+
+describe('LOCAL_PROGRESSIONS', () => {
+    it('value 唯一，且 steps 都是合法进行', () => {
+        const values = LOCAL_PROGRESSIONS.map(option => option.value);
+        expect(new Set(values).size).toBe(values.length);
+
+        for (const option of LOCAL_PROGRESSIONS) {
+            expect(option.steps.length).toBeGreaterThan(0);
+            expect(option.steps.every(isProgressionStep)).toBe(true);
+            expect(normalizeProgression(option.steps)).toEqual(option.steps);
+        }
+    });
+
+    it('包含 I 级兜底与 ii-V-I', () => {
+        expect(LOCAL_PROGRESSIONS[0].steps).toEqual([1]);
+        expect(LOCAL_PROGRESSIONS).toContainEqual({
+            value: 'ii-V-I',
+            label: 'ii–V–I',
+            steps: [2, 5, 1],
         });
     });
 });

@@ -131,6 +131,19 @@ function classifyRole(
     return durationUnits <= toUnits(0.125) ? 'passing' : 'weak';
 }
 
+/** 对外便利版：offset/duration 以全音符为单位 */
+export function classifySlotRole(
+    offset: number,
+    duration: NoteDuration,
+    timeSignature: string,
+): SlotRole {
+    return classifyRole(
+        Math.round(offset * UNITS_PER_WHOLE),
+        toUnits(duration),
+        timeSignature,
+    );
+}
+
 /**
  * 保证拍位数不少于 minNotes。
  *

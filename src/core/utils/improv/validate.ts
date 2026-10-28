@@ -8,13 +8,15 @@
 import type { Note } from '../../types/index.ts';
 import { NOTE_DURATIONS } from '../../types/index.ts';
 import type {
+    HarmonyMeasure,
     PlayabilityRules,
     ResolvedImprovOptions,
     RhythmMeasure,
 } from '../../types/improv.ts';
 import { BEND_AMOUNT_LABELS } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
-import { fretToMidi, isInScale } from './pitch.ts';
+import { fretToMidi, isInScale, pitchClassOf } from './pitch.ts';
+import { classifySlotRole } from './rhythm.ts';
 
 const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 const VALID_BEND_AMOUNTS = new Set<number>(
@@ -89,6 +91,7 @@ function validateNoteFields(
     options: ResolvedImprovOptions,
     playability: PlayabilityRules,
     index: number,
+    allowedPitchClasses?: ReadonlySet<number>,
 ): string[] {
     const errors: string[] = [];
     const prefix = `第 ${index + 1} 个音符`;
@@ -127,8 +130,14 @@ function validateNoteFields(
         && Number.isInteger(note.fret)) {
         try {
             const midi = fretToMidi(options.tuning, note.string, note.fret);
-            if (!isInScale(midi, options.tonicPitchClass, options.scaleType)) {
-                errors.push(`${prefix}不在调内: MIDI ${midi}`);
+            const pitchClass = pitchClassOf(midi);
+            const inAllowedPool = allowedPitchClasses
+                ? allowedPitchClasses.has(pitchClass)
+                : isInScale(midi, options.tonicPitchClass, options.scaleType);
+            if (!inAllowedPool) {
+                errors.push(allowedPitchClasses
+                    ? `${prefix}不在当前和声可用音池: MIDI ${midi}`
+                    : `${prefix}不在调内: MIDI ${midi}`);
             }
         } catch (error) {
             errors.push(`${prefix}无法换算音高: ${error instanceof Error ? error.message : String(error)}`);
@@ -201,10 +210,13 @@ function validateNoteFields(
 
 /**
  * 校验最终 Note[]：
- * - 每个音合法、调内、可演奏；
+ * - 每个音合法、调内或属于当前小节和声音池、可演奏；
+ * - 强拍落在当前和弦音，长音避开 avoid note；
  * - 技法/奏法在 v1 白名单内；
  * - 拍平顺序不会让 loadNotes 提前/延后切小节；
  * - 相邻音的跳进不超过可演奏上限。
+ *
+ * @param harmony 可选的每小节和声计划；不传时退回纯调内校验。
  */
 export function validateNotes(
     notes: Note[],
@@ -215,6 +227,7 @@ export function validateNotes(
      * playability.maxLeapSemitones，因为主音不一定落在风格音区内。
      */
     middleMaxLeapSemitones: number = playability.maxLeapSemitones,
+    harmony?: readonly HarmonyMeasure[],
 ): string[] {
     if (notes.length === 0) return ['没有音符'];
 
@@ -237,7 +250,25 @@ export function validateNotes(
     let previousMidi: number | null = null;
 
     notes.forEach((note, index) => {
-        errors.push(...validateNoteFields(note, options, playability, index));
+        const startsAt = total;
+        const measureIndex = Number.isFinite(startsAt) && startsAt >= 0
+            ? Math.floor(startsAt / capacity + 1e-9)
+            : 0;
+        const segment = harmony?.[measureIndex]?.segments[0];
+        const allowedPitchClasses = segment
+            ? new Set(segment.pool.availablePitchClasses)
+            : undefined;
+        const role = segment && Number.isFinite(note.duration) && note.duration > 0
+            ? classifySlotRole(
+                startsAt - measureIndex * capacity,
+                note.duration,
+                options.timeSignature,
+            )
+            : undefined;
+
+        errors.push(...validateNoteFields(
+            note, options, playability, index, allowedPitchClasses,
+        ));
 
         // 非有限/非正时值只报告非法，不能参与累加——否则 Infinity 会让
         // 下面的边界推进永远为真。
@@ -254,6 +285,20 @@ export function validateNotes(
         if (!note.isRest && note.string !== undefined && note.fret !== undefined) {
             try {
                 const midi = fretToMidi(options.tuning, note.string, note.fret);
+                const pitchClass = pitchClassOf(midi);
+
+                // 最后一个音是全曲收束，允许落在主音而不是当前和弦音。
+                if (segment && role && index !== lastSoundingIndex) {
+                    if (role === 'strong'
+                        && !segment.pool.chordPitchClasses.includes(pitchClass)) {
+                        errors.push(`第 ${index + 1} 个音符在强拍但不在当前和弦音`);
+                    } else if (role !== 'passing'
+                        && segment.pool.avoidPitchClasses.includes(pitchClass)
+                        && !segment.pool.chordPitchClasses.includes(pitchClass)) {
+                        errors.push(`第 ${index + 1} 个音符是长音 avoid note`);
+                    }
+                }
+
                 const leapLimit = index === lastSoundingIndex
                     ? playability.maxLeapSemitones
                     : middleLimit;

@@ -1,7 +1,7 @@
 /**
  * generate — 本地即兴的编排入口。
  *
- * 链路固定为：补默认值 → 节奏规则 → 旋律规则 → 把位 DP → 演奏层 → 校验。
+ * 链路固定为：补默认值 → 和声计划 → 节奏规则 → 旋律规则 → 把位 DP → 演奏层 → 校验。
  * 全程无网络、无 DOM；同一组选项与 seed 必然得到同一份谱面。
  */
 
@@ -20,6 +20,7 @@ import {
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { decorateSlots } from './decorate.ts';
+import { buildHarmonyPlan, normalizeProgression } from './harmony.ts';
 import { buildSkeleton } from './melody.ts';
 import { parseKey } from './pitch.ts';
 import { choosePositions } from './positioning.ts';
@@ -86,6 +87,7 @@ export function resolveLocalImprovOptions(
         tuning: isTuning(input.tuning)
             ? { ...input.tuning }
             : { ...config.defaults.tuning },
+        progression: normalizeProgression(input.progression),
         seed,
     };
 }
@@ -102,6 +104,7 @@ export function generateLocalImprovisation(
     const options = resolveLocalImprovOptions(input, config);
     const density = config.densityProfiles[options.density];
     const style = config.styleProfiles[options.style];
+    const harmony = buildHarmonyPlan(options);
 
     const plan = buildRhythmPlan(
         options, density, style, createRng(options.seed),
@@ -115,7 +118,7 @@ export function generateLocalImprovisation(
 
     const skeleton = buildSkeleton(
         plan, options, style, config.playability,
-        createRng(options.seed + 1),
+        createRng(options.seed + 1), harmony,
     );
     const positioned = choosePositions(
         skeleton, options, config.playability, style,
@@ -128,10 +131,11 @@ export function generateLocalImprovisation(
     const noteErrors = validateNotes(
         notes, options, config.playability,
         Math.min(style.maxLeapSemitones, config.playability.maxLeapSemitones),
+        harmony,
     );
     if (noteErrors.length > 0) {
         throw new Error(`本地即兴结果未通过校验:\n${noteErrors.join('\n')}`);
     }
 
-    return { notes, options };
+    return { notes, options, harmony };
 }

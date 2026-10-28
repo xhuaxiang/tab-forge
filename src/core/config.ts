@@ -5,7 +5,10 @@
  */
 
 import { STANDARD_TUNING, type Tuning } from './types/index.ts';
-import type { LocalImprovConfig } from './types/improv.ts';
+import type {
+    LocalImprovConfig,
+    ProgressionStep,
+} from './types/improv.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {
@@ -267,6 +270,21 @@ export function getHint(options: ImprovSelectOption[], value: string): string | 
 // ============================================================
 // 本地即兴生成配置
 // ============================================================
+
+/** 本地即兴面板可选的和弦进行（级数以当前调性展开） */
+export interface LocalProgressionOption {
+    value: string;
+    label: string;
+    steps: readonly ProgressionStep[];
+}
+
+export const LOCAL_PROGRESSIONS: readonly LocalProgressionOption[] = [
+    { value: 'I', label: '无（I 级）', steps: [1] },
+    { value: 'I-IV-V-I', label: 'I–IV–V–I', steps: [1, 4, 5, 1] },
+    { value: 'ii-V-I', label: 'ii–V–I', steps: [2, 5, 1] },
+    { value: 'I-V-vi-IV', label: 'I–V–vi–IV', steps: [1, 5, 6, 4] },
+    { value: 'I-vi-IV-V', label: 'I–vi–IV–V', steps: [1, 6, 4, 5] },
+];
 
 /**
  * 本地即兴生成参数。

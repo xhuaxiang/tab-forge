@@ -6,15 +6,18 @@
  */
 
 import type {
+    HarmonyMeasure,
     PlayabilityRules,
     ResolvedImprovOptions,
     RhythmMeasure,
     SkeletonSlot,
     StyleProfile,
 } from '../../types/improv.ts';
+import { buildHarmonyPlan } from './harmony.ts';
 import { pickWeighted } from './random.ts';
 import {
     nearestMidiWithPitchClasses,
+    pitchClassOf,
     playableMidiRange,
     scaleMidisInRange,
     tonicTriadPitchClasses,
@@ -108,21 +111,21 @@ function buildMotifSteps(length: number, rng: () => number): number[] {
 }
 
 /**
- * 把候选音吸到主三和弦上，且不超出当前音的单步音程。
+ * 把候选音吸到目标和弦音上，且不超出当前音的单步音程。
  *
  * 搜索窗口围绕 current，而不是围绕候选音，保证吸完之后仍然“弹得到”。
  */
-function snapToTriad(
+function snapToPitchClasses(
     candidate: number,
     current: number,
-    triad: readonly number[],
+    pitchClasses: readonly number[],
     low: number,
     high: number,
     maxLeap: number,
 ): number {
     const min = Math.max(low, current - maxLeap);
     const max = Math.min(high, current + maxLeap);
-    return nearestMidiWithPitchClasses(candidate, triad, min, max) ?? candidate;
+    return nearestMidiWithPitchClasses(candidate, pitchClasses, min, max) ?? candidate;
 }
 
 /**
@@ -160,10 +163,13 @@ function resolveToTonic(
  * 生成旋律骨架。
  *
  * 约束：
- * - 所有发音都在调内；
- * - 强拍与每小节最后一个音落在主三和弦；
+ * - 所有发音在调内，或属于当前小节和弦音；
+ * - 强拍、每小节第一个音与最后一个音落在当前小节和弦音；
+ * - 非经过音（时值 > 1/8）避开 avoid note；短经过音仍可使用；
  * - 全曲最后一个音落在主音；
  * - 相邻音不超过 min(style.maxLeap, playability.maxLeap)。
+ *
+ * @param harmony 可选的每小节和声计划；不传时按 `options.progression` 生成。
  */
 export function buildSkeleton(
     plan: RhythmMeasure[],
@@ -171,9 +177,13 @@ export function buildSkeleton(
     style: StyleProfile,
     playability: PlayabilityRules,
     rng: () => number,
+    harmony?: readonly HarmonyMeasure[],
 ): SkeletonSlot[] {
     const register = buildRegister(options, style, playability);
-    const triad = tonicTriadPitchClasses(options.tonicPitchClass, options.scaleType);
+    const harmonyPlan = harmony ?? buildHarmonyPlan(options);
+    const fallbackTriad = tonicTriadPitchClasses(
+        options.tonicPitchClass, options.scaleType,
+    );
     const maxLeap = Math.max(1, Math.min(style.maxLeapSemitones, playability.maxLeapSemitones));
     // 最近主音最多可能相隔 6 个半音；最终音允许放宽到可演奏性上限。
     const finalMaxLeap = Math.min(
@@ -187,6 +197,13 @@ export function buildSkeleton(
     let previousMidi: number | null = null;
 
     for (const measure of plan) {
+        const segment = harmonyPlan[measure.index]?.segments[0];
+        const chordTones = segment?.pool.chordPitchClasses ?? fallbackTriad;
+        const avoid = new Set(segment?.pool.avoidPitchClasses ?? []);
+        const nonAvoid = segment
+            ? segment.pool.availablePitchClasses.filter(pitchClass => !avoid.has(pitchClass))
+            : [];
+        const weakTargets = nonAvoid.length > 0 ? nonAvoid : chordTones;
         const soundingCount = measure.slots.filter(slot => !slot.isRest).length;
         let soundingIndex = 0;
 
@@ -211,12 +228,12 @@ export function buildSkeleton(
             let midi: number;
             if (previousMidi === null) {
                 midi = nearestMidiWithPitchClasses(
-                    register.center, triad, register.low, register.high,
+                    register.center, chordTones, register.low, register.high,
                 ) ?? register.midis[nearestIndex(register.midis, register.center)];
             } else if (isFirstOfMeasure) {
-                // 新小节从稳定音起句：贴着上一个音找主三和弦，不另起一个远把位
-                midi = snapToTriad(
-                    previousMidi, previousMidi, triad,
+                // 新小节从稳定音起句：贴着上一个音找当前和弦音，不另起一个远把位
+                midi = snapToPitchClasses(
+                    previousMidi, previousMidi, chordTones,
                     register.low, register.high, maxLeap,
                 );
             } else {
@@ -232,8 +249,16 @@ export function buildSkeleton(
                     register.playLow, register.playHigh, maxLeap, finalMaxLeap,
                 );
             } else if (slot.role === 'strong' || isLastOfMeasure) {
-                midi = snapToTriad(
-                    midi, previousMidi ?? midi, triad,
+                midi = snapToPitchClasses(
+                    midi, previousMidi ?? midi, chordTones,
+                    register.low, register.high, maxLeap,
+                );
+            } else if (slot.role !== 'passing' && avoid.has(pitchClassOf(midi))) {
+                // 弱拍长音不留在 avoid note 上；短经过音（passing）允许。
+                // 搜索窗口必须以 previousMidi 为中心：midi 可能已经离上一个音
+                // 一个 maxLeap，再围绕 midi 搜索会让最终落点离上一个音两倍超限。
+                midi = snapToPitchClasses(
+                    midi, previousMidi ?? midi, weakTargets,
                     register.low, register.high, maxLeap,
                 );
             }
