@@ -11,6 +11,7 @@ import type {
     ImprovOptions,
     LocalDensity,
     LocalStyle,
+    ResolvedImprovOptions,
     ScaleType,
 } from '../../core/types/improv.ts';
 import {
@@ -20,7 +21,10 @@ import {
 } from '../../core/types/improv.ts';
 import type { ImprovSelectOption } from '../../core/config.ts';
 import { IMPROV_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
-import { generateLocalImprovisation } from '../../core/utils/improv/index.ts';
+import {
+    generateLocalImprovisation,
+    parseImprovDescription,
+} from '../../core/utils/improv/index.ts';
 import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
 
 function readOption<T extends string>(
@@ -69,7 +73,31 @@ function initLocalImprovOptions(): void {
     );
 }
 
-function readLocalOptions(seed: number): Partial<ImprovOptions> {
+function readLocalDescription(): string {
+    return (document.getElementById('localImprovDescription') as HTMLTextAreaElement | null)?.value ?? '';
+}
+
+function setSelectValue(id: string, value: string): void {
+    const select = document.getElementById(id) as HTMLSelectElement | null;
+    if (select && Array.from(select.options).some(option => option.value === value)) {
+        select.value = value;
+    }
+}
+
+/** 把最终选项回写到控件，避免描述覆盖后下拉框还停在旧值 */
+function syncLocalControls(options: ResolvedImprovOptions): void {
+    setSelectValue('localNumMeasures', String(options.numMeasures));
+    setSelectValue('localStyle', options.style);
+    setSelectValue('localScaleType', options.scaleType);
+    setSelectValue('localDensity', options.density);
+    setSelectValue('keySelect', options.key);
+    setSelectValue('timeSigSelect', options.timeSignature);
+}
+
+function readLocalOptions(
+    seed: number,
+    described: Partial<ImprovOptions>,
+): Partial<ImprovOptions> {
     const numValue = (document.getElementById('localNumMeasures') as HTMLSelectElement | null)?.value;
     const parsed = numValue === undefined || numValue === '' ? NaN : Number(numValue);
     const config = LOCAL_IMPROV_CONFIG;
@@ -88,6 +116,8 @@ function readLocalOptions(seed: number): Partial<ImprovOptions> {
         ),
         timeSignature: scoreStore.score.timeSignature || undefined,
         tuning: { ...scoreStore.score.tuning },
+        // 描述里写到的字段优先；没写到的沿用上面的控件/乐谱值。
+        ...described,
         seed,
     };
 }
@@ -104,12 +134,35 @@ function handleLocalGenerate(): void {
     }
 
     try {
-        const result = generateLocalImprovisation(readLocalOptions(seed));
-        scoreStore.loadNotes(result.notes, result.options.numMeasures);
+        const description = readLocalDescription().trim();
+        const described = parseImprovDescription(description);
+        const result = generateLocalImprovisation(readLocalOptions(seed, described));
+
+        // 描述可能覆盖拍号/调性；先落到 store，loadNotes 才会按新拍号切小节。
+        scoreStore.beginBatch();
+        try {
+            if (scoreStore.score.timeSignature !== result.options.timeSignature) {
+                scoreStore.setTimeSignature(result.options.timeSignature);
+            }
+            if (scoreStore.score.key !== result.options.key) {
+                scoreStore.setKey(result.options.key);
+            }
+            scoreStore.loadNotes(result.notes, result.options.numMeasures);
+        } finally {
+            scoreStore.endBatch();
+        }
+        syncLocalControls(result.options);
+
         const sounding = result.notes.filter(note => !note.isRest).length;
+        const descriptionNote = description === ''
+            ? ''
+            : Object.keys(described).length > 0
+                ? ' · 描述已套用'
+                : ' · 描述未命中可识别项';
         const summary = `✅ ${sounding} 个音符 / ${result.options.numMeasures} 小节 · `
             + `${result.options.key} ${result.options.scaleType} · `
-            + `${result.options.style} · ${result.options.timeSignature} · seed ${seed}`;
+            + `${result.options.style} · ${result.options.timeSignature} · seed ${seed}`
+            + descriptionNote;
         setStatus(`✅ 本地即兴已生成（${result.options.style}）`, 'success');
         if (statusEl) statusEl.textContent = summary;
     } catch (error) {
@@ -126,14 +179,5 @@ function handleLocalGenerate(): void {
 
 export function initLocalImprovForm(): void {
     initLocalImprovOptions();
-
-    $('localImprovTopBtn')?.addEventListener('click', () => {
-        const panel = document.getElementById('localImprovPanel') as HTMLDetailsElement | null;
-        if (panel) {
-            panel.open = true;
-            panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-    });
-
     $('localImprovBtn')?.addEventListener('click', handleLocalGenerate);
 }

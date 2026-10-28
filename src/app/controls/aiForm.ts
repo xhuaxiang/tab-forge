@@ -123,15 +123,6 @@ export function initAIForm(): void {
     initAIKeyInput();
     initImprovConfig();
 
-    // Toolbar 快速按钮：打开 AI 设置面板
-    $('aiImprovBtn')?.addEventListener('click', () => {
-        const panel = document.getElementById('aiSettingsPanel') as HTMLDetailsElement;
-        if (panel) {
-            panel.open = true;
-            panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-    });
-
     // AI 生成按钮
     $('aiGenerateBtn')?.addEventListener('click', handleAIGenerate);
 

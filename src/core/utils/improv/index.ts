@@ -9,3 +9,4 @@ export {
     generateLocalImprovisation,
     resolveLocalImprovOptions,
 } from './generate.ts';
+export { parseImprovDescription } from './description.ts';
