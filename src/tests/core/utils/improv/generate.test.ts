@@ -13,6 +13,7 @@ import {
     generateLocalImprovisation,
     resolveLocalImprovOptions,
 } from '../../../../core/utils/improv/generate.ts';
+import { validatePhrasePlan } from '../../../../core/utils/improv/phrase.ts';
 import {
     fretToMidi,
     pitchClassOf,
@@ -204,5 +205,47 @@ describe('generateLocalImprovisation', () => {
                 }
             }
         }
+    });
+});
+
+describe('generateLocalImprovisation（乐句计划）', () => {
+    it('结果带完整乐句计划，首句 statement、末句 cadence', () => {
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 5; seed++) {
+                const { phrases, options } = generateLocalImprovisation({
+                    numMeasures: 8,
+                    key: caseItem.key,
+                    scaleType: caseItem.scaleType,
+                    style: caseItem.style,
+                    seed,
+                });
+                expect(validatePhrasePlan(phrases, options)).toEqual([]);
+                expect(phrases[0].startMeasure).toBe(0);
+                expect(phrases[phrases.length - 1].endMeasure).toBe(8);
+                expect(phrases[0].role).toBe('statement');
+                expect(phrases[phrases.length - 1].role).toBe('cadence');
+            }
+        }
+    });
+
+    it('同选项同 seed 的乐句计划完全一致', () => {
+        const input = {
+            numMeasures: 6, key: 'G', style: 'Rock' as const, seed: 9,
+        };
+        expect(generateLocalImprovisation(input).phrases)
+            .toEqual(generateLocalImprovisation(input).phrases);
+    });
+
+    it('乐句感知生成的 16 小节可完整写入 store', () => {
+        const { notes, options, phrases } = generateLocalImprovisation({
+            numMeasures: 16,
+            timeSignature: '4/4',
+            seed: 5,
+        });
+        expect(phrases[phrases.length - 1].endMeasure).toBe(16);
+        scoreStore.setTimeSignature(options.timeSignature);
+        expect(scoreStore.loadNotes(notes, options.numMeasures))
+            .toBe(notes.length);
+        expect(scoreStore.score.measures).toHaveLength(16);
     });
 });

@@ -162,6 +162,53 @@ export interface ResolvedImprovOptions {
 }
 
 // ============================================================
+// 乐句计划
+// ============================================================
+
+/** 乐句在段落中的功能 */
+export type PhraseRole = 'statement' | 'answer' | 'development' | 'cadence';
+
+/** 乐句相对动机来源的变形方式 */
+export type PhraseVariation =
+    | 'literal'
+    | 'tail'
+    | 'sequence'
+    | 'inversion'
+    | 'rhythmic'
+    | 'cadence';
+
+/** 旋律轮廓 */
+export type MelodicContour = 'arch' | 'ascending' | 'descending' | 'wave';
+
+/**
+ * 一句的生成计划。
+ *
+ * `steps` 是级数步序列，跨小节延续（不在小节边界重置）；动机变形通过
+ * 复用/反向/改尾实现，而不是每小节重新抽一次随机步。
+ */
+export interface PhrasePlan {
+    index: number;
+    /** 起始小节（含） */
+    startMeasure: number;
+    /** 结束小节（不含） */
+    endMeasure: number;
+    role: PhraseRole;
+    contour: MelodicContour;
+    variation: PhraseVariation;
+    /** 动机来源句；statement 为 null */
+    sourcePhrase: number | null;
+    /** 句首相对来源句的模进级数 */
+    transposeSteps: number;
+    /** 相对基础音区的半音偏移（保留给后续按句移调） */
+    registerShift: number;
+    /** 本句把位窗口（品位，含端点） */
+    fretMin: number;
+    fretMax: number;
+    /** 级数步序列，跨小节延续 */
+    steps: number[];
+}
+
+// ============================================================
 // 节奏计划
 // ============================================================
 
@@ -180,6 +227,8 @@ export interface RhythmMeasure {
     index: number;
     capacity: number;
     slots: RhythmSlot[];
+    /** 所属乐句下标；字段可选，兼容只测单层的旧调用 */
+    phraseIndex?: number;
 }
 
 // ============================================================
@@ -200,6 +249,8 @@ export interface SkeletonSlot {
     /** MIDI 音号，v1 长度 0/1 */
     midis: number[];
     role: SlotRole;
+    /** 所属乐句下标；字段可选，兼容只测单层的旧调用 */
+    phraseIndex?: number;
 }
 
 // ============================================================
@@ -240,6 +291,20 @@ export interface DensityProfile {
     minNotesPerMeasure: number;
 }
 
+/** 乐句参数：句长、轮廓、换把与句尾呼吸 */
+export interface PhraseProfile {
+    /** 每句小节数（通常 2） */
+    measures: number;
+    /** 轮廓循环顺序；statement 必用第一个 */
+    contours: readonly MelodicContour[];
+    /** 非末句句尾留休止的概率 */
+    endRestProbability: number;
+    /** 句间换把概率（answer/development 用高把位窗口） */
+    shiftProbability: number;
+    /** 换把幅度（品），当前用于句首模进/窗口选择 */
+    shiftFrets: number;
+}
+
 /** 风格参数：全部是机器可读的数字，不是 AI prompt 文案 */
 export interface StyleProfile {
     /** 风格偏好的时值权重，与密度权重共同决定节奏 */
@@ -267,6 +332,8 @@ export interface StyleProfile {
     vibratoProbability: number;
     /** 手掌闷音概率（仅低音弦） */
     palmMuteProbability: number;
+    /** 乐句结构参数 */
+    phrase: PhraseProfile;
 }
 
 /**
@@ -285,6 +352,8 @@ export interface PlayabilityRules {
     maxStringJump: number;
     /** 单步最大音程（半音），与风格取更严者；校验会强制执行 */
     maxLeapSemitones: number;
+    /** 句间换把/全曲收束允许的最大音程（半音），通常为一个八度 */
+    maxPhraseLeapSemitones: number;
     /** 允许推弦的最短时值 */
     minBendDuration: NoteDuration;
     /** 允许「推上去再放回」的最短时值（释放需要更多时间） */
@@ -327,4 +396,6 @@ export interface LocalImprovResult {
     options: ResolvedImprovOptions;
     /** 每小节实际使用的和弦与可用音池（仅生成期数据，不写入 Score） */
     harmony: HarmonyMeasure[];
+    /** 本次生成的乐句计划（仅生成期数据） */
+    phrases: PhrasePlan[];
 }

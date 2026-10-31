@@ -6,8 +6,14 @@ import { describe, it, expect } from 'vitest';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
 import type { NoteDuration } from '../../../../core/types/index.ts';
 import { NOTE_DURATIONS } from '../../../../core/types/index.ts';
-import { LOCAL_DENSITIES } from '../../../../core/types/improv.ts';
+import type {
+    LocalStyle,
+    ResolvedImprovOptions,
+    StyleProfile,
+} from '../../../../core/types/improv.ts';
+import { LOCAL_DENSITIES, LOCAL_STYLES } from '../../../../core/types/improv.ts';
 import { capacityFromTimeSignature } from '../../../../core/utils/measureUtils.ts';
+import { buildPhrasePlan } from '../../../../core/utils/improv/phrase.ts';
 import { buildRhythmPlan, canFill } from '../../../../core/utils/improv/rhythm.ts';
 import { createRng } from '../../../../core/utils/improv/random.ts';
 import { makeOptions } from './testOptions.ts';
@@ -196,5 +202,125 @@ describe('buildRhythmPlan', () => {
                 expect(canFill(capacity, Array.from(new Set(durations)))).toBe(true);
             }
         }
+    });
+});
+
+describe('buildRhythmPlan（乐句感知）', () => {
+    function phrasedPlan(
+        styleName: LocalStyle,
+        options: ResolvedImprovOptions,
+        styleOverride?: StyleProfile,
+        phraseSeed?: number,
+    ) {
+        const style = styleOverride
+            ?? LOCAL_IMPROV_CONFIG.styleProfiles[styleName];
+        const phrases = buildPhrasePlan(
+            options, style, LOCAL_IMPROV_CONFIG.playability,
+            createRng((phraseSeed ?? options.seed) + 4),
+        );
+        const plan = buildRhythmPlan(
+            options,
+            LOCAL_IMPROV_CONFIG.densityProfiles[options.density],
+            style,
+            createRng(options.seed),
+            phrases,
+        );
+        return { phrases, plan };
+    }
+
+    it('每个拍号 × 密度 × seed 仍精确闭合，并标注句归属', () => {
+        for (const signature of LOCAL_IMPROV_CONFIG.timeSignatures) {
+            for (const density of LOCAL_DENSITIES) {
+                for (let seed = 1; seed <= 5; seed++) {
+                    const options = makeOptions({
+                        numMeasures: 8,
+                        timeSignature: signature,
+                        density,
+                        seed,
+                    });
+                    const { phrases, plan } = phrasedPlan('Jazz', options);
+
+                    expect(plan).toHaveLength(8);
+                    const capacity = capacityFromTimeSignature(signature);
+                    plan.forEach((measure, measureIndex) => {
+                        const phrase = phrases.find(item =>
+                            measureIndex >= item.startMeasure
+                            && measureIndex < item.endMeasure);
+                        expect(measure.phraseIndex).toBe(phrase!.index);
+                        expect(measure.capacity).toBeCloseTo(capacity, 9);
+
+                        let total = 0;
+                        for (const slot of measure.slots) {
+                            expect(NOTE_DURATIONS).toContain(slot.duration);
+                            total += slot.duration;
+                        }
+                        expect(total).toBeCloseTo(capacity, 9);
+                        expect(measure.slots[0].isRest).toBe(false);
+                        expect(measure.slots[0].role).toBe('strong');
+                        expect(measure.slots.filter(slot => !slot.isRest).length)
+                            .toBeGreaterThanOrEqual(
+                                LOCAL_IMPROV_CONFIG.densityProfiles[density]
+                                    .minNotesPerMeasure,
+                            );
+                    });
+                }
+            }
+        }
+    });
+
+    it('同 seed 的乐句节奏完全一致', () => {
+        const options = makeOptions({ numMeasures: 8, seed: 11 });
+        expect(phrasedPlan('Rock', options).plan)
+            .toEqual(phrasedPlan('Rock', options).plan);
+    });
+
+    it('非末句句尾按概率留休止', () => {
+        const baseStyle = LOCAL_IMPROV_CONFIG.styleProfiles.Jazz;
+        const style: StyleProfile = {
+            ...baseStyle,
+            phrase: { ...baseStyle.phrase, endRestProbability: 1 },
+        };
+        let endRests = 0;
+        for (let seed = 1; seed <= 20; seed++) {
+            const options = makeOptions({
+                numMeasures: 8, timeSignature: '4/4', density: '高', seed,
+            });
+            const { phrases, plan } = phrasedPlan('Jazz', options, style);
+            plan.forEach(measure => {
+                const phrase = phrases.find(item =>
+                    measure.index >= item.startMeasure
+                    && measure.index < item.endMeasure)!;
+                const isPhraseEnd = measure.index === phrase.endMeasure - 1;
+                const isLastPhrase = phrase.index === phrases.length - 1;
+                if (isPhraseEnd && !isLastPhrase
+                    && measure.slots[measure.slots.length - 1].isRest) {
+                    endRests++;
+                }
+            });
+        }
+        expect(endRests).toBeGreaterThan(0);
+    });
+
+    it('句内后续小节相对首小节产生节奏变体', () => {
+        let varied = 0;
+        for (const style of LOCAL_STYLES) {
+            for (let seed = 1; seed <= 20; seed++) {
+                const options = makeOptions({
+                    numMeasures: 8, timeSignature: '4/4', density: '中', seed,
+                });
+                const { plan } = phrasedPlan(style, options);
+                for (let measureIndex = 1; measureIndex < plan.length; measureIndex++) {
+                    if (plan[measureIndex - 1].phraseIndex !== plan[measureIndex].phraseIndex) {
+                        continue;
+                    }
+                    const before = plan[measureIndex - 1].slots
+                        .map(slot => `${slot.duration}:${slot.isRest}`);
+                    const after = plan[measureIndex].slots
+                        .map(slot => `${slot.duration}:${slot.isRest}`);
+                    if (before.join('|') !== after.join('|')) varied++;
+                }
+            }
+        }
+        expect(varied).toBeGreaterThan(0);
     });
 });

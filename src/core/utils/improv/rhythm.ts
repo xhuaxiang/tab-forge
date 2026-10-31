@@ -6,10 +6,12 @@
  * 内部统一用 1/32 音符为整数单位，避免 0.25/0.125 的浮点误差。
  */
 
+import { NOTE_DURATIONS } from '../../types/index.ts';
 import type { NoteDuration } from '../../types/index.ts';
 import type {
     DensityProfile,
     DurationWeight,
+    PhrasePlan,
     ResolvedImprovOptions,
     RhythmMeasure,
     RhythmSlot,
@@ -208,19 +210,197 @@ function ensureSoundingNotes(slots: RhythmSlot[], minNotes: number): void {
     }
 }
 
+/** 生成一小节的拍位（容量精确闭合、发音数达标） */
+function buildMeasureSlots(
+    options: ResolvedImprovOptions,
+    density: DensityProfile,
+    candidates: readonly DurationCandidate[],
+    capacityUnits: number,
+    rng: () => number,
+): RhythmSlot[] {
+    const slots: RhythmSlot[] = [];
+    let remainingUnits = capacityUnits;
+    let offsetUnits = 0;
+    let restStreak = 0;
+
+    while (remainingUnits > 0) {
+        const feasible = candidates.filter(candidate =>
+            candidate.units <= remainingUnits
+            && canFillUnits(remainingUnits - candidate.units, candidates));
+        if (feasible.length === 0) {
+            throw new Error(`节奏无法闭合: 剩余 ${remainingUnits}/32`);
+        }
+
+        const chosen = pickWeighted(
+            rng,
+            feasible.map(candidate => ({ value: candidate, weight: candidate.weight })),
+        );
+
+        const isFirst = slots.length === 0;
+        // 第一个拍位必须是音符；连续休止越多，继续休止的概率越低
+        const restFactor = restStreak === 0 ? 1 : restStreak === 1 ? 0.3 : 0;
+        const isRest = !isFirst
+            && remainingUnits > chosen.units
+            && rng() < density.restProbability * restFactor;
+
+        const role = classifyRole(offsetUnits, chosen.units, options.timeSignature);
+        slots.push({ duration: chosen.duration, isRest, role });
+
+        offsetUnits += chosen.units;
+        remainingUnits -= chosen.units;
+        restStreak = isRest ? restStreak + 1 : 0;
+    }
+
+    ensureMinimumSlots(slots, density.minNotesPerMeasure);
+    reassignRoles(slots, options.timeSignature);
+    ensureSoundingNotes(slots, density.minNotesPerMeasure);
+    return slots;
+}
+
+function cloneSlots(slots: readonly RhythmSlot[]): RhythmSlot[] {
+    return slots.map(slot => ({ ...slot }));
+}
+
+function soundingCount(slots: readonly RhythmSlot[]): number {
+    return slots.filter(slot => !slot.isRest).length;
+}
+
+/** 把某个拍位一分为二；时值必须仍是合法音符（不生成 1/32） */
+function splitOneSlot(slots: RhythmSlot[], rng: () => number): boolean {
+    const indices: number[] = [];
+    slots.forEach((slot, index) => {
+        const half = slot.duration / 2;
+        if (slot.duration >= 0.125
+            && NOTE_DURATIONS.includes(half as NoteDuration)
+            && half >= 0.0625) {
+            indices.push(index);
+        }
+    });
+    if (indices.length === 0) return false;
+
+    const index = indices[Math.floor(rng() * indices.length)];
+    const source = slots[index];
+    const half = (source.duration / 2) as NoteDuration;
+    slots.splice(
+        index,
+        1,
+        { duration: half, isRest: source.isRest, role: source.role },
+        { duration: half, isRest: source.isRest, role: source.role },
+    );
+    return true;
+}
+
+/** 合并相邻两拍；合并后的总时值必须仍是合法音符 */
+function mergeTwoSlots(
+    slots: RhythmSlot[],
+    minNotes: number,
+    rng: () => number,
+): boolean {
+    if (slots.length <= minNotes) return false;
+
+    const indices: number[] = [];
+    for (let index = 0; index + 1 < slots.length; index++) {
+        const total = slots[index].duration + slots[index + 1].duration;
+        if (NOTE_DURATIONS.includes(total as NoteDuration)) indices.push(index);
+    }
+    if (indices.length === 0) return false;
+
+    const index = indices[Math.floor(rng() * indices.length)];
+    const first = slots[index];
+    const second = slots[index + 1];
+    slots.splice(index, 2, {
+        duration: (first.duration + second.duration) as NoteDuration,
+        isRest: first.isRest && second.isRest,
+        role: first.role,
+    });
+    return true;
+}
+
+/** 翻转一个非首拍位的休止状态；翻成休止时不能低于密度下限 */
+function toggleOneRest(
+    slots: RhythmSlot[],
+    minNotes: number,
+    rng: () => number,
+): boolean {
+    const indices: number[] = [];
+    slots.forEach((slot, index) => {
+        if (index === 0) return;
+        if (slot.isRest) {
+            indices.push(index);
+        } else if (soundingCount(slots) > minNotes) {
+            indices.push(index);
+        }
+    });
+    if (indices.length === 0) return false;
+
+    const index = indices[Math.floor(rng() * indices.length)];
+    slots[index].isRest = !slots[index].isRest;
+    return true;
+}
+
+/**
+ * 按乐句角色做一次节奏变形。
+ *
+ * 只做「拆分 / 合并 / 翻转休止」三种保持总容量的操作；候选操作按角色
+ * 排序，第一个成功的生效。这样句内第二小节不会和第一小节一模一样，
+ * 又不会破坏容量闭合。
+ */
+function varySlots(
+    slots: RhythmSlot[],
+    role: PhrasePlan['role'],
+    minNotes: number,
+    rng: () => number,
+): RhythmSlot[] {
+    const operations = role === 'development'
+        ? ['split', 'merge', 'toggle']
+        : role === 'cadence'
+            ? ['merge', 'toggle', 'split']
+            : ['toggle', 'split', 'merge'];
+
+    for (const operation of operations) {
+        if (operation === 'split' && splitOneSlot(slots, rng)) return slots;
+        if (operation === 'merge' && mergeTwoSlots(slots, minNotes, rng)) return slots;
+        if (operation === 'toggle' && toggleOneRest(slots, minNotes, rng)) return slots;
+    }
+    return slots;
+}
+
+/** 非末句的句尾呼吸：把最后一个可休止的发音改为休止 */
+function applyPhraseEndRest(
+    slots: RhythmSlot[],
+    minNotes: number,
+    rng: () => number,
+): void {
+    if (slots.length <= 1 || soundingCount(slots) <= minNotes) return;
+    const indices: number[] = [];
+    slots.forEach((slot, index) => {
+        if (index > 0 && !slot.isRest) indices.push(index);
+    });
+    if (indices.length === 0) return;
+    // 优先真正的小节末拍位；没有就用倒数第二个可休止音
+    const last = indices[indices.length - 1];
+    const target = rng() < 0.7 ? last : indices[Math.floor(rng() * indices.length)];
+    slots[target].isRest = true;
+}
+
 /**
  * 生成整段节奏计划。
+ *
+ * 不传 `phrases` 时保持旧的逐小节随机行为；传入乐句计划后，每句复用
+ * 一个小节节奏 cell，句内后续小节按角色拆分/合并/翻转休止。
  *
  * @param options 已补齐的生成选项（numMeasures / timeSignature）
  * @param density 密度参数
  * @param style   风格参数
  * @param rng     确定性随机源
+ * @param phrases 可选的乐句计划；有它才启用乐句节奏
  */
 export function buildRhythmPlan(
     options: ResolvedImprovOptions,
     density: DensityProfile,
     style: StyleProfile,
     rng: () => number,
+    phrases?: readonly PhrasePlan[],
 ): RhythmMeasure[] {
     const capacity = capacityFromTimeSignature(options.timeSignature);
     if (!Number.isFinite(capacity) || capacity <= 0) {
@@ -236,45 +416,49 @@ export function buildRhythmPlan(
         throw new Error('没有可用的节奏时值');
     }
 
-    const measures: RhythmMeasure[] = [];
-    for (let measureIndex = 0; measureIndex < options.numMeasures; measureIndex++) {
-        const slots: RhythmSlot[] = [];
-        let remainingUnits = capacityUnits;
-        let offsetUnits = 0;
-        let restStreak = 0;
+    if (phrases === undefined || phrases.length === 0) {
+        const measures: RhythmMeasure[] = [];
+        for (let measureIndex = 0; measureIndex < options.numMeasures; measureIndex++) {
+            measures.push({
+                index: measureIndex,
+                capacity,
+                slots: buildMeasureSlots(
+                    options, density, candidates, capacityUnits, rng,
+                ),
+            });
+        }
+        return measures;
+    }
 
-        while (remainingUnits > 0) {
-            const feasible = candidates.filter(candidate =>
-                candidate.units <= remainingUnits
-                && canFillUnits(remainingUnits - candidate.units, candidates));
-            if (feasible.length === 0) {
-                throw new Error(`节奏无法闭合: 剩余 ${remainingUnits}/32`);
+    const measures: RhythmMeasure[] = [];
+    for (const phrase of phrases) {
+        const base = buildMeasureSlots(
+            options, density, candidates, capacityUnits, rng,
+        );
+        for (let measureIndex = phrase.startMeasure;
+            measureIndex < phrase.endMeasure;
+            measureIndex++) {
+            const isFirstOfPhrase = measureIndex === phrase.startMeasure;
+            const slots = cloneSlots(base);
+            if (!isFirstOfPhrase) {
+                varySlots(slots, phrase.role, density.minNotesPerMeasure, rng);
+            }
+            if (measureIndex === phrase.endMeasure - 1
+                && phrase.index < phrases.length - 1
+                && rng() < style.phrase.endRestProbability) {
+                applyPhraseEndRest(slots, density.minNotesPerMeasure, rng);
             }
 
-            const chosen = pickWeighted(
-                rng,
-                feasible.map(candidate => ({ value: candidate, weight: candidate.weight })),
-            );
-
-            const isFirst = slots.length === 0;
-            // 第一个拍位必须是音符；连续休止越多，继续休止的概率越低
-            const restFactor = restStreak === 0 ? 1 : restStreak === 1 ? 0.3 : 0;
-            const isRest = !isFirst
-                && remainingUnits > chosen.units
-                && rng() < density.restProbability * restFactor;
-
-            const role = classifyRole(offsetUnits, chosen.units, options.timeSignature);
-            slots.push({ duration: chosen.duration, isRest, role });
-
-            offsetUnits += chosen.units;
-            remainingUnits -= chosen.units;
-            restStreak = isRest ? restStreak + 1 : 0;
+            ensureMinimumSlots(slots, density.minNotesPerMeasure);
+            reassignRoles(slots, options.timeSignature);
+            ensureSoundingNotes(slots, density.minNotesPerMeasure);
+            measures.push({
+                index: measureIndex,
+                capacity,
+                slots,
+                phraseIndex: phrase.index,
+            });
         }
-
-        ensureMinimumSlots(slots, density.minNotesPerMeasure);
-        reassignRoles(slots, options.timeSignature);
-        ensureSoundingNotes(slots, density.minNotesPerMeasure);
-        measures.push({ index: measureIndex, capacity, slots });
     }
 
     return measures;

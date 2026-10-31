@@ -4,11 +4,17 @@
 
 import { describe, it, expect } from 'vitest';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
-import type { ScaleType, LocalStyle } from '../../../../core/types/improv.ts';
+import type {
+    LocalStyle,
+    ScaleType,
+} from '../../../../core/types/improv.ts';
+import { buildHarmonyPlan } from '../../../../core/utils/improv/harmony.ts';
+import { buildPhrasePlan, phraseForMeasure } from '../../../../core/utils/improv/phrase.ts';
 import { buildRhythmPlan } from '../../../../core/utils/improv/rhythm.ts';
 import { buildSkeleton } from '../../../../core/utils/improv/melody.ts';
 import {
     isInScale,
+    midiRangeForFretRange,
     pitchClassOf,
     scalePitchClasses,
     tonicTriadPitchClasses,
@@ -213,6 +219,158 @@ describe('buildSkeleton', () => {
         ));
         for (const slot of first.skeleton) {
             if (!slot.isRest) expect(scale.has(pitchClassOf(slot.midis[0]))).toBe(true);
+        }
+    });
+});
+
+describe('buildSkeleton（乐句感知）', () => {
+    function buildPhrased(
+        caseItem: Case,
+        seed: number,
+        numMeasures = 8,
+    ) {
+        const options = makeOptions({
+            numMeasures,
+            key: caseItem.key,
+            scaleType: caseItem.scaleType,
+            style: caseItem.style,
+            density: '中',
+            seed,
+        });
+        const style = LOCAL_IMPROV_CONFIG.styleProfiles[caseItem.style];
+        const playability = LOCAL_IMPROV_CONFIG.playability;
+        const phrases = buildPhrasePlan(
+            options, style, playability, createRng(seed + 4),
+        );
+        const rhythm = buildRhythmPlan(
+            options,
+            LOCAL_IMPROV_CONFIG.densityProfiles[options.density],
+            style,
+            createRng(seed),
+            phrases,
+        );
+        const skeleton = buildSkeleton(
+            rhythm, options, style, playability,
+            createRng(seed + 1), undefined, phrases,
+        );
+        return { options, style, playability, phrases, skeleton };
+    }
+
+    it('每个发音标注所属乐句，且音高落在该句把位窗口内（全曲末音除外）', () => {
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 5; seed++) {
+                const { options, phrases, skeleton } = buildPhrased(caseItem, seed);
+                const sounding = skeleton.filter(slot => !slot.isRest);
+                const final = sounding[sounding.length - 1];
+
+                for (const slot of sounding) {
+                    expect(slot.phraseIndex).toBeDefined();
+                    const phrase = phraseForMeasure(phrases, slot.measureIndex);
+                    expect(slot.phraseIndex).toBe(phrase.index);
+                    if (slot === final) continue;
+
+                    const [low, high] = midiRangeForFretRange(
+                        options.tuning, phrase.fretMin, phrase.fretMax,
+                    );
+                    expect(slot.midis[0]).toBeGreaterThanOrEqual(low);
+                    expect(slot.midis[0]).toBeLessThanOrEqual(high);
+                }
+            }
+        }
+    });
+
+    it('每小节末音与每句首音落和弦音，全曲末音落主音', () => {
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 5; seed++) {
+                const { options, phrases, skeleton } = buildPhrased(caseItem, seed);
+                const harmony = buildHarmonyPlan(options);
+                const sounding = skeleton.filter(slot => !slot.isRest);
+                const final = sounding[sounding.length - 1];
+                expect(pitchClassOf(final.midis[0])).toBe(options.tonicPitchClass);
+
+                for (let measureIndex = 0; measureIndex < options.numMeasures; measureIndex++) {
+                    const chordTones = harmony[measureIndex].segments[0]
+                        .pool.chordPitchClasses;
+                    const inMeasure = sounding.filter(slot =>
+                        slot.measureIndex === measureIndex);
+                    expect(inMeasure.length).toBeGreaterThan(0);
+                    expect(chordTones).toContain(
+                        pitchClassOf(inMeasure[inMeasure.length - 1].midis[0]),
+                    );
+                }
+
+                for (const phrase of phrases) {
+                    const first = sounding.find(slot =>
+                        slot.measureIndex >= phrase.startMeasure
+                        && slot.measureIndex < phrase.endMeasure);
+                    const chordTones = harmony[first!.measureIndex].segments[0]
+                        .pool.chordPitchClasses;
+                    expect(chordTones).toContain(pitchClassOf(first!.midis[0]));
+                }
+            }
+        }
+    });
+
+    it('句内不超过风格上限，句间与末音放宽到换把上限', () => {
+        for (const caseItem of CASES) {
+            const style = LOCAL_IMPROV_CONFIG.styleProfiles[caseItem.style];
+            const playability = LOCAL_IMPROV_CONFIG.playability;
+            const styleLeap = Math.min(
+                style.maxLeapSemitones, playability.maxLeapSemitones,
+            );
+            for (let seed = 1; seed <= 10; seed++) {
+                const { skeleton } = buildPhrased(caseItem, seed);
+                const sounding = skeleton.filter(slot => !slot.isRest);
+                sounding.forEach((slot, index) => {
+                    if (index === 0) return;
+                    const previous = sounding[index - 1];
+                    const isFinal = index === sounding.length - 1;
+                    const samePhrase = slot.phraseIndex === previous.phraseIndex;
+                    const limit = isFinal || !samePhrase
+                        ? playability.maxPhraseLeapSemitones
+                        : styleLeap;
+                    expect(Math.abs(slot.midis[0] - previous.midis[0]))
+                        .toBeLessThanOrEqual(limit);
+                });
+            }
+        }
+    });
+
+    it('不会出现三连机械同音（锚点/经过音除外）', () => {
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 10; seed++) {
+                const { skeleton } = buildPhrased(caseItem, seed);
+                const sounding = skeleton.filter(slot => !slot.isRest);
+                const lastOfMeasure = new Map<number, number>();
+                const lastOfPhrase = new Map<number, number>();
+                sounding.forEach((slot, index) => {
+                    lastOfMeasure.set(slot.measureIndex, index);
+                    lastOfPhrase.set(slot.phraseIndex ?? -1, index);
+                });
+                const isAnchor = (index: number) => {
+                    const slot = sounding[index];
+                    return slot.role === 'strong'
+                        || slot.role === 'passing'
+                        || lastOfMeasure.get(slot.measureIndex) === index
+                        || lastOfPhrase.get(slot.phraseIndex ?? -1) === index;
+                };
+
+                for (let index = 2; index < sounding.length; index++) {
+                    const same = sounding[index].midis[0] === sounding[index - 1].midis[0]
+                        && sounding[index - 1].midis[0] === sounding[index - 2].midis[0];
+                    if (!same) continue;
+                    expect(
+                        isAnchor(index - 2) || isAnchor(index - 1) || isAnchor(index),
+                    ).toBe(true);
+                }
+            }
+        }
+    });
+
+    it('同 seed 的乐句旋律完全一致', () => {
+        for (const caseItem of CASES) {
+            expect(buildPhrased(caseItem, 13).skeleton)
+                .toEqual(buildPhrased(caseItem, 13).skeleton);
         }
     });
 });

@@ -22,6 +22,7 @@ import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { decorateSlots } from './decorate.ts';
 import { buildHarmonyPlan, normalizeProgression } from './harmony.ts';
 import { buildSkeleton } from './melody.ts';
+import { buildPhrasePlan, validatePhrasePlan } from './phrase.ts';
 import { parseKey } from './pitch.ts';
 import { choosePositions } from './positioning.ts';
 import { createRng } from './random.ts';
@@ -106,8 +107,16 @@ export function generateLocalImprovisation(
     const style = config.styleProfiles[options.style];
     const harmony = buildHarmonyPlan(options);
 
+    const phrases = buildPhrasePlan(
+        options, style, config.playability, createRng(options.seed + 4),
+    );
+    const phraseErrors = validatePhrasePlan(phrases, options);
+    if (phraseErrors.length > 0) {
+        throw new Error(`本地即兴乐句计划无效:\n${phraseErrors.join('\n')}`);
+    }
+
     const plan = buildRhythmPlan(
-        options, density, style, createRng(options.seed),
+        options, density, style, createRng(options.seed), phrases,
     );
     const planErrors = validatePlan(
         plan, options, density.minNotesPerMeasure,
@@ -118,7 +127,7 @@ export function generateLocalImprovisation(
 
     const skeleton = buildSkeleton(
         plan, options, style, config.playability,
-        createRng(options.seed + 1), harmony,
+        createRng(options.seed + 1), harmony, phrases,
     );
     const positioned = choosePositions(
         skeleton, options, config.playability, style,
@@ -132,10 +141,11 @@ export function generateLocalImprovisation(
         notes, options, config.playability,
         Math.min(style.maxLeapSemitones, config.playability.maxLeapSemitones),
         harmony,
+        phrases,
     );
     if (noteErrors.length > 0) {
         throw new Error(`本地即兴结果未通过校验:\n${noteErrors.join('\n')}`);
     }
 
-    return { notes, options, harmony };
+    return { notes, options, harmony, phrases };
 }

@@ -6,6 +6,8 @@ import { describe, it, expect } from 'vitest';
 import type { Note } from '../../../../core/types/index.ts';
 import type { RhythmMeasure } from '../../../../core/types/improv.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
+import { buildPhrasePlan } from '../../../../core/utils/improv/phrase.ts';
+import { createRng } from '../../../../core/utils/improv/random.ts';
 import { validateNotes, validatePlan } from '../../../../core/utils/improv/validate.ts';
 import { makeOptions } from './testOptions.ts';
 
@@ -205,6 +207,36 @@ describe('validateNotes', () => {
         const leap = validNotes();
         leap[1] = note({ string: 1, fret: 12, duration: 0.25 });
         expectError(leap, /跳进/);
+    });
+
+    it('句首换把放宽到 maxPhraseLeapSemitones，且只放宽第一个发音', () => {
+        const leap = validNotes();
+        leap[4] = note({ string: 1, fret: 14, duration: 0.25 });
+        leap[5] = note({ string: 1, fret: 3, duration: 0.25 });
+
+        // 没有乐句信息时，第 2 小节首音仍按风格上限校验。
+        expect(validateNotes(
+            leap, validOptions(), LOCAL_IMPROV_CONFIG.playability, 4,
+        ).some(error => /跳进/.test(error))).toBe(true);
+
+        const options = validOptions();
+        const base = LOCAL_IMPROV_CONFIG.styleProfiles.Jazz;
+        const style = {
+            ...base,
+            phrase: { ...base.phrase, measures: 1 },
+        };
+        const phrases = buildPhrasePlan(
+            options, style, LOCAL_IMPROV_CONFIG.playability, createRng(1),
+        );
+        expect(phrases[1].startMeasure).toBe(1);
+        const errors = validateNotes(
+            leap, options, LOCAL_IMPROV_CONFIG.playability, 4,
+            undefined, phrases,
+        );
+        // 第 5 个音是句首（5→14 共 9 个半音，放宽后允许）
+        expect(errors.some(error => error.includes('第 5 个音符跳进'))).toBe(false);
+        // 第 6 个音不再放宽（14→3 共 11 个半音，超过 middleLimit=4）
+        expect(errors.some(error => error.includes('第 6 个音符跳进 11'))).toBe(true);
     });
 });
 

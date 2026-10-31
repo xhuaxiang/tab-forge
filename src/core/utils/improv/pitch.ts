@@ -116,6 +116,24 @@ export function playableMidiRange(tuning: Tuning, fretMax: number): readonly [nu
     return [Math.min(...open), Math.max(...open) + fretMax];
 }
 
+/**
+ * 某个品位窗口能发出的 MIDI 粗范围。
+ *
+ * 这是各弦 `空弦 + 品位` 的并集边界，不是连续可弹集合；调用方若要
+ * 逐音取候选，仍应使用 `midiToFretPositions` 过滤。
+ */
+export function midiRangeForFretRange(
+    tuning: Tuning,
+    fretMin: number,
+    fretMax: number,
+): readonly [number, number] {
+    const open = Object.values(openStringMidis(tuning));
+    return [
+        Math.min(...open) + fretMin,
+        Math.max(...open) + fretMax,
+    ];
+}
+
 /** 范围内所有调内 MIDI（含端点） */
 export function scaleMidisInRange(
     tonicPitchClass: number,

@@ -9,6 +9,7 @@ import type { Note } from '../../types/index.ts';
 import { NOTE_DURATIONS } from '../../types/index.ts';
 import type {
     HarmonyMeasure,
+    PhrasePlan,
     PlayabilityRules,
     ResolvedImprovOptions,
     RhythmMeasure,
@@ -223,11 +224,13 @@ export function validateNotes(
     options: ResolvedImprovOptions,
     playability: PlayabilityRules,
     /**
-     * 段落中间的跳进上限（通常传风格上限）。最后一个音允许放宽到
-     * playability.maxLeapSemitones，因为主音不一定落在风格音区内。
+     * 段落中间的跳进上限（通常传风格上限）。句间首音与最后一个音允许
+     * 放宽到 playability.maxPhraseLeapSemitones，因为换把与收束主音不一定
+     * 落在风格音区内。
      */
     middleMaxLeapSemitones: number = playability.maxLeapSemitones,
     harmony?: readonly HarmonyMeasure[],
+    phrases?: readonly PhrasePlan[],
 ): string[] {
     if (notes.length === 0) return ['没有音符'];
 
@@ -244,6 +247,17 @@ export function validateNotes(
     const middleLimit = Number.isFinite(middleMaxLeapSemitones)
         ? Math.max(1, Math.min(middleMaxLeapSemitones, playability.maxLeapSemitones))
         : playability.maxLeapSemitones;
+    // 句间换把与旋律骨骼一致：只在这一句的第一个发音上放宽。
+    const phraseStartMeasures = new Set(
+        phrases?.map(phrase => phrase.startMeasure) ?? [],
+    );
+    const phraseStartSeen = new Set<number>();
+    // 生成器在句首取 max(风格上限, maxPhraseLeap)，这里用同一表达式，
+    // 避免把 maxPhraseLeap 配得比 maxLeap 小时生成结果必被拒绝。
+    const phraseLeapLimit = Math.max(
+        playability.maxLeapSemitones,
+        playability.maxPhraseLeapSemitones,
+    );
 
     let total = 0;
     let measureBoundary = capacity;
@@ -299,8 +313,12 @@ export function validateNotes(
                     }
                 }
 
-                const leapLimit = index === lastSoundingIndex
-                    ? playability.maxLeapSemitones
+                // 同一小节内只有第一个发音享受换把放宽，后续音仍守中间上限。
+                const isPhraseStart = phraseStartMeasures.has(measureIndex)
+                    && !phraseStartSeen.has(measureIndex);
+                if (isPhraseStart) phraseStartSeen.add(measureIndex);
+                const leapLimit = index === lastSoundingIndex || isPhraseStart
+                    ? phraseLeapLimit
                     : middleLimit;
                 if (previousMidi !== null
                     && Math.abs(midi - previousMidi) > leapLimit) {

@@ -7,6 +7,7 @@
 
 import type {
     HarmonyMeasure,
+    PhrasePlan,
     PlayabilityRules,
     ResolvedImprovOptions,
     RhythmMeasure,
@@ -16,6 +17,8 @@ import type {
 import { buildHarmonyPlan } from './harmony.ts';
 import { pickWeighted } from './random.ts';
 import {
+    midiRangeForFretRange,
+    midiToFretPositions,
     nearestMidiWithPitchClasses,
     pitchClassOf,
     playableMidiRange,
@@ -23,19 +26,21 @@ import {
     tonicTriadPitchClasses,
 } from './pitch.ts';
 
-/** 旋律中心附近的可选 MIDI */
-function buildRegister(
-    options: ResolvedImprovOptions,
-    style: StyleProfile,
-    playability: PlayabilityRules,
-): {
+interface Register {
     midis: number[];
     low: number;
     high: number;
     center: number;
     playLow: number;
     playHigh: number;
-} {
+}
+
+/** 旋律中心附近的可选 MIDI */
+function buildRegister(
+    options: ResolvedImprovOptions,
+    style: StyleProfile,
+    playability: PlayabilityRules,
+): Register {
     const [playMin, playMax] = playableMidiRange(options.tuning, playability.fretMax);
     const center = Math.min(playMax, Math.max(playMin, style.registerCenterMidi));
     const halfRange = Math.floor(style.registerRangeSemitones / 2);
@@ -54,6 +59,45 @@ function buildRegister(
         throw new Error('调内没有可演奏的音高');
     }
     return { midis, low, high, center, playLow: playMin, playHigh: playMax };
+}
+
+/**
+ * 按乐句把位窗口构造音区。
+ *
+ * 窗口内的调内音优先；若窗口里没有可落位的调内音（极窄把位），
+ * 回落到全局音区并在校验层由约束兜底。
+ */
+function buildPhraseRegister(
+    phrase: PhrasePlan,
+    options: ResolvedImprovOptions,
+    playability: PlayabilityRules,
+    fallback: Register,
+): Register {
+    const fretMin = Math.max(playability.fretMin, phrase.fretMin);
+    const fretMax = Math.min(playability.fretMax, phrase.fretMax);
+    if (fretMax < fretMin) return fallback;
+
+    const [rangeLow, rangeHigh] = midiRangeForFretRange(
+        options.tuning, fretMin, fretMax,
+    );
+    const midis = scaleMidisInRange(
+        options.tonicPitchClass, options.scaleType, rangeLow, rangeHigh,
+    ).filter(midi => midiToFretPositions(
+        options.tuning, midi, fretMin, fretMax,
+    ).length > 0);
+
+    if (midis.length === 0) return fallback;
+
+    const low = midis[0];
+    const high = midis[midis.length - 1];
+    return {
+        midis,
+        low,
+        high,
+        center: (low + high) / 2,
+        playLow: fallback.playLow,
+        playHigh: fallback.playHigh,
+    };
 }
 
 /** 在 register 中找最接近 current 的下标；平局取较低音 */
@@ -129,13 +173,35 @@ function snapToPitchClasses(
 }
 
 /**
+ * 句首/稳定音吸附：优先在单步音程内找目标和弦音，找不到再在整个
+ * 乐句音区里找最近的——句首允许比句内略大的跳进，否则会卡在非和弦音上。
+ */
+function snapOrNearest(
+    candidate: number,
+    current: number,
+    pitchClasses: readonly number[],
+    low: number,
+    high: number,
+    maxLeap: number,
+): number {
+    const min = Math.max(low, current - maxLeap);
+    const max = Math.min(high, current + maxLeap);
+    const nearby = nearestMidiWithPitchClasses(
+        candidate, pitchClasses, min, max,
+    );
+    if (nearby !== null) return nearby;
+    return nearestMidiWithPitchClasses(candidate, pitchClasses, low, high)
+        ?? candidate;
+}
+
+/**
  * 句尾落到主音。
  *
  * 第一搜索范围是「当前音 ± 风格上限」，并且限定在整条指板的可演奏范围，
  * 而不是风格音区：风格音区可能把附近的主音排除在外（例如 D 大调里
  * D3=50 在 Jazz 音区下方），于是只能跳到更远的 D4，产生超限跳进。
- * 若风格上限内确实没有主音（最近主音可能相隔 6 个半音），再放宽到
- * 可演奏性上限；这个例外只作用于全曲最后一个音。
+ * 若风格上限内确实没有主音，再放宽到句间/收束上限；仍找不到时以主音
+ * 为准（允许略超上限），这个例外只作用于全曲最后一个音。
  */
 function resolveToTonic(
     current: number,
@@ -154,8 +220,16 @@ function resolveToTonic(
 
     const finalMin = Math.max(playLow, current - finalMaxLeap);
     const finalMax = Math.min(playHigh, current + finalMaxLeap);
-    return nearestMidiWithPitchClasses(
+    const relaxed = nearestMidiWithPitchClasses(
         current, [tonicPitchClass], finalMin, finalMax,
+    );
+    if (relaxed !== null) return relaxed;
+
+    // 收束必须落在主音：音域边界附近（如标准调弦最低的 E2 到最近的 C3
+    // 相距 8 个半音）可能超出放宽后的上限，此时以主音为准，交由校验层
+    // 判断这次跳进是否仍可演奏。
+    return nearestMidiWithPitchClasses(
+        current, [tonicPitchClass], playLow, playHigh,
     ) ?? current;
 }
 
@@ -178,7 +252,14 @@ export function buildSkeleton(
     playability: PlayabilityRules,
     rng: () => number,
     harmony?: readonly HarmonyMeasure[],
+    phrases?: readonly PhrasePlan[],
 ): SkeletonSlot[] {
+    if (phrases !== undefined && phrases.length > 0) {
+        return buildSkeletonPhrased(
+            plan, options, style, playability, rng, harmony, phrases,
+        );
+    }
+
     const register = buildRegister(options, style, playability);
     const harmonyPlan = harmony ?? buildHarmonyPlan(options);
     const fallbackTriad = tonicTriadPitchClasses(
@@ -275,6 +356,205 @@ export function buildSkeleton(
             soundingIndex++;
         }
     }
+
+    return result;
+}
+
+/**
+ * 乐句感知的旋律生成。
+ *
+ * 与逐小节版本的区别：
+ * - 级数步在整句内连续推进，不在小节边界重置；
+ * - 每句有自己的把位窗口/音区；
+ * - 句首、小节末、句末是锚点，锚点优先落在和弦音上；
+ * - answer 复用 statement 的句头，development 用模进/反向，cadence 收尾。
+ */
+function buildSkeletonPhrased(
+    plan: RhythmMeasure[],
+    options: ResolvedImprovOptions,
+    style: StyleProfile,
+    playability: PlayabilityRules,
+    rng: () => number,
+    harmony: readonly HarmonyMeasure[] | undefined,
+    phrases: readonly PhrasePlan[],
+): SkeletonSlot[] {
+    const fallbackRegister = buildRegister(options, style, playability);
+    const harmonyPlan = harmony ?? buildHarmonyPlan(options);
+    const fallbackTriad = tonicTriadPitchClasses(
+        options.tonicPitchClass, options.scaleType,
+    );
+    const maxLeap = Math.max(1, Math.min(
+        style.maxLeapSemitones, playability.maxLeapSemitones,
+    ));
+    // 句间换把与全曲收束允许放宽到换把上限，句内仍守风格上限。
+    const boundaryMaxLeap = Math.max(maxLeap, playability.maxPhraseLeapSemitones);
+    const finalMaxLeap = boundaryMaxLeap;
+
+    const result: SkeletonSlot[] = [];
+    let previousMidi: number | null = null;
+
+    phrases.forEach((phrase, phraseIndex) => {
+        const register = buildPhraseRegister(
+            phrase, options, playability, fallbackRegister,
+        );
+        const phraseMeasures = plan.filter(measure =>
+            measure.index >= phrase.startMeasure
+            && measure.index < phrase.endMeasure);
+        const phraseSoundingCount = phraseMeasures.reduce(
+            (count, measure) =>
+                count + measure.slots.filter(slot => !slot.isRest).length,
+            0,
+        );
+        if (phraseSoundingCount === 0) return;
+
+        let phraseSoundingIndex = 0;
+        let phraseStepIndex = 0;
+        let sameNoteRun = 0;
+        const isFirstPhrase = phraseIndex === 0;
+        const isLastPhrase = phraseIndex === phrases.length - 1;
+
+        for (const measure of phraseMeasures) {
+            const segment = harmonyPlan[measure.index]?.segments[0];
+            const chordTones = segment?.pool.chordPitchClasses ?? fallbackTriad;
+            const avoid = new Set(segment?.pool.avoidPitchClasses ?? []);
+            const nonAvoid = segment
+                ? segment.pool.availablePitchClasses.filter(
+                    pitchClass => !avoid.has(pitchClass))
+                : [];
+            const weakTargets = nonAvoid.length > 0 ? nonAvoid : chordTones;
+            const measureSoundingCount = measure.slots
+                .filter(slot => !slot.isRest).length;
+            let measureSoundingIndex = 0;
+
+            for (let slotIndex = 0; slotIndex < measure.slots.length; slotIndex++) {
+                const slot = measure.slots[slotIndex];
+                if (slot.isRest) {
+                    result.push({
+                        measureIndex: measure.index,
+                        slotIndex,
+                        duration: slot.duration,
+                        isRest: true,
+                        midis: [],
+                        role: slot.role,
+                        phraseIndex,
+                    });
+                    continue;
+                }
+
+                const isFirstOfPhrase = phraseSoundingIndex === 0;
+                const isLastOfPhrase = phraseSoundingIndex === phraseSoundingCount - 1;
+                const isLastOfMeasure = measureSoundingIndex === measureSoundingCount - 1;
+                const isFinal = isLastPhrase && isLastOfPhrase;
+                const previous = previousMidi;
+
+                let midi: number;
+                if (isFirstOfPhrase) {
+                    if (isFirstPhrase || previous === null) {
+                        midi = nearestMidiWithPitchClasses(
+                            register.center, chordTones,
+                            register.low, register.high,
+                        ) ?? register.midis[nearestIndex(register.midis, register.center)];
+                    } else {
+                        const shift = Math.max(
+                            -boundaryMaxLeap,
+                            Math.min(
+                                boundaryMaxLeap,
+                                phrase.transposeSteps * 2 + phrase.registerShift,
+                            ),
+                        );
+                        midi = previous + shift;
+                    }
+                } else if (previous !== null) {
+                    const step = phrase.steps[
+                        phraseStepIndex % phrase.steps.length
+                    ];
+                    phraseStepIndex++;
+                    midi = stepFrom(previous, step, register.midis, maxLeap);
+                } else {
+                    midi = register.midis[nearestIndex(register.midis, register.center)];
+                }
+
+                if (isFinal) {
+                    midi = resolveToTonic(
+                        previous ?? midi, options.tonicPitchClass,
+                        register.playLow, register.playHigh, maxLeap, finalMaxLeap,
+                    );
+                } else if (isFirstOfPhrase) {
+                    // 句首换把允许放宽，但只吸附一次，避免二次吸附把音推回远处。
+                    midi = snapOrNearest(
+                        midi, previous ?? midi, chordTones,
+                        register.low, register.high, boundaryMaxLeap,
+                    );
+                } else if (slot.role === 'strong' || isLastOfMeasure || isLastOfPhrase) {
+                    midi = snapOrNearest(
+                        midi, previous ?? midi, chordTones,
+                        register.low, register.high, maxLeap,
+                    );
+                } else if (slot.role !== 'passing' && avoid.has(pitchClassOf(midi))) {
+                    midi = snapToPitchClasses(
+                        midi, previous ?? midi, weakTargets,
+                        register.low, register.high, maxLeap,
+                    );
+                }
+
+                // 机械同音：同音最多连续两次；强拍/锚点上的和弦音重复是稳定的，
+                // 不做移位，避免把已经吸附好的和弦音又推开。
+                const isAnchor = slot.role === 'strong' || isLastOfMeasure || isLastOfPhrase;
+                if (previous !== null && midi === previous
+                    && !isAnchor && slot.role !== 'passing') {
+                    sameNoteRun++;
+                    if (sameNoteRun >= 2) {
+                        const direction = rng() < 0.5 ? 1 : -1;
+                        const first = stepFrom(
+                            previous, direction, register.midis, maxLeap,
+                        );
+                        const second = stepFrom(
+                            previous, -direction, register.midis, maxLeap,
+                        );
+                        // 音区边缘时 stepFrom 会夹回同一个音，这种邻音不能用来
+                        // 打破同音，否则计数清零后又会立刻累计出三连。
+                        const canUseFirst = first !== previous
+                            && !avoid.has(pitchClassOf(first));
+                        const canUseSecond = second !== previous
+                            && !avoid.has(pitchClassOf(second));
+                        if (canUseFirst) {
+                            midi = first;
+                        } else if (canUseSecond) {
+                            midi = second;
+                        } else {
+                            // 两侧邻音都不可用时，退回最近的弱拍目标音；
+                            // 排除同音高，保证确实离开 previous。
+                            const alternatives = weakTargets.filter(
+                                pitchClass => pitchClass !== pitchClassOf(previous),
+                            );
+                            midi = nearestMidiWithPitchClasses(
+                                previous,
+                                alternatives.length > 0 ? alternatives : weakTargets,
+                                Math.max(register.low, previous - maxLeap),
+                                Math.min(register.high, previous + maxLeap),
+                            ) ?? previous;
+                        }
+                        sameNoteRun = 0;
+                    }
+                } else {
+                    sameNoteRun = 0;
+                }
+
+                result.push({
+                    measureIndex: measure.index,
+                    slotIndex,
+                    duration: slot.duration,
+                    isRest: false,
+                    midis: [midi],
+                    role: slot.role,
+                    phraseIndex,
+                });
+                previousMidi = midi;
+                phraseSoundingIndex++;
+                measureSoundingIndex++;
+            }
+        }
+    });
 
     return result;
 }
