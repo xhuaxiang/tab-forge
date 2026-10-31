@@ -9,11 +9,11 @@
  *
  * 该模块集中了最容易出错的调度规则：
  *   时值→秒换算、和弦音量补偿、扫弦/琶音的弦序与间隔、
- *   休止符与延音跳过、空小节按 4/4 兜底。
+ *   休止符与延音跳过、小节内容不足时按自身拍号容量补齐。
  */
 
 import type { Measure, Note } from '../../../core/types/index.ts';
-import { forEachSlot } from '../../../core/utils/measureUtils.ts';
+import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
 /** 单条播放事件 */
@@ -126,11 +126,14 @@ export function buildSchedule(
             cursorMs += durMs;
         });
 
-        // 小节内容不足 4 拍时补齐到 4 拍（历史行为，保证小节时长稳定）。
-        // 注意：固定按 4/4 兜底，未参考小节自身 timeSignature；
-        // 且部分填充的小节同样会被补齐（不只是空小节）。
-        if (cursorMs - measureStartMs < beat * 4 * 1000 - 1) {
-            cursorMs = measureStartMs + beat * 4 * 1000;
+        // 小节内容不足自身容量时补齐（部分填充的小节也会补齐）。
+        // 容量以全音符为 1，换算成四分音符拍数要 ×4；不能用固定 4/4，
+        // 否则 3/4、6/8 的谱子会多出拍子。
+        // 非法/零容量拍号回退旧的 4 拍，避免 NaN/Infinity 毒化总时长。
+        const capacity = measureCapacity(measure);
+        const measureBeats = Number.isFinite(capacity) && capacity > 0 ? capacity * 4 : 4;
+        if (cursorMs - measureStartMs < beat * measureBeats * 1000 - 1) {
+            cursorMs = measureStartMs + beat * measureBeats * 1000;
         }
     }
 

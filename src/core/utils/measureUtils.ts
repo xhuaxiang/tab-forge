@@ -8,6 +8,21 @@
 import type { Measure, Note } from '../types/index.ts';
 
 /**
+ * 返回从 `start` 开始的拍位组结束下标（不含）。
+ *
+ * 分组规则只在这里实现：单音/休止符各自成组；只有组首带 `chordGroup`
+ * 时，才把紧随其后、`chordGroup` 相同的音符并进来。只合并相邻项。
+ */
+function slotEndIndex(notes: readonly Note[], start: number): number {
+    const first = notes[start];
+    let end = start + 1;
+    if (first.chordGroup !== undefined) {
+        while (end < notes.length && notes[end].chordGroup === first.chordGroup) end++;
+    }
+    return end;
+}
+
+/**
  * 按拍位分组遍历 measure.notes（单一来源）
  *
  * 单音/休止符各自独立为一组（`notes.length === 1`），
@@ -25,13 +40,9 @@ export function forEachSlotGroup(
     const notes = measure.notes;
     let i = 0;
     while (i < notes.length) {
-        const first = notes[i];
-        let j = i + 1;
-        if (first.chordGroup !== undefined) {
-            while (j < notes.length && notes[j].chordGroup === first.chordGroup) j++;
-        }
-        callback(i, notes.slice(i, j));
-        i = j;
+        const end = slotEndIndex(notes, i);
+        callback(i, notes.slice(i, end));
+        i = end;
     }
 }
 
@@ -101,21 +112,17 @@ export function locateSlotAt(measure: Measure, beatOffset: number): SlotLocation
     let acc = 0;
     let i = 0;
     while (i < notes.length) {
-        const first = notes[i];
-        let j = i + 1;
-        if (first.chordGroup !== undefined) {
-            while (j < notes.length && notes[j].chordGroup === first.chordGroup) j++;
-        }
+        const endIndex = slotEndIndex(notes, i);
         const start = acc;
-        const end = acc + first.duration;
+        const end = acc + notes[i].duration;
         if (Math.abs(beatOffset - start) < 1e-6) {
-            return { kind: 'slot', index: i, slot: notes.slice(i, j), start };
+            return { kind: 'slot', index: i, slot: notes.slice(i, endIndex), start };
         }
         if (beatOffset > start && beatOffset < end) {
-            return { kind: 'inside', afterIndex: j, slot: notes.slice(i, j), start };
+            return { kind: 'inside', afterIndex: endIndex, slot: notes.slice(i, endIndex), start };
         }
         acc = end;
-        i = j;
+        i = endIndex;
     }
     return { kind: 'end', index: notes.length };
 }

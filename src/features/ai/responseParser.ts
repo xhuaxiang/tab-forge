@@ -94,16 +94,27 @@ function isAIHarmonic(v: string): v is AppHarmonic {
     return (APP_HARMONICS as readonly string[]).includes(v);
 }
 
-/** 规范化时值为最近的有效枚举值 */
-function clampDuration(d: number | undefined): NoteDuration {
-    if (!d || !VALID_DURATIONS.has(d)) {
-        const arr = NOTE_DURATIONS;
-        const closest = arr.reduce((prev, curr) =>
-            Math.abs(curr - (d ?? 0.25)) < Math.abs(prev - (d ?? 0.25)) ? curr : prev
-        );
-        return closest as NoteDuration;
+/**
+ * 规范化时值为最近的有效枚举值。
+ *
+ * AI 输出是不可信输入：非数字（`true` / `{}` / `"abc"` / `null`）、负数、
+ * NaN 和 Infinity 先收口到默认四分音符，避免 `Math.abs` 得到 NaN 后比较恒为
+ * false、循环停在 `NOTE_DURATIONS[0]` 把非法值放大成全音符。
+ * 有限非负数字仍按距离取最近合法值（0 → 0.03125）。
+ */
+function clampDuration(d: unknown): NoteDuration {
+    if (typeof d === 'number' && VALID_DURATIONS.has(d)) {
+        return d as NoteDuration;
     }
-    return d as NoteDuration;
+
+    const target = typeof d === 'number' && Number.isFinite(d) && d >= 0 ? d : 0.25;
+    let closest: NoteDuration = NOTE_DURATIONS[0];
+    for (const candidate of NOTE_DURATIONS) {
+        if (Math.abs(candidate - target) < Math.abs(closest - target)) {
+            closest = candidate;
+        }
+    }
+    return closest;
 }
 
 /** 校验单个音符 */

@@ -146,9 +146,24 @@ describe('时值 duration 规范化', () => {
     });
 
     it('duration: 0 → 取距 0 最近的 0.03125（“0 回落到 0.25”并不成立）', () => {
-        // clampDuration 里 `d ?? 0.25` 只对 null/undefined 生效，0 会原样参与取最近，
-        // 故 0 落在最小时值而非默认四分音符。
+        // 0 是有限数字，原样参与取最近，故落在最小时值而非默认四分音符。
         expect(parseOne({ string: 1, fret: 3, duration: 0 })?.duration).toBe(0.03125);
+    });
+
+    it('非数字/空值 → 回落默认 0.25，而不是全音符', () => {
+        for (const bad of [true, {}, 'abc', '0.5', null, []]) {
+            expect(parseOne({ string: 1, fret: 3, duration: bad })?.duration).toBe(0.25);
+        }
+    });
+
+    it('Infinity（1e999）→ 回落默认 0.25', () => {
+        // JSON.stringify 会把 Infinity 变成 null，直接构造原始文本绕过。
+        const raw = '{"measures":[{"notes":[{"string":1,"fret":3,"duration":1e999}]}]}';
+        expect(parseAIResponse(raw).notes[0]?.duration).toBe(0.25);
+    });
+
+    it('负数 → 回落默认 0.25，而不是最小时值', () => {
+        expect(parseOne({ string: 1, fret: 3, duration: -0.25 })?.duration).toBe(0.25);
     });
 });
 

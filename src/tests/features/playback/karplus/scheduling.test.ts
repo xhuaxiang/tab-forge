@@ -125,6 +125,29 @@ describe('buildSchedule', () => {
         expect(s.totalDurationMs).toBeCloseTo(100 + 2000, 0);
     });
 
+    it('3/4 小节填两个四分音符 → 补齐到 3 拍，而不是 4 拍', () => {
+        const s = buildSchedule([
+            measure([note({ duration: 0.25 }), note({ duration: 0.25 })], 3, 4),
+            measure([note({ duration: 0.25 })], 3, 4),
+        ], BPM);
+        // 两个事件都在第一小节；3 拍 = 1.5s，下一小节从 100 + 1500 开始
+        expect(s.events[2].delayMs).toBeCloseTo(100 + 1500, 0);
+        // 两个 3/4 小节合计 3s
+        expect(s.totalDurationMs).toBeCloseTo(100 + 3000, 0);
+    });
+
+    it('6/8 小节按自身容量补齐（3 个四分音符）', () => {
+        const s = buildSchedule([measure([], 6, 8)], BPM);
+        expect(s.totalDurationMs).toBeCloseTo(100 + 1500, 0);
+    });
+
+    it('非法/零容量拍号回退 4 拍，不产生 NaN/Infinity 总时长', () => {
+        for (const [num, den] of [[0, 0], [4, 0]]) {
+            const s = buildSchedule([measure([], num, den)], BPM);
+            expect(s.totalDurationMs).toBeCloseTo(100 + 2000, 0);
+        }
+    });
+
     it('多小节:各小节不足 4 拍时分别补齐', () => {
         const s = buildSchedule([
             measure([note({ duration: 0.25 })]),
