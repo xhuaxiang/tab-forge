@@ -257,17 +257,41 @@
                             <label>和弦进行</label>
                             <select id="localProgression" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 从 LOCAL_PROGRESSIONS 填充 --></select>
                         </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>每小节和弦数</label>
+                            <select id="localChordsPerMeasure" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
+                        </div>
+                    </div>
+                    <div class="collapse-row">
+                        <div class="input-group" style="flex:1;">
+                            <label>自定义和弦（可选）</label>
+                            <input id="localProgressionText" class="compact-input" type="text"
+                                placeholder="如 C G Am F，或 | C G | Am F |；留空用上面的进行"
+                                style="width:100%;">
+                        </div>
+                    </div>
+                    <div class="collapse-row">
+                        <div class="input-group" style="flex:1;">
+                            <label>把位范围（品，留空不限）</label>
+                            <div style="display:flex; gap:4px; align-items:center;">
+                                <input id="localFretMin" class="compact-input" type="number"
+                                    min="0" max="24" step="1" placeholder="最低" style="width:90px;">
+                                <span style="font-size:11px; color:var(--text-muted);">–</span>
+                                <input id="localFretMax" class="compact-input" type="number"
+                                    min="0" max="24" step="1" placeholder="最高" style="width:90px;">
+                            </div>
+                        </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
                             <label>描述（可选）</label>
                             <textarea id="localImprovDescription" class="compact-input" rows="3"
-                                placeholder="如：爵士、16 小节、高密度、7/8、D 大调"
+                                placeholder="如：爵士、16 小节、高密度、7/8、D 大调、7-10品、| C G | Am F |"
                                 style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
                     <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                        描述里写到的项优先；只写调性时自动配大/小调音阶；没写到的沿用当前乐谱设置，乐谱为空时回落到默认配置。推弦、滑弦等技法描述暂不解析。
+                        描述里写到的项优先；只写调性时自动配大/小调音阶；可识别 7-10品 这类把位范围与 | C G | Am F | 和弦写法。La/D 指型与自然音限制暂不支持，会在结果里提示。推弦、滑弦等技法描述暂不解析。
                     </div>
                     <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;">🎸 生成即兴谱</button>
                     <div id="localImprovStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>

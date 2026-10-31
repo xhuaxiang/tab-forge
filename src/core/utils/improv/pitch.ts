@@ -159,20 +159,60 @@ export function nearestMidiWithPitchClasses(
     minMidi: number,
     maxMidi: number,
 ): number | null {
+    return searchNearestMidi(
+        targetMidi, pitchClasses, minMidi, maxMidi, null,
+    );
+}
+
+/**
+ * 在给定 MIDI 范围与品位窗口内，找最接近目标且真正弹得到的音。
+ *
+ * `midiRangeForFretRange` 只是各弦范围的并集边界；窗口窄于弦间音程时
+ * 中间会留洞（例如标准调弦 5-8 品的 54），所以这里必须逐音确认该 MIDI
+ * 至少有一根弦能在 `[fretMin, fretMax]` 内按到。
+ */
+export function nearestPlayableMidiWithPitchClasses(
+    tuning: Tuning,
+    targetMidi: number,
+    pitchClasses: readonly number[],
+    minMidi: number,
+    maxMidi: number,
+    fretMin: number,
+    fretMax: number,
+): number | null {
+    return searchNearestMidi(
+        targetMidi, pitchClasses, minMidi, maxMidi, (midi) =>
+            midiToFretPositions(tuning, midi, fretMin, fretMax).length > 0,
+    );
+}
+
+function searchNearestMidi(
+    targetMidi: number,
+    pitchClasses: readonly number[],
+    minMidi: number,
+    maxMidi: number,
+    isPlayable: ((midi: number) => boolean) | null,
+): number | null {
     const wanted = new Set(pitchClasses.map(pitchClassOf));
+    // 音区中心常是 x.5；按整数步进会永远落在 x.5 上，匹配不到整数音高。
+    const center = Math.round(targetMidi);
     // 目标可能落在范围外（例如窗口收窄到 current 附近），搜索半径要覆盖
     // 目标到最近端点的距离，否则会提前返回 null。
     const maxDistance = Math.max(
-        Math.abs(targetMidi - minMidi),
-        Math.abs(targetMidi - maxMidi),
+        Math.abs(center - minMidi),
+        Math.abs(center - maxMidi),
     );
     for (let distance = 0; distance <= maxDistance; distance++) {
-        const lower = targetMidi - distance;
-        const upper = targetMidi + distance;
-        if (lower >= minMidi && lower <= maxMidi && wanted.has(pitchClassOf(lower))) {
+        const lower = center - distance;
+        const upper = center + distance;
+        if (lower >= minMidi && lower <= maxMidi
+            && wanted.has(pitchClassOf(lower))
+            && (isPlayable === null || isPlayable(lower))) {
             return lower;
         }
-        if (distance > 0 && upper >= minMidi && upper <= maxMidi && wanted.has(pitchClassOf(upper))) {
+        if (distance > 0 && upper >= minMidi && upper <= maxMidi
+            && wanted.has(pitchClassOf(upper))
+            && (isPlayable === null || isPlayable(upper))) {
             return upper;
         }
     }

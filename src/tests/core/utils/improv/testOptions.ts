@@ -24,6 +24,8 @@ export function makeOptions(
         timeSignature: overrides.timeSignature ?? defaults.timeSignature,
         tuning: overrides.tuning ?? { ...defaults.tuning },
         progression: overrides.progression ?? [1],
+        chordChart: overrides.chordChart ?? [],
+        fretRange: overrides.fretRange ?? null,
         seed: overrides.seed ?? defaults.seed,
     };
 }

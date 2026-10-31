@@ -6,13 +6,20 @@
  */
 
 import type {
+    FretRange,
     ImprovOptions,
     LocalDensity,
     LocalStyle,
+    Progression,
+    ProgressionStep,
     ScaleType,
 } from '../../types/improv.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { parseKey } from './pitch.ts';
+import {
+    parseProgressionText,
+    parseProgressionToken,
+} from './progression.ts';
 
 interface Keyword<T> {
     pattern: RegExp;
@@ -121,6 +128,210 @@ function parseDescriptionKey(
 }
 
 /**
+ * 解析描述里的把位范围，如 `7-10品`、`8–13 品`、`把位固定在 8 到 13 品`。
+ *
+ * 只认带范围连接词的写法；单个品位数字不构成锁定范围。
+ */
+export function parseDescriptionFretRange(text: string): FretRange | null {
+    const patterns: RegExp[] = [
+        /(\d{1,2})\s*(?:品)?\s*(?:[-–—~]|到|至)\s*(\d{1,2})\s*品/g,
+        /(?:把位|品位)[^0-9]{0,12}(\d{1,2})\s*(?:[-–—~]|到|至)\s*(\d{1,2})/g,
+    ];
+    const playability = LOCAL_IMPROV_CONFIG.playability;
+
+    for (const pattern of patterns) {
+        for (const match of text.matchAll(pattern)) {
+            let min = Number(match[1]);
+            let max = Number(match[2]);
+            if (!Number.isInteger(min) || !Number.isInteger(max)) continue;
+            if (min > max) [min, max] = [max, min];
+            min = Math.max(playability.fretMin, Math.min(playability.fretMax, min));
+            max = Math.max(playability.fretMin, Math.min(playability.fretMax, max));
+            return { min, max };
+        }
+    }
+    return null;
+}
+
+/**
+ * 识别当前本地引擎不支持、但用户明确写出来的需求。
+ *
+ * 只用于 UI 提示，不参与生成；`La/D 指型` 与自然音限制都属于这一类。
+ */
+export function detectUnsupportedDescription(text: string): string[] {
+    const unsupported: string[] = [];
+
+    if (/指型|CAGED/i.test(text)) {
+        unsupported.push('指型图案（La/D 型等）暂未支持，当前按音阶自由度生成');
+    }
+    if (/自然音(?!阶)|只用白键|不要\s*[A-G][#b]|不要[^。；;\n]{0,6}[升降]|落在\s*[A-G]\s*[-–]\s*[A-G]\s*(?:这些|之间|范围|内|上)/i.test(text)) {
+        unsupported.push('自然音/升降音限制暂未支持，生成仍按音阶与和弦音池');
+    }
+
+    return unsupported;
+}
+
+/** 散文片段：含中文，或全小写英文（如 then / and then）。 */
+function isProsePart(part: string): boolean {
+    const trimmed = part.trim();
+    if (trimmed === '') return true;
+    return /[一-鿿]/.test(trimmed) || /^[a-z\s]+$/.test(trimmed);
+}
+
+/**
+ * 从一段描述里提取小节写法，如 `... 在 | C G | Am F | 内 ...`。
+ *
+ * 按 `|` 切分：能解析的是和弦组，散文片段跳过；既不是和弦也不是散文
+ * （如 `| C | H |` 里的 H）说明写法有误，整行作废，避免静默丢半张表。
+ * 单边小节线与跨行续写也按同一规则处理。
+ */
+export function parseDescriptionChordChart(
+    text: string,
+): ProgressionStep[][] | null {
+    const bars: ProgressionStep[][] = [];
+
+    for (const line of text.split(/\r?\n/)) {
+        if (!line.includes('|')) continue;
+        const parts = line.split('|');
+        const lineBars: ProgressionStep[][] = [];
+        let malformed = false;
+        for (const part of parts) {
+            const trimmed = part.trim();
+            if (trimmed === '') continue;
+            const parsed = parseProgressionText(trimmed);
+            if (parsed) {
+                lineBars.push([...parsed]);
+            } else if (!isProsePart(trimmed)) {
+                malformed = true;
+                break;
+            }
+        }
+        if (!malformed) bars.push(...lineBars);
+    }
+
+    return bars.length > 0 ? bars : null;
+}
+
+interface LabeledProgression {
+    steps: Progression;
+    /** 标签结束位置（正文起点） */
+    bodyStart: number;
+    /** 已消费的正文长度 */
+    consumed: number;
+}
+
+const PROGRESSION_LABEL = /(?:和弦(?:进行)?|chords?|progression)\s*[:：]?\s*/i;
+const LABEL_TOKEN = /[^\s,;，、|–—\-]+/g;
+/** 标签正文里一出现就说明和弦列表已结束的短语（调性 / 把位） */
+const OPTION_PHRASES: readonly RegExp[] = [
+    /\d{1,2}\s*(?:品)?\s*(?:[-–—~]|到|至)\s*\d{1,2}\s*品/,
+    /(?:^|[^A-Za-z])[A-Ga-g][#b]?\s*(?:大调|小调|调|major|minor|maj|min)(?![A-Za-z0-9])/i,
+];
+
+function optionPhraseStart(text: string): number {
+    let best = -1;
+    for (const pattern of OPTION_PHRASES) {
+        const match = pattern.exec(text);
+        if (match?.index !== undefined && (best < 0 || match.index < best)) {
+            best = match.index;
+        }
+    }
+    return best;
+}
+
+/**
+ * 标签进行只吃「连续合法的和弦 token」。
+ *
+ * 这样 `和弦进行：C G Am F、D 大调` 只取前面的进行，`D 大调` 留给调性
+ * 解析；也不会因为行尾还有把位范围而整组作废。第一段若以英文散文结尾，
+ * 允许取至少两个合法 token 的前缀。
+ */
+function parseLabeledProgression(line: string): LabeledProgression | undefined {
+    const label = PROGRESSION_LABEL.exec(line);
+    if (!label) return undefined;
+
+    const bodyStart = label.index + label[0].length;
+    const rawBody = line.slice(bodyStart);
+    const stops = [rawBody.search(/[。；;]/), optionPhraseStart(rawBody)]
+        .filter(index => index >= 0);
+    const body = stops.length > 0
+        ? rawBody.slice(0, Math.min(...stops))
+        : rawBody;
+
+    const steps: ProgressionStep[] = [];
+    let consumed = 0;
+    for (const clause of body.matchAll(/[^，,、]+/g)) {
+        const clauseText = clause[0];
+        const clauseStart = clause.index ?? 0;
+        const tokens = Array.from(clauseText.matchAll(LABEL_TOKEN));
+        if (tokens.length === 0) continue;
+
+        const parsed: ProgressionStep[] = [];
+        let lastValidEnd = clauseStart;
+        let allValid = true;
+        for (const token of tokens) {
+            const step = parseProgressionToken(token[0]);
+            if (step === null) {
+                allValid = false;
+                break;
+            }
+            parsed.push(step);
+            lastValidEnd = clauseStart + (token.index ?? 0) + token[0].length;
+        }
+
+        if (allValid) {
+            steps.push(...parsed);
+            consumed = clauseStart + clauseText.length;
+            continue;
+        }
+
+        if (steps.length === 0 && parsed.length >= 2) {
+            steps.push(...parsed);
+            consumed = lastValidEnd;
+        }
+        break;
+    }
+
+    if (steps.length === 0) return undefined;
+    return { steps, bodyStart, consumed };
+}
+
+/** 描述里的和弦进行：优先显式标签，其次 `| C G | Am F |` 小节写法 */
+function parseDescriptionProgression(text: string): Progression | undefined {
+    for (const line of text.split(/\r?\n/)) {
+        const labeled = parseLabeledProgression(line);
+        if (labeled) return labeled.steps;
+    }
+
+    const bars = parseDescriptionChordChart(text);
+    if (bars) return bars.flat();
+    return undefined;
+}
+
+/**
+ * 去掉描述里已经被进行解析消费的和弦内容，避免把进行中的 `Am` 误当调性。
+ *
+ * 只用于调性/音阶识别；未消费的尾部（例如 `D 大调`、`7-10品`）保留。
+ */
+function stripProgressionText(text: string): string {
+    return text.split(/\r?\n/).map(line => {
+        const label = PROGRESSION_LABEL.exec(line);
+        let cleaned = line;
+        if (label) {
+            const labeled = parseLabeledProgression(line);
+            cleaned = labeled
+                ? `${line.slice(0, label.index)} ${line.slice(labeled.bodyStart + labeled.consumed)}`
+                : `${line.slice(0, label.index)} ${line.slice(label.index + label[0].length)}`;
+        }
+
+        const start = cleaned.indexOf('|');
+        if (start < 0) return cleaned;
+        const end = cleaned.lastIndexOf('|');
+        return `${cleaned.slice(0, start)} ${end > start ? cleaned.slice(end + 1) : ''}`;
+    }).join('\n');
+}
+
+/**
  * 把一段中文/英文描述解析成生成选项。
  *
  * 未识别的文字直接忽略；返回值只包含命中的字段。
@@ -154,7 +365,7 @@ export function parseImprovDescription(text: string): Partial<ImprovOptions> {
         }
     }
 
-    const parsedKey = parseDescriptionKey(normalized);
+    const parsedKey = parseDescriptionKey(stripProgressionText(normalized));
     if (parsedKey) {
         result.key = parsedKey.key;
         // 只写了调性、没写音阶时，按大小调给一个合理默认；显式音阶在下面覆盖。
@@ -165,6 +376,12 @@ export function parseImprovDescription(text: string): Partial<ImprovOptions> {
 
     const scale = findFirst(normalized, SCALE_KEYWORDS);
     if (scale !== undefined) result.scaleType = scale;
+
+    const progression = parseDescriptionProgression(normalized);
+    if (progression !== undefined) result.progression = progression;
+
+    const fretRange = parseDescriptionFretRange(normalized);
+    if (fretRange !== null) result.fretRange = fretRange;
 
     return result;
 }

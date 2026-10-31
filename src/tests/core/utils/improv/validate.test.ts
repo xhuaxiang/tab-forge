@@ -209,6 +209,38 @@ describe('validateNotes', () => {
         expectError(leap, /跳进/);
     });
 
+    it('锁定把位时只对收尾音豁免跳进，中间音仍按放宽上限校验', () => {
+        const playability = LOCAL_IMPROV_CONFIG.playability;
+        const locked = makeOptions({
+            numMeasures: 2,
+            key: 'C',
+            fretRange: { min: 10, max: 12 },
+        });
+        const notes = Array.from({ length: 8 }, () =>
+            note({ string: 1, fret: 10, duration: 0.25 }));
+
+        // 收尾落到 10-12 品内唯一的主音 C（60），与上一个音 74 差 14。
+        const finalFar = [...notes];
+        finalFar[7] = note({ string: 4, fret: 10, duration: 0.25 });
+        expect(validateNotes(finalFar, locked, playability)
+            .some(error => /跳进/.test(error))).toBe(false);
+
+        // 同样的跳进放在中间音上仍然超限（锁定放宽上限为 12）。
+        const middleFar = [...notes];
+        middleFar[6] = note({ string: 4, fret: 10, duration: 0.25 });
+        expect(validateNotes(middleFar, locked, playability)
+            .some(error => /跳进/.test(error))).toBe(true);
+
+        // 全指板范围不算「锁定窄窗口」，不触发收尾豁免。
+        const wide = makeOptions({
+            numMeasures: 2,
+            key: 'C',
+            fretRange: { min: 0, max: 24 },
+        });
+        expect(validateNotes(finalFar, wide, playability)
+            .some(error => /跳进/.test(error))).toBe(true);
+    });
+
     it('句首换把放宽到 maxPhraseLeapSemitones，且只放宽第一个发音', () => {
         const leap = validNotes();
         leap[4] = note({ string: 1, fret: 14, duration: 0.25 });

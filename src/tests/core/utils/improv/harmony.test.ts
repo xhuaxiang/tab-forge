@@ -24,6 +24,8 @@ import {
     chordTonePitchClasses,
     diatonicChord,
     normalizeProgression,
+    segmentAt,
+    segmentIndexAt,
 } from '../../../../core/utils/improv/harmony.ts';
 import { buildSkeleton } from '../../../../core/utils/improv/melody.ts';
 import { fretToMidi, pitchClassOf } from '../../../../core/utils/improv/pitch.ts';
@@ -225,6 +227,106 @@ describe('buildHarmonyPlan', () => {
     });
 });
 
+describe('buildHarmonyPlan 与多和弦小节', () => {
+    it('同一小节按 chordChart 等分成多个和弦段', () => {
+        const options = makeOptions({
+            numMeasures: 2,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            progression: [2, 5],
+            chordChart: [
+                { measure: 0, start: 0, chord: 1 },
+                { measure: 0, start: 0.5, chord: 4 },
+            ],
+        });
+        const plan = buildHarmonyPlan(options);
+        const measure = plan[0];
+
+        expect(measure.segments.map(segment => segment.chord.rootPitchClass))
+            .toEqual([0, 5]);
+        expect(measure.segments.map(segment => segment.start)).toEqual([0, 0.5]);
+        expect(measure.segments.map(segment => segment.duration)).toEqual([0.5, 0.5]);
+        expect(measure.segments[0].pool.chordPitchClasses).toEqual([0, 4, 7]);
+        expect(measure.segments[1].pool.chordPitchClasses).toEqual([0, 5, 9]);
+        // 没有被 chordChart 覆盖的小节仍按 progression 兜底：2 小节正好用完进行。
+        expect(plan[1].segments).toHaveLength(1);
+        expect(plan[1].segments[0].chord.rootPitchClass).toBe(7);
+    });
+
+    it('6/8 下和弦段按 0.75 容量铺开', () => {
+        const options = makeOptions({
+            numMeasures: 1,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            timeSignature: '6/8',
+            chordChart: [
+                { measure: 0, start: 0, chord: 1 },
+                { measure: 0, start: 0.375, chord: 4 },
+            ],
+        });
+        const segments = buildHarmonyPlan(options)[0].segments;
+        expect(segments.map(segment => segment.start)).toEqual([0, 0.375]);
+        expect(segments.map(segment => segment.duration)).toEqual([0.375, 0.375]);
+    });
+
+    it('首个事件不在小节开头时，用进行兜底和弦补齐前半段', () => {
+        const options = makeOptions({
+            numMeasures: 1,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            progression: [2],
+            chordChart: [{ measure: 0, start: 0.5, chord: 4 }],
+        });
+        const segments = buildHarmonyPlan(options)[0].segments;
+        expect(segments).toHaveLength(2);
+        expect(segments[0].chord.rootPitchClass).toBe(2);
+        expect(segments[0].duration).toBe(0.5);
+        expect(segments[1].chord.rootPitchClass).toBe(5);
+    });
+
+    it('segmentAt 在边界上取后一段', () => {
+        const options = makeOptions({
+            numMeasures: 1,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            chordChart: [
+                { measure: 0, start: 0, chord: 1 },
+                { measure: 0, start: 0.5, chord: 4 },
+            ],
+        });
+        const measure = buildHarmonyPlan(options)[0];
+
+        expect(segmentIndexAt(measure, 0)).toBe(0);
+        expect(segmentIndexAt(measure, 0.49)).toBe(0);
+        expect(segmentIndexAt(measure, 0.5)).toBe(1);
+        expect(segmentAt(measure, 0.75)?.chord.rootPitchClass).toBe(5);
+        expect(segmentAt(measure, 1)?.chord.rootPitchClass).toBe(5);
+        expect(segmentAt(undefined, 0)).toBeUndefined();
+    });
+
+    it('多和弦进行能端到端生成，并保留每小节和弦段', () => {
+        const result = generateLocalImprovisation({
+            numMeasures: 4,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            style: 'Folk',
+            density: '中',
+            progression: [1, 4, 5, 1],
+            chordChart: [
+                { measure: 0, start: 0, chord: 1 },
+                { measure: 0, start: 0.5, chord: 4 },
+                { measure: 1, start: 0, chord: 5 },
+                { measure: 1, start: 0.5, chord: 1 },
+            ],
+            seed: 7,
+        });
+
+        expect(result.harmony[0].segments).toHaveLength(2);
+        expect(result.harmony[1].segments).toHaveLength(2);
+        expect(result.notes.some(note => !note.isRest)).toBe(true);
+    });
+});
+
 describe('buildSkeleton 与和声约束', () => {
     it('强拍、句尾落当前和弦音，弱拍长音避开 avoid note', () => {
         const options = makeOptions({
@@ -325,6 +427,35 @@ describe('validateNotes 与和声', () => {
         // C3 → E3 → G3 → C3
         expect(validateNotes(
             chordTones, options, LOCAL_IMPROV_CONFIG.playability,
+            LOCAL_IMPROV_CONFIG.playability.maxLeapSemitones, harmony,
+        )).toEqual([]);
+    });
+
+    it('换和弦后的首音不是新和弦音会报错', () => {
+        const options = makeOptions({
+            numMeasures: 1,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            chordChart: [
+                { measure: 0, start: 0, chord: 1 },
+                { measure: 0, start: 0.5, chord: 2 },
+            ],
+        });
+        const harmony = buildHarmonyPlan(options);
+        // C3 → E3 → E3（换到 Dm 后的首音）→ G3
+        const notes = [
+            note(5, 3), note(4, 2), note(4, 2), note(3, 0),
+        ];
+
+        expect(validateNotes(
+            notes, options, LOCAL_IMPROV_CONFIG.playability,
+            LOCAL_IMPROV_CONFIG.playability.maxLeapSemitones, harmony,
+        ).some(error => /换和弦后的首音/.test(error))).toBe(true);
+
+        // 把首音改成 D3（Dm 和弦音）后通过。
+        expect(validateNotes(
+            [note(5, 3), note(4, 2), note(4, 0), note(3, 0)],
+            options, LOCAL_IMPROV_CONFIG.playability,
             LOCAL_IMPROV_CONFIG.playability.maxLeapSemitones, harmony,
         )).toEqual([]);
     });

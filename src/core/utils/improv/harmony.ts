@@ -2,13 +2,14 @@
  * harmony — 和弦进行 → 每小节和弦音与可用音池（纯函数）。
  *
  * 这一层只处理 pitch class：具体八度仍由旋律音区与把位 DP 决定。
- * v1 一小节一个和弦；小节数少于进行长度时保留进行的收尾，小节数多于
- * 进行长度时循环，但最后一小节强制落在进行的最后一步，避免句子停在
- * 不稳定和弦上。
+ * 一小节可以有一个或多个和弦（`chordChart`），未覆盖的小节按 `progression`
+ * 铺法兜底：小节数少于进行长度时保留收尾，多于进行长度时循环，但最后一
+ * 小节强制落在进行的最后一步，避免句子停在不稳定和弦上。
  */
 
 import type {
     ChordDegree,
+    ChordEvent,
     ChordSpec,
     ChordQuality,
     HarmonyMeasure,
@@ -20,53 +21,21 @@ import type {
 } from '../../types/improv.ts';
 import {
     CHORD_INTERVALS,
-    CHORD_QUALITIES,
     SCALE_INTERVALS,
 } from '../../types/improv.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { pitchClassOf, scalePitchClasses } from './pitch.ts';
 
-/** 和弦质量白名单（运行时输入校验用） */
-export function isChordQuality(value: unknown): value is ChordQuality {
-    return typeof value === 'string'
-        && (CHORD_QUALITIES as readonly string[]).includes(value);
-}
+// 校验与规范化已移到 progression.ts；这里保留 re-export，避免现有调用点漂移。
+export {
+    isChordDegree,
+    isChordQuality,
+    isChordSpec,
+    isProgressionStep,
+    normalizeProgression,
+} from './progression.ts';
 
-/** 调内级数校验 */
-export function isChordDegree(value: unknown): value is ChordDegree {
-    return typeof value === 'number'
-        && Number.isInteger(value)
-        && value >= 1
-        && value <= 7;
-}
-
-/** 显式和弦校验 */
-export function isChordSpec(value: unknown): value is ChordSpec {
-    if (typeof value !== 'object' || value === null) return false;
-    const candidate = value as Partial<ChordSpec>;
-    return typeof candidate.rootPitchClass === 'number'
-        && Number.isInteger(candidate.rootPitchClass)
-        && candidate.rootPitchClass >= 0
-        && candidate.rootPitchClass <= 11
-        && isChordQuality(candidate.quality);
-}
-
-/** 进行步骤校验 */
-export function isProgressionStep(value: unknown): value is ProgressionStep {
-    return isChordDegree(value) || isChordSpec(value);
-}
-
-/**
- * 把外部输入收敛成合法进行。
- *
- * 整个数组只要有一项非法就回落到 `[1]`，不做「过滤坏项、保留好项」——
- * 半截进行比明确回落更难排查。返回值是新数组，避免调用方后续修改。
- */
-export function normalizeProgression(value: unknown): Progression {
-    if (!Array.isArray(value) || value.length === 0) return [1];
-    if (!value.every(isProgressionStep)) return [1];
-    return value.map(step => typeof step === 'number' ? step : { ...step });
-}
+const TOLERANCE = 1e-9;
 
 /** 和弦音 pitch classes（升序、去重） */
 export function chordTonePitchClasses(chord: ChordSpec): number[] {
@@ -134,10 +103,53 @@ function chordForStep(
     return { ...step };
 }
 
+function makeSegment(
+    start: number,
+    duration: number,
+    step: ProgressionStep,
+    options: ResolvedImprovOptions,
+): HarmonySegment {
+    const chord = chordForStep(step, options);
+    return {
+        start,
+        duration,
+        chord,
+        pool: buildPitchPool(chord, options),
+    };
+}
+
+/** 把一小节的显式和弦事件铺成连续段；首段之前用默认和弦补齐 */
+function segmentsForMeasure(
+    events: readonly ChordEvent[],
+    defaultChord: ChordSpec,
+    capacity: number,
+    options: ResolvedImprovOptions,
+): HarmonySegment[] {
+    const points: Array<{ start: number; chord: ProgressionStep }> = [];
+    if (events[0].start > TOLERANCE) {
+        points.push({ start: 0, chord: defaultChord });
+    }
+    for (const event of events) {
+        points.push({ start: Math.min(capacity, Math.max(0, event.start)), chord: event.chord });
+    }
+    points.sort((a, b) => a.start - b.start);
+
+    return points.map((point, index) => {
+        const end = index + 1 < points.length ? points[index + 1].start : capacity;
+        return makeSegment(
+            point.start,
+            Math.max(TOLERANCE, end - point.start),
+            point.chord,
+            options,
+        );
+    });
+}
+
 /**
  * 生成每小节的和弦与音池。
  *
- * 进行展开规则：
+ * `chordChart` 非空时，优先按显式事件铺段：同一小节可以有多个和弦，
+ * 未被覆盖的小节仍按 `progression` 兜底。否则沿用逐小节铺法：
  * - 小节数 ≤ 进行长度：取进行的最后 N 步，保留收尾；
  * - 小节数 > 进行长度：循环进行，最后一小节强制落在最后一步。
  */
@@ -153,23 +165,62 @@ export function buildHarmonyPlan(options: ResolvedImprovOptions): HarmonyMeasure
     const chords = steps.map(step => chordForStep(step, options));
     const count = chords.length;
 
+    const chartByMeasure = new Map<number, ChordEvent[]>();
+    for (const event of options.chordChart) {
+        if (!Number.isInteger(event.measure)
+            || event.measure < 0 || event.measure >= options.numMeasures) {
+            continue;
+        }
+        const list = chartByMeasure.get(event.measure) ?? [];
+        list.push(event);
+        chartByMeasure.set(event.measure, list);
+    }
+    for (const list of chartByMeasure.values()) {
+        list.sort((a, b) => a.start - b.start);
+    }
+
     const measures: HarmonyMeasure[] = [];
     for (let measureIndex = 0; measureIndex < options.numMeasures; measureIndex++) {
-        const chord = options.numMeasures <= count
+        const defaultChord = options.numMeasures <= count
             ? chords[count - options.numMeasures + measureIndex]
             : measureIndex === options.numMeasures - 1
                 ? chords[count - 1]
                 : chords[measureIndex % count];
 
-        const segment: HarmonySegment = {
-            start: 0,
-            duration: capacity,
-            chord,
-            pool: buildPitchPool(chord, options),
-        };
-        measures.push({ measureIndex, segments: [segment] });
+        const events = chartByMeasure.get(measureIndex);
+        const segments = events && events.length > 0
+            ? segmentsForMeasure(events, defaultChord, capacity, options)
+            : [{ start: 0, chord: defaultChord, duration: capacity }]
+                .map(segment => ({
+                    ...segment,
+                    pool: buildPitchPool(segment.chord, options),
+                }));
+        measures.push({ measureIndex, segments });
     }
     return measures;
+}
+
+/** 小节内某偏移所属和弦段的下标；偏移正好落在边界时取后一段 */
+export function segmentIndexAt(
+    measure: HarmonyMeasure | undefined,
+    offsetInMeasure: number,
+): number {
+    if (!measure || measure.segments.length === 0) return -1;
+    for (let index = measure.segments.length - 1; index >= 0; index--) {
+        if (offsetInMeasure >= measure.segments[index].start - TOLERANCE) {
+            return index;
+        }
+    }
+    return 0;
+}
+
+/** 小节内某偏移所属的和弦段 */
+export function segmentAt(
+    measure: HarmonyMeasure | undefined,
+    offsetInMeasure: number,
+): HarmonySegment | undefined {
+    const index = segmentIndexAt(measure, offsetInMeasure);
+    return index >= 0 ? measure?.segments[index] : undefined;
 }
 
 /** 构建一个和弦的可用音池 */

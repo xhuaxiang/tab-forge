@@ -7,6 +7,7 @@
  */
 
 import type {
+    FretRange,
     MelodicContour,
     PhrasePlan,
     PhraseRole,
@@ -149,7 +150,16 @@ function windowFor(
     style: StyleProfile,
     playability: PlayabilityRules,
     rng: () => number,
+    fixedRange: FretRange | null,
 ): { fretMin: number; fretMax: number } {
+    // 用户锁定把位时所有乐句都用同一个窗口，风格偏好不再收窄或换把。
+    if (fixedRange) {
+        return {
+            fretMin: Math.max(playability.fretMin, fixedRange.min),
+            fretMax: Math.min(playability.fretMax, fixedRange.max),
+        };
+    }
+
     const baseMin = Math.max(playability.fretMin, style.preferredFretMin);
     const baseMax = Math.min(playability.fretMax, style.preferredFretMax);
     if (baseMax - baseMin + 1 <= 3) return { fretMin: baseMin, fretMax: baseMax };
@@ -203,7 +213,9 @@ export function buildPhrasePlan(
         const steps = index === 0
             ? [...baseSteps]
             : deriveSteps(baseSteps, variation, contour, rng);
-        const { fretMin, fretMax } = windowFor(role, style, playability, rng);
+        const { fretMin, fretMax } = windowFor(
+            role, style, playability, rng, options.fretRange,
+        );
 
         phrases.push({
             index,

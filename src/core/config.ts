@@ -303,6 +303,10 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         options: [...IMPROV_CONFIG.numMeasures.options],
     },
     timeSignatures: ['2/2', '2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8'],
+    chordsPerMeasure: {
+        default: 1,
+        options: [1, 2, 4],
+    },
     defaults: {
         numMeasures: 4,
         key: SCORE_DEFAULTS.key,

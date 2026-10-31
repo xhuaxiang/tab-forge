@@ -79,6 +79,8 @@ export function choosePositions(
 ): PositionedSlot[] {
     const noteIndices: number[] = [];
     const noteCandidates: FretPosition[][] = [];
+    const fretMin = options.fretRange?.min ?? playability.fretMin;
+    const fretMax = options.fretRange?.max ?? playability.fretMax;
 
     skeleton.forEach((slot, index) => {
         if (slot.isRest) {
@@ -94,8 +96,8 @@ export function choosePositions(
         const candidates = midiToFretPositions(
             options.tuning,
             slot.midis[0],
-            playability.fretMin,
-            playability.fretMax,
+            fretMin,
+            fretMax,
         );
         if (candidates.length === 0) {
             throw new Error(`MIDI ${slot.midis[0]} 在指板上没有可用位置`);

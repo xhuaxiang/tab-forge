@@ -101,6 +101,26 @@ export type ProgressionStep = ChordDegree | ChordSpec;
 /** 和弦进行：按小节铺开，最后一小节落在进行的最后一步 */
 export type Progression = readonly ProgressionStep[];
 
+/** 用户锁定的把位范围（品位，含端点，0-24） */
+export interface FretRange {
+    min: number;
+    max: number;
+}
+
+/**
+ * 显式和弦事件：在第 `measure` 小节的 `start` 位置换和弦。
+ *
+ * `start` 以全音符为单位（4/4 一小节 = 1）；`chord` 可以是级数或显式
+ * 和弦，级别解析仍在和声层完成。一小节内按 start 升序形成多个和弦段。
+ */
+export interface ChordEvent {
+    /** 小节下标，0-based */
+    measure: number;
+    /** 相对小节起点的位置（全音符为单位） */
+    start: number;
+    chord: ProgressionStep;
+}
+
 /**
  * 一个小节/和弦段的可用音池（pitch class）。
  *
@@ -114,7 +134,7 @@ export interface PitchPool {
     avoidPitchClasses: number[];
 }
 
-/** 小节内的和弦段；v1 一小节一个和弦，start=0、duration=小节容量 */
+/** 小节内的和弦段；start/duration 与小节容量同单位（全音符=1） */
 export interface HarmonySegment {
     /** 相对小节起点的位置（全音符为单位） */
     start: number;
@@ -141,6 +161,13 @@ export interface ImprovOptions {
     tuning?: Tuning;
     /** 和弦进行；不传时按 I 级主和弦，保持原有行为 */
     progression?: Progression;
+    /**
+     * 显式多和弦位置；非空时覆盖 `progression` 的逐小节铺法，
+     * 未覆盖的小节仍按 `progression` 兜底。
+     */
+    chordChart?: readonly ChordEvent[];
+    /** 用户锁定的把位范围；不传时按风格偏好 */
+    fretRange?: FretRange;
     /** 固定种子；不传时由 UI 生成，core 默认 1 */
     seed?: number;
 }
@@ -158,6 +185,10 @@ export interface ResolvedImprovOptions {
     timeSignature: string;
     tuning: Tuning;
     progression: Progression;
+    /** 规范化后的显式和弦事件；空数组表示只按 progression 铺 */
+    chordChart: readonly ChordEvent[];
+    /** 规范化后的用户把位；null 表示未锁定，按风格偏好 */
+    fretRange: FretRange | null;
     seed: number;
 }
 
@@ -375,6 +406,11 @@ export interface LocalImprovConfig {
         options: readonly number[];
     };
     timeSignatures: readonly string[];
+    /** 每小节和弦数（等分）；1 表示沿用 progression 的逐小节铺法 */
+    chordsPerMeasure: {
+        default: number;
+        options: readonly number[];
+    };
     defaults: {
         numMeasures: number;
         key: string;

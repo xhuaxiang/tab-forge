@@ -16,7 +16,14 @@ import type {
 } from '../../types/improv.ts';
 import { BEND_AMOUNT_LABELS } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
-import { fretToMidi, isInScale, pitchClassOf } from './pitch.ts';
+import { segmentAt, segmentIndexAt } from './harmony.ts';
+import {
+    fretToMidi,
+    isInScale,
+    midiRangeForFretRange,
+    nearestPlayableMidiWithPitchClasses,
+    pitchClassOf,
+} from './pitch.ts';
 import { classifySlotRole } from './rhythm.ts';
 
 const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
@@ -96,6 +103,8 @@ function validateNoteFields(
 ): string[] {
     const errors: string[] = [];
     const prefix = `第 ${index + 1} 个音符`;
+    const fretMin = options.fretRange?.min ?? playability.fretMin;
+    const fretMax = options.fretRange?.max ?? playability.fretMax;
 
     if (!isDurationValid(note.duration) || note.duration <= 0) {
         errors.push(`${prefix}时值非法: ${note.duration}`);
@@ -122,7 +131,7 @@ function validateNoteFields(
         errors.push(`${prefix}弦号非法: ${note.string}`);
     }
     if (note.fret === undefined || !Number.isInteger(note.fret)
-        || note.fret < playability.fretMin || note.fret > playability.fretMax) {
+        || note.fret < fretMin || note.fret > fretMax) {
         errors.push(`${prefix}品位非法: ${note.fret}`);
     }
 
@@ -244,7 +253,7 @@ export function validateNotes(
         (last, note, index) => note.isRest ? last : index,
         -1,
     );
-    const middleLimit = Number.isFinite(middleMaxLeapSemitones)
+    const baseMiddleLimit = Number.isFinite(middleMaxLeapSemitones)
         ? Math.max(1, Math.min(middleMaxLeapSemitones, playability.maxLeapSemitones))
         : playability.maxLeapSemitones;
     // 句间换把与旋律骨骼一致：只在这一句的第一个发音上放宽。
@@ -252,12 +261,36 @@ export function validateNotes(
         phrases?.map(phrase => phrase.startMeasure) ?? [],
     );
     const phraseStartSeen = new Set<number>();
+    const segmentStartSeen = new Set<string>();
     // 生成器在句首取 max(风格上限, maxPhraseLeap)，这里用同一表达式，
     // 避免把 maxPhraseLeap 配得比 maxLeap 小时生成结果必被拒绝。
     const phraseLeapLimit = Math.max(
         playability.maxLeapSemitones,
         playability.maxPhraseLeapSemitones,
     );
+    // 锁定把位时，和弦音可能只在风格音区之外出现；生成器用同一上限
+    // 做锚点吸附，这里必须同步放行，否则合法结果会被判超限。
+    const middleLimit = options.fretRange
+        ? Math.max(baseMiddleLimit, phraseLeapLimit)
+        : baseMiddleLimit;
+    // 收尾主音可能只在锁定窗口的另一端。仅在窗口确实窄于整条指板时
+    // 豁免；上限取该窗口的 MIDI 跨度（有限值，不会放过任意跳进）。
+    let lockedFinalLeapLimit: number | null = null;
+    if (options.fretRange) {
+        const narrower = options.fretRange.max - options.fretRange.min
+            < playability.fretMax - playability.fretMin;
+        if (narrower) {
+            const [lockedLow, lockedHigh] = midiRangeForFretRange(
+                options.tuning,
+                options.fretRange.min,
+                options.fretRange.max,
+            );
+            lockedFinalLeapLimit = Math.max(
+                phraseLeapLimit,
+                lockedHigh - lockedLow,
+            );
+        }
+    }
 
     let total = 0;
     let measureBoundary = capacity;
@@ -268,13 +301,16 @@ export function validateNotes(
         const measureIndex = Number.isFinite(startsAt) && startsAt >= 0
             ? Math.floor(startsAt / capacity + 1e-9)
             : 0;
-        const segment = harmony?.[measureIndex]?.segments[0];
+        const offsetInMeasure = startsAt - measureIndex * capacity;
+        const measureHarmony = harmony?.[measureIndex];
+        const segmentIndex = segmentIndexAt(measureHarmony, offsetInMeasure);
+        const segment = segmentAt(measureHarmony, offsetInMeasure);
         const allowedPitchClasses = segment
             ? new Set(segment.pool.availablePitchClasses)
             : undefined;
         const role = segment && Number.isFinite(note.duration) && note.duration > 0
             ? classifySlotRole(
-                startsAt - measureIndex * capacity,
+                offsetInMeasure,
                 note.duration,
                 options.timeSignature,
             )
@@ -301,25 +337,71 @@ export function validateNotes(
                 const midi = fretToMidi(options.tuning, note.string, note.fret);
                 const pitchClass = pitchClassOf(midi);
 
+                // 换和弦后的第一个发音必须落在新和弦音；段 0 沿用旧的
+                // “小节首音”规则，不额外收紧。
+                const segmentKey = `${measureIndex}:${segmentIndex}`;
+                const isFirstSoundingOfSegment = segmentIndex > 0
+                    && !segmentStartSeen.has(segmentKey);
+                segmentStartSeen.add(segmentKey);
+
+                // 锁定把位时，窗口里可能根本按不到当前和弦音。此时锚点
+                // 规则无解，生成器只能保留候选音；校验同步跳过这两条，
+                // 但仍保留 avoid note 与越界检查。
+                const reachable = (pitchClasses: readonly number[]): boolean =>
+                    !options.fretRange || previousMidi === null
+                    || nearestPlayableMidiWithPitchClasses(
+                        options.tuning,
+                        previousMidi,
+                        pitchClasses,
+                        previousMidi - phraseLeapLimit,
+                        previousMidi + phraseLeapLimit,
+                        options.fretRange.min,
+                        options.fretRange.max,
+                    ) !== null;
+                const chordToneReachable = reachable(
+                    segment?.pool.chordPitchClasses ?? [],
+                );
+                const nonAvoid = segment
+                    ? segment.pool.availablePitchClasses.filter(
+                        value => !segment.pool.avoidPitchClasses.includes(value),
+                    )
+                    : [];
+                const weakTargetReachable = reachable(
+                    nonAvoid.length > 0
+                        ? nonAvoid
+                        : segment?.pool.chordPitchClasses ?? [],
+                );
+
                 // 最后一个音是全曲收束，允许落在主音而不是当前和弦音。
                 if (segment && role && index !== lastSoundingIndex) {
-                    if (role === 'strong'
+                    if (isFirstSoundingOfSegment && chordToneReachable
+                        && !segment.pool.chordPitchClasses.includes(pitchClass)) {
+                        errors.push(`第 ${index + 1} 个音符是换和弦后的首音却不在新和弦音`);
+                    } else if (role === 'strong' && chordToneReachable
                         && !segment.pool.chordPitchClasses.includes(pitchClass)) {
                         errors.push(`第 ${index + 1} 个音符在强拍但不在当前和弦音`);
-                    } else if (role !== 'passing'
+                    } else if (role !== 'passing' && weakTargetReachable
                         && segment.pool.avoidPitchClasses.includes(pitchClass)
                         && !segment.pool.chordPitchClasses.includes(pitchClass)) {
                         errors.push(`第 ${index + 1} 个音符是长音 avoid note`);
                     }
                 }
 
-                // 同一小节内只有第一个发音享受换把放宽，后续音仍守中间上限。
+                // 同一小节内只有第一个发音享受换把放宽，后续音仍守中间上限；
+                // 小节内换和弦的首音也允许一次换把幅度。
                 const isPhraseStart = phraseStartMeasures.has(measureIndex)
                     && !phraseStartSeen.has(measureIndex);
                 if (isPhraseStart) phraseStartSeen.add(measureIndex);
-                const leapLimit = index === lastSoundingIndex || isPhraseStart
-                    ? phraseLeapLimit
-                    : middleLimit;
+                // 锁定把位时，收尾主音可能只在离上一个音很远的品位上出现
+                // （例如 10-12 品里 C 只有 60）。此时把位是硬约束，收尾
+                // 优先落主音；豁免上限见 lockedFinalLeapLimit。
+                const leapLimit = index === lastSoundingIndex
+                    && lockedFinalLeapLimit !== null
+                    ? lockedFinalLeapLimit
+                    : index === lastSoundingIndex || isPhraseStart
+                        || isFirstSoundingOfSegment
+                        ? phraseLeapLimit
+                        : middleLimit;
                 if (previousMidi !== null
                     && Math.abs(midi - previousMidi) > leapLimit) {
                     errors.push(`第 ${index + 1} 个音符跳进 ${Math.abs(midi - previousMidi)} 超过上限`);
