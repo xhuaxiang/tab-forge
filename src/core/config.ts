@@ -5,6 +5,10 @@
  */
 
 import { STANDARD_TUNING, type Tuning } from './types/index.ts';
+import type {
+    LocalImprovConfig,
+    ProgressionStep,
+} from './types/improv.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {
@@ -262,3 +266,195 @@ export const IMPROV_CONFIG = {
 export function getHint(options: ImprovSelectOption[], value: string): string | undefined {
     return options.find(o => o.value === value)?.hint;
 }
+
+// ============================================================
+// 本地即兴生成配置
+// ============================================================
+
+/** 本地即兴面板可选的和弦进行（级数以当前调性展开） */
+export interface LocalProgressionOption {
+    value: string;
+    label: string;
+    steps: readonly ProgressionStep[];
+}
+
+export const LOCAL_PROGRESSIONS: readonly LocalProgressionOption[] = [
+    { value: 'I', label: '无（I 级）', steps: [1] },
+    { value: 'I-IV-V-I', label: 'I–IV–V–I', steps: [1, 4, 5, 1] },
+    { value: 'ii-V-I', label: 'ii–V–I', steps: [2, 5, 1] },
+    { value: 'I-V-vi-IV', label: 'I–V–vi–IV', steps: [1, 5, 6, 4] },
+    { value: 'I-vi-IV-V', label: 'I–vi–IV–V', steps: [1, 6, 4, 5] },
+];
+
+/**
+ * 本地即兴生成参数。
+ *
+ * 与 {@link IMPROV_CONFIG} 分开：后者是 AI 的散文 prompt 资产（hint），
+ * 这里必须是机器可读的数字权重。两边的风格/密度/音阶取值集合要保持一致，
+ * 由 `tests/core/config.localImprov.test.ts` 的漂移测试钉住。
+ *
+ * 本地路径允许 2 小节；AI 路径仍按 IMPROV_CONFIG 的 min=3 夹取，互不影响。
+ */
+export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
+    numMeasures: {
+        default: 4,
+        min: 2,
+        max: 16,
+        options: [...IMPROV_CONFIG.numMeasures.options],
+    },
+    timeSignatures: ['2/2', '2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8'],
+    defaults: {
+        numMeasures: 4,
+        key: SCORE_DEFAULTS.key,
+        scaleType: 'Major (Ionian)',
+        style: 'Folk',
+        density: '中',
+        timeSignature: SCORE_DEFAULTS.timeSignature,
+        tuning: { ...SCORE_DEFAULTS.tuning },
+        seed: 1,
+    },
+    densityProfiles: {
+        低: {
+            durations: [
+                { duration: 0.5, weight: 0.55 },
+                { duration: 0.25, weight: 0.35 },
+                { duration: 0.125, weight: 0.1 },
+            ],
+            restProbability: 0.28,
+            minNotesPerMeasure: 2,
+        },
+        中: {
+            durations: [
+                { duration: 0.25, weight: 0.4 },
+                { duration: 0.125, weight: 0.4 },
+                { duration: 0.5, weight: 0.1 },
+                { duration: 0.0625, weight: 0.1 },
+            ],
+            restProbability: 0.15,
+            minNotesPerMeasure: 3,
+        },
+        高: {
+            durations: [
+                { duration: 0.125, weight: 0.45 },
+                { duration: 0.0625, weight: 0.3 },
+                { duration: 0.25, weight: 0.25 },
+            ],
+            restProbability: 0.07,
+            minNotesPerMeasure: 4,
+        },
+    },
+    styleProfiles: {
+        Jazz: {
+            durations: [
+                { duration: 0.125, weight: 0.45 },
+                { duration: 0.25, weight: 0.3 },
+                { duration: 0.0625, weight: 0.15 },
+                { duration: 0.5, weight: 0.1 },
+            ],
+            preferredFretMin: 5,
+            preferredFretMax: 12,
+            registerCenterMidi: 64,
+            registerRangeSemitones: 21,
+            maxLeapSemitones: 7,
+            motifLength: 2,
+            repetitionProbability: 0.45,
+            accentProbability: 0.35,
+            softProbability: 0.35,
+            bendProbability: 0.12,
+            vibratoProbability: 0.18,
+            palmMuteProbability: 0,
+        },
+        Blues: {
+            durations: [
+                { duration: 0.125, weight: 0.45 },
+                { duration: 0.25, weight: 0.3 },
+                { duration: 0.0625, weight: 0.15 },
+                { duration: 0.5, weight: 0.1 },
+            ],
+            preferredFretMin: 5,
+            preferredFretMax: 12,
+            registerCenterMidi: 62,
+            registerRangeSemitones: 19,
+            maxLeapSemitones: 5,
+            motifLength: 2,
+            repetitionProbability: 0.4,
+            accentProbability: 0.4,
+            softProbability: 0.3,
+            bendProbability: 0.25,
+            vibratoProbability: 0.25,
+            palmMuteProbability: 0,
+        },
+        Rock: {
+            durations: [
+                { duration: 0.125, weight: 0.45 },
+                { duration: 0.25, weight: 0.25 },
+                { duration: 0.0625, weight: 0.2 },
+                { duration: 0.5, weight: 0.1 },
+            ],
+            preferredFretMin: 5,
+            preferredFretMax: 17,
+            registerCenterMidi: 67,
+            registerRangeSemitones: 24,
+            maxLeapSemitones: 7,
+            motifLength: 3,
+            repetitionProbability: 0.5,
+            accentProbability: 0.45,
+            softProbability: 0.2,
+            bendProbability: 0.12,
+            vibratoProbability: 0.1,
+            palmMuteProbability: 0.25,
+        },
+        Folk: {
+            durations: [
+                { duration: 0.25, weight: 0.4 },
+                { duration: 0.125, weight: 0.4 },
+                { duration: 0.5, weight: 0.15 },
+                { duration: 0.0625, weight: 0.05 },
+            ],
+            preferredFretMin: 0,
+            preferredFretMax: 7,
+            registerCenterMidi: 62,
+            registerRangeSemitones: 19,
+            maxLeapSemitones: 5,
+            motifLength: 2,
+            repetitionProbability: 0.35,
+            accentProbability: 0.3,
+            softProbability: 0.25,
+            bendProbability: 0,
+            vibratoProbability: 0.06,
+            palmMuteProbability: 0,
+        },
+        Classical: {
+            durations: [
+                { duration: 0.25, weight: 0.35 },
+                { duration: 0.125, weight: 0.4 },
+                { duration: 0.0625, weight: 0.2 },
+                { duration: 0.5, weight: 0.05 },
+            ],
+            preferredFretMin: 0,
+            preferredFretMax: 12,
+            registerCenterMidi: 64,
+            registerRangeSemitones: 24,
+            maxLeapSemitones: 7,
+            motifLength: 2,
+            repetitionProbability: 0.25,
+            accentProbability: 0.25,
+            softProbability: 0.25,
+            bendProbability: 0,
+            vibratoProbability: 0.08,
+            palmMuteProbability: 0,
+        },
+    },
+    playability: {
+        fretMin: 0,
+        fretMax: 24,
+        maxHandSpan: 5,
+        maxStringJump: 2,
+        maxLeapSemitones: 7,
+        minBendDuration: 0.125,
+        minBendReleaseDuration: 0.25,
+        minVibratoDuration: 0.25,
+        minPalmMuteDuration: 0.125,
+        palmMuteStrings: [4, 6],
+    },
+};

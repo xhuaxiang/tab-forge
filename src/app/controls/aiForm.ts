@@ -6,36 +6,18 @@ import { $, setStatus } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../../features/ai/index.ts';
 import { IMPROV_CONFIG } from '../../core/config.ts';
+import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
 
 /** 从 IMPROV_CONFIG 生成即兴选项下拉（小节数/音阶/风格/密度），单一来源 */
 function initImprovConfig(): void {
-    const fillSelect = (id: string, options: ReadonlyArray<{ value: string; label: string }>, defaultVal: string): void => {
-        const sel = document.getElementById(id) as HTMLSelectElement | null;
-        if (!sel) return;
-        sel.innerHTML = '';
-        for (const o of options) {
-            const opt = document.createElement('option');
-            opt.value = o.value;
-            opt.textContent = o.label;
-            if (o.value === defaultVal) opt.selected = true;
-            sel.appendChild(opt);
-        }
-    };
-
-    const numSel = document.getElementById('aiNumMeasures') as HTMLSelectElement | null;
-    if (numSel) {
-        numSel.innerHTML = '';
-        for (const n of IMPROV_CONFIG.numMeasures.options) {
-            const opt = document.createElement('option');
-            opt.value = String(n);
-            opt.textContent = String(n);
-            if (n === IMPROV_CONFIG.numMeasures.default) opt.selected = true;
-            numSel.appendChild(opt);
-        }
-    }
-    fillSelect('aiScaleType', IMPROV_CONFIG.scaleTypes, IMPROV_CONFIG.scaleTypes[0].value);
-    fillSelect('aiStyle', IMPROV_CONFIG.styles, IMPROV_CONFIG.styles[0].value);
-    fillSelect('aiDensity', IMPROV_CONFIG.densities, IMPROV_CONFIG.densities[1].value);
+    fillNumberSelect(
+        'aiNumMeasures',
+        IMPROV_CONFIG.numMeasures.options,
+        IMPROV_CONFIG.numMeasures.default,
+    );
+    fillSelectOptions('aiScaleType', IMPROV_CONFIG.scaleTypes, IMPROV_CONFIG.scaleTypes[0].value);
+    fillSelectOptions('aiStyle', IMPROV_CONFIG.styles, IMPROV_CONFIG.styles[0].value);
+    fillSelectOptions('aiDensity', IMPROV_CONFIG.densities, IMPROV_CONFIG.densities[1].value);
 }
 
 /** 初始化 API Key 输入框（从存储中加载已保存的 Key） */
@@ -140,15 +122,6 @@ export function initAIForm(): void {
     // 初始化 API Key 输入框 + 选项下拉（从 IMPROV_CONFIG 生成）
     initAIKeyInput();
     initImprovConfig();
-
-    // Toolbar 快速按钮：打开 AI 设置面板
-    $('aiImprovBtn')?.addEventListener('click', () => {
-        const panel = document.getElementById('aiSettingsPanel') as HTMLDetailsElement;
-        if (panel) {
-            panel.open = true;
-            panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-    });
 
     // AI 生成按钮
     $('aiGenerateBtn')?.addEventListener('click', handleAIGenerate);

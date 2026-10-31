@@ -14,6 +14,8 @@ import { initSearchSelects } from './input/searchSelect.ts';
 import { initNoteInput } from './input/noteInput.ts';
 import { initMeasureControls } from './controls/measureControls.ts';
 import { initAIForm } from './controls/aiForm.ts';
+import { initLocalImprovForm } from './controls/localImprovForm.ts';
+import { initImprovModeSwitch } from './controls/improvMode.ts';
 import { syncScoreDefaultsToUI } from './controls/formSync.ts';
 import { initScoreControls } from './controls/scoreControls.ts';
 import { initPlaybackControls } from './playback/playbackControls.ts';
@@ -69,6 +71,8 @@ export function initEventListeners(): void {
     initNoteInput();
     initMeasureControls();
     initAIForm();
+    initLocalImprovForm();
+    initImprovModeSwitch();
     syncScoreDefaultsToUI();
     initScoreControls();
     initPlaybackControls();
