@@ -44,6 +44,25 @@ export function isPlaybackEngine(v: string | null | undefined): v is PlaybackEng
     return v != null && (PLAYBACK_ENGINES as readonly string[]).includes(v);
 }
 
+/**
+ * 谱面显示模式取值（唯一来源）。
+ *
+ * `tab` = 只画六线谱（alphaTab 原生支持，休止符/拍号都落在六线上）；
+ * `scoretab` = 五线谱 + 六线谱（alphaTab 会隐藏六线上的休止符）。
+ * 与 index.html 的 `#displayModeSelect` option value 对应，启动时同样做漂移自检。
+ */
+export const DISPLAY_MODES = ['tab', 'scoretab'] as const;
+
+export type DisplayMode = (typeof DISPLAY_MODES)[number];
+
+/** 默认显示模式：六线谱（扒谱工具的主视图，且六线上能看到休止符） */
+export const DEFAULT_DISPLAY_MODE: DisplayMode = 'tab';
+
+/** 把 DOM 上取到的字符串收敛成 DisplayMode（不合法时返回 false，调用方决定回落） */
+export function isDisplayMode(v: string | null | undefined): v is DisplayMode {
+    return v != null && (DISPLAY_MODES as readonly string[]).includes(v);
+}
+
 /** alphaTab 整体显示缩放（含字体），适配紧凑布局 */
 export const ALPHATAB_DISPLAY_SCALE = 0.75;
 

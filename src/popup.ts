@@ -6,7 +6,7 @@
  */
 
 import { setStatus } from './app/dom.ts';
-import { initRenderer, render, renderHighlight } from './app/render/render.ts';
+import { initRenderer, initDisplayModeControl, render, renderHighlight } from './app/render/render.ts';
 import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 
@@ -24,6 +24,8 @@ function init(): void {
     scoreStore.setOnSelectChange(() => {
         renderHighlight();
     });
+    // 谱面显示模式（六线谱 / 五线+六线）；必须在挂载渲染器前接线，切换时才不会丢
+    initDisplayModeControl();
     // 挂载 alphaTab 渲染器
     void initRenderer();
 

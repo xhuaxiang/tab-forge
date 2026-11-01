@@ -9,7 +9,7 @@ import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
 import { $, setStatus } from './dom.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
 import { initChordGrid } from './input/chordInput.ts';
-import { PLAYBACK_ENGINES } from '../core/config.ts';
+import { PLAYBACK_ENGINES, DISPLAY_MODES } from '../core/config.ts';
 import { initSearchSelects } from './input/searchSelect.ts';
 import { initNoteInput } from './input/noteInput.ts';
 import { initMeasureControls } from './controls/measureControls.ts';
@@ -32,6 +32,14 @@ function warnOnDomValueDrift(): void {
     for (const v of PLAYBACK_ENGINES) {
         if (!domEngines.includes(v)) {
             console.warn(`[TabForge] #engineSelect 缺少取值 "${v}"，与 PLAYBACK_ENGINES 不同步：该引擎无法选中`);
+        }
+    }
+
+    const displaySel = $('displayModeSelect') as HTMLSelectElement | null;
+    const domModes = displaySel ? Array.from(displaySel.options).map(o => o.value) : [];
+    for (const v of DISPLAY_MODES) {
+        if (!domModes.includes(v)) {
+            console.warn(`[TabForge] #displayModeSelect 缺少取值 "${v}"，与 DISPLAY_MODES 不同步：该显示模式无法选中`);
         }
     }
 }
