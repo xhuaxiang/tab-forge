@@ -132,12 +132,26 @@ describe('推弦 / 揉弦作用于音符自身', () => {
     it('推弦音符自己发声并按 bendAmount 上弯（不依赖前一个同弦音）', async () => {
         const engine = new AudioEngine();
         await engine.play(scoreOf([
-            { string: 1, fret: 5, duration: 0.25, technique: 'bend', bendAmount: 0.5, bendRelease: true },
+            {
+                string: 1,
+                fret: 5,
+                duration: 0.25,
+                technique: 'bend',
+                bendAmount: 0.5,
+                bendRelease: true,
+                // 显式力度，避免这条用例依赖 AUTO_METRIC_ACCENT 的派生结果
+                dynamics: 'soft',
+            },
         ]));
         vi.advanceTimersByTime(120); // 唯一事件在 100ms
 
         // 旧实现只有在上一音同弦且仍活跃时才推弦，单音直接听不到技法
         expect(playedNotes).toHaveBeenCalledTimes(1);
+        // 推弦音符自己拨响时也要带上谱面把位与显式力度
+        expect(playedNotes.mock.calls[0][0]).toMatchObject({
+            fret: 5,
+            dynamics: 'soft',
+        });
         expect(bentNotes).toHaveBeenCalledTimes(1);
         const [noteId, semitones, holdSec, release] = bentNotes.mock.calls[0];
         expect(typeof noteId).toBe('symbol');
@@ -163,6 +177,36 @@ describe('推弦 / 揉弦作用于音符自身', () => {
         expect(rate).toBeGreaterThan(0);
         expect(startDelay).toBeGreaterThan(0);
         expect(bentNotes).not.toHaveBeenCalled();
+        engine.dispose();
+    });
+
+    it('普通拨弦把调度力度与谱面把位传到合成器', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 7, duration: 0.25, dynamics: 'soft' },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        expect(playedNotes.mock.calls[0][0]).toMatchObject({
+            fret: 7,
+            dynamics: 'soft',
+        });
+        engine.dispose();
+    });
+
+    it('未显式标注力度时，强拍音符按 accent 传入合成器', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 2, fret: 3, duration: 0.25 },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        expect(playedNotes.mock.calls[0][0]).toMatchObject({
+            fret: 3,
+            dynamics: 'accent',
+        });
         engine.dispose();
     });
 

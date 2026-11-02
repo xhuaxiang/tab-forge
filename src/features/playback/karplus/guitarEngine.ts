@@ -30,6 +30,10 @@ export interface NoteOptions {
     mute?: boolean;
     /** 手掌闷音：短促、暗，但仍保留音高 */
     palmMute?: boolean;
+    /** 拨弦力度：影响激励亮度、起音瞬态、阻尼与延音 */
+    dynamics?: 'soft' | 'accent';
+    /** 把位（0 = 空弦）：影响拨弦位置与延音 */
+    fret?: number;
     onEnd?: () => void;
 }
 
@@ -77,6 +81,8 @@ export class GuitarEngine {
             string: stringNum,
             mute = false,
             palmMute = false,
+            dynamics,
+            fret,
             onEnd = null,
         } = options;
 
@@ -104,6 +110,8 @@ export class GuitarEngine {
             palmMute,
             // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音
             sustain: duration,
+            dynamics,
+            fret,
         });
         const buffer = toAudioBuffer(ctx, ks);
 

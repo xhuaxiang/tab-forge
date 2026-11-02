@@ -200,6 +200,58 @@ export const KARPLUS_ARTICULATION = {
     vibratoStartSec: 0.08,
 } as const;
 
+/**
+ * Karplus-Strong 激励与弦参数（可调音色旋钮）。
+ *
+ * 与 {@link KARPLUS_ARTICULATION} 的分工：那边管技法时长/音量，
+ * 这里管“拨弦本身”的激励、反馈滤波与力度响应。SoundFont 侧不读。
+ */
+export const KARPLUS_SYNTHESIS = {
+    /**
+     * 每弦反馈低通权重 [w2, w3]（w1 = 1 - w2 - w3）。
+     * w1 越小低通越强、音色越暖；高音弦保留更多高频。
+     */
+    stringFeedbackWeights: [
+        [0.18, 0.08], // 1 弦
+        [0.19, 0.09], // 2 弦
+        [0.21, 0.09], // 3 弦
+        [0.22, 0.14], // 4 弦
+        [0.24, 0.16], // 5 弦
+        [0.25, 0.19], // 6 弦
+    ] as ReadonlyArray<readonly [number, number]>,
+    /** 每弦延音系数（乘到 sustain 上）：低音弦稍长、高音弦稍短 */
+    stringSustainFactor: [0.92, 0.92, 0.97, 1.0, 1.03, 1.05],
+    /** 每弦基准拨弦位置（距琴桥的弦长比例） */
+    stringPickPosition: [0.10, 0.11, 0.12, 0.13, 0.14, 0.15],
+    /** 把位对拨弦位置比例的放大指数：手指位置固定时，有效弦长越短比例越大 */
+    fretPickPositionFactor: 0.75,
+    /** 拨弦位置上下限（太小接近琴桥、太大会让梳状零点过低而发空） */
+    minPickPosition: 0.02,
+    maxPickPosition: 0.32,
+    /** 把位对延音的轻微削弱（每品） */
+    fretDampingPerFret: 0.004,
+    /** 力度 → 合成强度 0..1（未标注按 normal） */
+    dynamicsStrength: { soft: 0.25, normal: 0.55, accent: 1.0 } as Record<'soft' | 'normal' | 'accent', number>,
+    /** 激励低通截止的 soft / accent 两端（Hz），按强度指数插值 */
+    excitationLowpassSoftHz: 900,
+    excitationLowpassAccentHz: 7000,
+    /** 每弦激励亮度系数（乘在低通截止上） */
+    stringBrightness: [1.25, 1.15, 1.0, 0.9, 0.8, 0.7],
+    /** 拨片/手指瞬态时长（秒） */
+    transientSec: 0.004,
+    /** 瞬态强度（相对激励 RMS），再乘力度强度 */
+    transientStrength: 1.2,
+    /**
+     * 激励 RMS 归一化目标：低/中音弦的起音对齐 P0（0.25 会整体响约 6dB）；
+     * 高音弦因激励更亮仍残留约 +2dB。力度只改频谱与衰减，不靠这里改响度。
+     */
+    excitationRms: 0.12,
+    /** 力度对延音的缩放：轻拨收得快、重拨稍长 */
+    dynamicsSustain: { soft: 0.85, normal: 1.0, accent: 1.1 } as Record<'soft' | 'normal' | 'accent', number>,
+    /** 力度对反馈阻尼的缩放（>1 更暗、<1 更亮） */
+    dynamicsDamping: { soft: 1.15, normal: 1.0, accent: 0.85 } as Record<'soft' | 'normal' | 'accent', number>,
+} as const;
+
 // ============================================================
 // AI 即兴生成配置
 // ============================================================

@@ -62,6 +62,7 @@ export class AudioEngine {
         note: Note,
         duration: number,
         volume?: number,
+        dynamics?: Note['dynamics'],
     ): symbol | null {
         const str = note.string ?? 1;
         const noteName = getNoteFromFret(this.tuning, str, note.fret ?? 0);
@@ -119,6 +120,8 @@ export class AudioEngine {
                 string: str,
                 mute: false,
                 palmMute: !!note.palmMute,
+                dynamics,
+                fret: note.fret ?? 0,
             });
             if (note.technique === 'bend') {
                 // bendAmount 以全音为单位（1 全音 = 2 个半音）
@@ -173,6 +176,8 @@ export class AudioEngine {
             string: str,
             mute: !!note.deadNote,
             palmMute: !!note.palmMute,
+            dynamics,
+            fret: note.fret ?? 0,
         });
         this.stringNoteMap.set(str, noteId);
         return noteId;
@@ -222,7 +227,7 @@ export class AudioEngine {
         for (const item of events) {
             this.eventTimers.push(setTimeout(() => {
                 if (this.runId !== runId || this.state !== 'playing') return;
-                this.playNote(item.note, item.duration, item.volume);
+                this.playNote(item.note, item.duration, item.volume, item.dynamics);
             }, item.delayMs));
         }
 

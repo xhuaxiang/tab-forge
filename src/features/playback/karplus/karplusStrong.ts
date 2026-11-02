@@ -2,18 +2,18 @@
  * Karplus-Strong 琴弦合成算法（纯计算层）
  *
  * 物理原理：
- *   拨弦 → 噪声激励 → 延迟线(长度=采样率/频率) → 低通 → 反馈
+ *   拨弦 → 低通噪声 + 拨弦位置梳状滤波 + 拨片瞬态 → 延迟线(长度=采样率/频率) → 低通 → 反馈
  *
  * 每次迭代:
  *   data[n] = (S1*w1 + S2*w2 + S3*w3) * decay
- *   S1..S3 是分数延迟位置上的三次插值采样，w1..w3 由弦号与基频决定
+ *   S1..S3 是分数延迟位置上的三次插值采样，w1..w3 由弦号、力度与基频决定
  *
  * 本文件只做"纯计算"：输入参数，输出裸 Float32Array 采样数据。
  * 不创建 AudioContext、无副作用，可在 Node 中单测，也便于直接导出 WAV。
  * 包装为 AudioBuffer 由 toAudioBuffer() 负责（浏览器环境）。
  */
 
-import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
+import { KARPLUS_ARTICULATION, KARPLUS_SYNTHESIS } from '../../../core/config.ts';
 
 export interface KSParams {
     frequency: number;
@@ -27,6 +27,12 @@ export interface KSParams {
     palmMute?: boolean;
     /** 记谱时值（秒）。KS 衰减按此时值缩放：短音快速收干、长音自然延音 */
     sustain?: number;
+    /** 拨弦力度：影响激励亮度、起音瞬态、反馈阻尼与延音；未标注按 normal */
+    dynamics?: 'soft' | 'accent';
+    /** 把位（0 = 空弦）：影响拨弦位置比例与延音 */
+    fret?: number;
+    /** 拨弦位置（距琴桥的弦长比例）；不传则按弦号 + 把位派生 */
+    pickPosition?: number;
 }
 
 /** 纯计算输出：裸采样数据 + 元信息 */
@@ -60,27 +66,34 @@ function catmullRom(p0: number, p1: number, p2: number, p3: number, t: number): 
  * 不依赖 Web Audio API，返回裸 Float32Array。
  */
 export function generateStringData(params: KSParams): KSBufferData {
-    const { frequency, duration, sampleRate, string: stringNum, mute, palmMute, sustain } = params;
+    const {
+        frequency,
+        duration,
+        sampleRate,
+        string: stringNum,
+        mute,
+        palmMute,
+        sustain,
+        dynamics,
+        fret: fretParam,
+        pickPosition: pickPositionParam,
+    } = params;
 
     // 频率无效时返回 1 采样的静音数据（调用方也可自行短路）
     if (frequency <= 0) {
         return { data: new Float32Array(1), sampleRate, duration: 0 };
     }
 
-    const str = stringNum ?? 3;
-    const isLow = str >= 4;
-    const isHigh = str <= 2;
+    const str = Math.min(6, Math.max(1, Math.round(stringNum ?? 3)));
+    const dynamicsKey: 'soft' | 'normal' | 'accent' = dynamics ?? 'normal';
+    const strength = KARPLUS_SYNTHESIS.dynamicsStrength[dynamicsKey];
+    const fret = Math.max(0, Math.min(24, Math.round(fretParam ?? 0)));
 
-    // 反馈低通权重：决定音色，也决定滤波器的群延迟
-    const [baseW2, baseW3] = mute
-        ? [0.5, 0]                  // 制音：两级平均，最快收干
-        : palmMute
-            ? [0.32, 0.18]          // 手掌闷音：更强低通，闷而短
-            : isLow
-                ? [0.25, 0.2]       // 低音：三点低通，圆润原声
-                : isHigh
-                    ? [0.2, 0.1]    // 高音：稍加低通，亮而不尖
-                    : [0.3, 0];     // 中音：适中
+    // 反馈低通权重：决定音色，也决定滤波器的群延迟。
+    // 基础值来自每弦表；制音/手掌闷音用固定权重覆盖。
+    const tableWeights = KARPLUS_SYNTHESIS.stringFeedbackWeights[str - 1];
+    const baseW2 = mute ? 0.5 : palmMute ? 0.32 : tableWeights[0];
+    const baseW3 = mute ? 0 : palmMute ? 0.18 : tableWeights[1];
 
     // 基频越高，反馈滤波在每圈里的能量损失累计越可观（880Hz 一圈损失
     // 约 0.03dB，1 秒就是 26dB），会把 sustain 的实际衰减拉得远早于目标。
@@ -93,9 +106,12 @@ export function generateStringData(params: KSParams): KSBufferData {
                 (KARPLUS_ARTICULATION.highFreqDampingEndHz - KARPLUS_ARTICULATION.highFreqDampingStartHz),
         ),
     );
+    // 力度也参与阻尼：软拨更暗、重拨更亮；制音/手掌闷音的**反馈阻尼**
+    // 固定由技法决定（激励仍随力度变化，重拨的闷音起音更硬）
     const dampingScale = mute || palmMute
         ? 1
-        : 1 - (1 - KARPLUS_ARTICULATION.highFreqDampingFloor) * dampingBlend;
+        : (1 - (1 - KARPLUS_ARTICULATION.highFreqDampingFloor) * dampingBlend) *
+            KARPLUS_SYNTHESIS.dynamicsDamping[dynamicsKey];
     const w2 = baseW2 * dampingScale;
     const w3 = baseW3 * dampingScale;
     const w1 = 1 - w2 - w3;
@@ -115,30 +131,96 @@ export function generateStringData(params: KSParams): KSBufferData {
 
     const data = new Float32Array(totalSamples);
 
-    // ---- 第1步：拨弦激励（短噪声） ----
-    let excitationMean = 0;
+    // ---- 第1步：拨弦激励 ----
+    // 低通白噪声决定力度亮度；真正的梳状滤波由拨弦位置产生
+    // （零点在 k / pickPosition 次谐波上）。旧实现用一条慢正弦近似，
+    // 周期远长于激励长度，实际只起到轻微包络作用，不是梳状滤波。
+    const cutoff = Math.min(
+        sampleRate * 0.45,
+        KARPLUS_SYNTHESIS.excitationLowpassSoftHz *
+            Math.pow(
+                KARPLUS_SYNTHESIS.excitationLowpassAccentHz /
+                    KARPLUS_SYNTHESIS.excitationLowpassSoftHz,
+                strength,
+            ) *
+            KARPLUS_SYNTHESIS.stringBrightness[str - 1],
+    );
+    const alpha = 1 - Math.exp((-2 * Math.PI * cutoff) / sampleRate);
+
+    // 把位越高，有效弦长越短；手位不变时拨弦点占比变大。
+    const basePickPosition = KARPLUS_SYNTHESIS.stringPickPosition[str - 1];
+    const derivedPickPosition = Math.min(
+        KARPLUS_SYNTHESIS.maxPickPosition,
+        basePickPosition * Math.pow(2, (fret * KARPLUS_SYNTHESIS.fretPickPositionFactor) / 12),
+    );
+    const pickPosition = Math.min(
+        KARPLUS_SYNTHESIS.maxPickPosition,
+        Math.max(KARPLUS_SYNTHESIS.minPickPosition, pickPositionParam ?? derivedPickPosition),
+    );
+    const pickDelay = Math.max(1, Math.min(delaySamples, Math.round(pickPosition * period)));
+
+    const excitation = new Float32Array(delaySamples);
+    let lowpassed = 0;
     for (let i = 0; i < delaySamples; i++) {
-        const noise = (Math.random() * 2 - 1);
-        const att = Math.exp(-i / (delaySamples * 0.15));
-        // 拾音器位置模拟：在延迟线1/8处拨弦。
-        // 低音弦减弱梳状调制，避免金属"电吉他味"；高音弦保留明亮拨片感
-        const pickPos = 1.0 + (isLow ? 0.12 : (isHigh ? 0.22 : 0.3)) * Math.sin(i * Math.PI * 2 / delaySamples * 0.125);
-        data[i] = noise * att * pickPos;
-        excitationMean += data[i];
+        const noise = Math.random() * 2 - 1;
+        lowpassed += alpha * (noise - lowpassed);
+        excitation[i] = lowpassed;
     }
+    for (let i = 0; i < delaySamples; i++) {
+        data[i] = excitation[i] - (i >= pickDelay ? excitation[i - pickDelay] : 0);
+    }
+
     // 去掉激励的直流分量：反馈回路对 DC 的增益为 1，保留偏移会让低音持续段
     // 出现缓慢的低频漂移/咔哒。
+    let excitationMean = 0;
+    for (let i = 0; i < delaySamples; i++) {
+        excitationMean += data[i];
+    }
     excitationMean /= Math.max(1, delaySamples);
     for (let i = 0; i < delaySamples; i++) {
         data[i] -= excitationMean;
+    }
+
+    // 拨片/手指的短瞬态：一阶差分噪声（高通），越重拨越明显。
+    // 高把位周期短时整个激励就是起音，截断到 delaySamples。
+    const transientSamples = Math.min(
+        delaySamples,
+        Math.max(1, Math.round(sampleRate * KARPLUS_SYNTHESIS.transientSec)),
+    );
+    const transientGain =
+        KARPLUS_SYNTHESIS.excitationRms * KARPLUS_SYNTHESIS.transientStrength * strength;
+    let previousNoise = 0;
+    for (let i = 0; i < transientSamples; i++) {
+        const noise = Math.random() * 2 - 1;
+        const click = noise - previousNoise;
+        previousNoise = noise;
+        const decayEnv = 1 - i / transientSamples;
+        data[i] += click * transientGain * decayEnv;
+    }
+
+    // 起音能量归一化：力度只改变频谱与衰减，不改变整体响度（音量由调度层给）。
+    let sumSquares = 0;
+    for (let i = 0; i < delaySamples; i++) {
+        sumSquares += data[i] * data[i];
+    }
+    const excitationRms = Math.sqrt(sumSquares / Math.max(1, delaySamples));
+    if (excitationRms > 1e-9) {
+        const norm = KARPLUS_SYNTHESIS.excitationRms / excitationRms;
+        for (let i = 0; i < delaySamples; i++) {
+            data[i] *= norm;
+        }
     }
 
     // ---- 第2步：反馈循环（延迟线 + 低通 + 衰减） ----
     // 衰减在反馈循环里**每绕延迟线一圈**才乘一次，所以要先算出时值内会绕多少圈。
     // 旧公式把圈数误当成采样点数，每圈衰减几乎为 1，长音几乎不收干。
     const ringDuration = Math.max(0.06, sustain ?? duration); // 至少保留 60ms 琴身主体
-    // 低音弦不再额外拉长延音(原 1.15),降低低音"突出感"；高音弦仍稍短
-    const sustainFactor = isLow ? 1.0 : (isHigh ? 0.9 : 1.0);
+    // 延音 = 弦号基础值 × 力度 × 把位。轻拨收得快、重拨稍长；
+    // 把位越高有效弦长越短，能量耗散略快。
+    const sustainFactor =
+        KARPLUS_SYNTHESIS.stringSustainFactor[str - 1] *
+        KARPLUS_SYNTHESIS.dynamicsSustain[dynamicsKey] *
+        (1 - fret * KARPLUS_SYNTHESIS.fretDampingPerFret);
     const decaySeconds = Math.max(0.001, ringDuration * sustainFactor);
     // 总延迟（延迟线 + 低通群延迟）等于 period，因此每圈时长就是 period
     const loopCount = Math.max(1, (sampleRate * decaySeconds) / period);

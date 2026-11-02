@@ -232,6 +232,15 @@ function goertzel(data: Float32Array, sampleRate: number, freq: number, from: nu
 }
 
 describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
+    // YIN 偶尔会锁到二次谐波（实测约 1/600），固定噪声种子让音高回归稳定
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
     it('各弦基频误差 < 0.5%', () => {
         const SR48 = 48000;
         const cases: Array<[number, number]> = [
@@ -251,6 +260,28 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
             });
             const measured = estimateFrequency(ks.data, SR48);
             expect(Math.abs(measured - freq) / freq).toBeLessThan(0.002);
+        }
+    });
+
+    it('力度与把位不改变音高（反馈权重变了，群延迟补偿要跟着变）', () => {
+        const SR48 = 48000;
+        const cases: Array<[number, number, 'soft' | 'accent', number]> = [
+            [82.41, 6, 'accent', 12],
+            [440, 3, 'soft', 5],
+            [880, 1, 'accent', 12],
+        ];
+        for (const [freq, stringNum, dynamics, fret] of cases) {
+            const ks = generateStringData({
+                frequency: freq,
+                duration: 0.6,
+                sampleRate: SR48,
+                string: stringNum,
+                dynamics,
+                fret,
+            });
+            const measured = estimateFrequency(ks.data, SR48);
+            // 收紧到 0.1%：忽略 dynamicsDamping 的错误群延迟在 440Hz 就会偏 0.107%
+            expect(Math.abs(measured - freq) / freq).toBeLessThan(0.001);
         }
     });
 
@@ -274,6 +305,122 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
             expect(db).toBeGreaterThan(-30);
             expect(db).toBeLessThan(-10);
         }
+    });
+});
+
+/** 高频占比：一阶差分 RMS / 信号 RMS，越大越亮 */
+function brightness(data: Float32Array, from: number, to: number): number {
+    let diff = 0;
+    let sig = 0;
+    for (let i = from + 1; i < to; i++) {
+        const d = data[i] - data[i - 1];
+        diff += d * d;
+        sig += data[i] * data[i];
+    }
+    return Math.sqrt(diff / Math.max(1, sig));
+}
+
+/** 第 h 次谐波相对基频的幅度（起音段，主要反映激励的梳状滤波） */
+function harmonicRatio(
+    data: Float32Array,
+    sampleRate: number,
+    fundamental: number,
+    harmonic: number,
+    from: number,
+    to: number,
+): number {
+    return goertzel(data, sampleRate, fundamental * harmonic, from, to) /
+        goertzel(data, sampleRate, fundamental, from, to);
+}
+
+describe('力度响应', () => {
+    const SR48 = 48000;
+    const BASE = {
+        frequency: 330,
+        duration: 1.2,
+        sampleRate: SR48,
+        string: 3,
+        sustain: 1,
+    };
+
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    /** 每个力度都从同一噪声种子起算，只比较力度本身的影响 */
+    function byDynamics(dynamics?: 'soft' | 'accent'): Float32Array {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+        return generateStringData({ ...BASE, dynamics }).data;
+    }
+
+    it('soft / normal / accent 的整体亮度与起音高频依次增强', () => {
+        const soft = byDynamics('soft');
+        const normal = byDynamics();
+        const accent = byDynamics('accent');
+
+        const tone = (d: Float32Array) => brightness(d, Math.round(SR48 * 0.02), Math.round(SR48 * 0.12));
+        expect(tone(soft)).toBeLessThan(tone(normal) * 0.95);
+        expect(tone(accent)).toBeGreaterThan(tone(normal) * 1.1);
+
+        // 起音 10ms 内的瞬态：重拨的拨片声更突出
+        const attack = (d: Float32Array) => brightness(d, 1, Math.round(SR48 * 0.01));
+        expect(attack(soft)).toBeLessThan(attack(normal) * 0.95);
+        expect(attack(accent)).toBeGreaterThan(attack(normal) * 1.1);
+    });
+
+    it('soft 收得更快、accent 延音更长（基频包络）', () => {
+        const decayRatio = (d: Float32Array) =>
+            goertzel(d, SR48, 330, Math.round(SR48 * 0.7), Math.round(SR48 * 0.75)) /
+            goertzel(d, SR48, 330, Math.round(SR48 * 0.1), Math.round(SR48 * 0.15));
+
+        const soft = decayRatio(byDynamics('soft'));
+        const normal = decayRatio(byDynamics());
+        const accent = decayRatio(byDynamics('accent'));
+
+        expect(soft).toBeLessThan(normal * 0.85);
+        expect(accent).toBeGreaterThan(normal * 1.05);
+    });
+});
+
+describe('把位与拨弦位置', () => {
+    const SR48 = 48000;
+    const BASE = {
+        frequency: 330,
+        duration: 1.2,
+        sampleRate: SR48,
+        string: 3,
+        sustain: 1,
+    };
+    const FROM = Math.round(SR48 * 0.01);
+    const TO = Math.round(SR48 * 0.1);
+
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    function gen(extra: { fret?: number; pickPosition?: number }): Float32Array {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+        return generateStringData({ ...BASE, ...extra }).data;
+    }
+
+    it('同一弦高把位的拨弦比例更大，梳状零点下移压低 4 次谐波', () => {
+        const open = harmonicRatio(gen({ fret: 0 }), SR48, 330, 4, FROM, TO);
+        const high = harmonicRatio(gen({ fret: 12 }), SR48, 330, 4, FROM, TO);
+        expect(high).toBeLessThan(open * 0.8);
+    });
+
+    it('拨弦位置 0.3 的 3 次谐波明显低于 0.1（零点落在 3.3 次附近）', () => {
+        const nearBridge = harmonicRatio(gen({ pickPosition: 0.1 }), SR48, 330, 3, FROM, TO);
+        const middle = harmonicRatio(gen({ pickPosition: 0.3 }), SR48, 330, 3, FROM, TO);
+        expect(middle).toBeLessThan(nearBridge * 0.5);
     });
 });
 
