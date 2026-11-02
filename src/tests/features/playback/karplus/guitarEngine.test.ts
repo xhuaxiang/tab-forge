@@ -8,18 +8,90 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GuitarEngine } from '../../../../features/playback/karplus/guitarEngine.ts';
+import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 
 // ---- 最小 AudioContext mock ----
-class MockParam {
+/** 全局模拟时钟：AudioParam.value 按当前时刻计算，而不是简单返回最后写入值 */
+let mockNow = 0;
+
+interface MockEvent {
+    time: number;
     value: number;
-    /** 记录 setValueAtTime 的调度值（dampNote 断言用；value 最终会被 ramp 覆盖） */
+    ramp: boolean;
+    /** ramp 的调用时刻与当时电平；无前置事件时按规范从调用时刻起算 */
+    startTime?: number;
+    startValue?: number;
+}
+
+class MockParam {
+    /** 直接赋值（param.value = x）的固有值 */
+    private intrinsic: number;
+    /** 记录 setValueAtTime 的调度值（dampNote 断言用） */
     scheduled: number[] = [];
-    /** 记录 ramp 目标值（推弦/滑弦断言用） */
+    /** 记录 ramp 目标值（推弦/滑弦/释放包络断言用） */
     ramps: number[] = [];
-    constructor(v = 0) { this.value = v; }
-    setValueAtTime(v: number) { this.value = v; this.scheduled.push(v); }
-    exponentialRampToValueAtTime(v: number) { this.value = v; this.ramps.push(v); }
-    cancelScheduledValues() {}
+    /** 真实语义的自动化事件表：cancel 只删 >= 指定时间的事件 */
+    private events: MockEvent[] = [];
+
+    constructor(v = 0) { this.intrinsic = v; }
+
+    get value(): number { return this.valueAt(mockNow); }
+    set value(v: number) { this.intrinsic = v; }
+
+    setValueAtTime(v: number, t: number) {
+        this.scheduled.push(v);
+        this.events.push({ time: t, value: v, ramp: false });
+    }
+    // 真实 AudioParam 的 ramp 不会立刻改写当前值；valueAt 按时间插值
+    exponentialRampToValueAtTime(v: number, t: number) {
+        this.ramps.push(v);
+        this.events.push({
+            time: t,
+            value: v,
+            ramp: true,
+            startTime: mockNow,
+            startValue: this.valueAt(mockNow),
+        });
+    }
+    cancelScheduledValues(t: number) {
+        this.events = this.events.filter(e => e.time < t);
+    }
+    cancelAndHoldAtTime(t: number) {
+        // 规范：没有需要取消的事件时是 no-op，不会凭空插入 hold
+        if (!this.events.some(e => e.time >= t)) return;
+        const held = this.valueAt(t);
+        this.events = this.events.filter(e => e.time < t);
+        this.events.push({ time: t, value: held, ramp: false });
+    }
+    /** 清空断言日志（事件表保留，模拟真实参数状态） */
+    clearLog() { this.scheduled = []; this.ramps = []; }
+
+    private valueAt(t: number): number {
+        let value = this.intrinsic;
+        let lastTime = -Infinity;
+        let lastValue = value;
+        const sorted = [...this.events].sort((a, b) => a.time - b.time);
+        for (const e of sorted) {
+            if (e.time <= t) {
+                value = e.value;
+                lastTime = e.time;
+                lastValue = e.value;
+            } else if (e.ramp) {
+                // 无前置事件时，ramp 从调用时刻的固有值起算（真实规范行为）
+                const startTime = lastTime === -Infinity ? (e.startTime ?? 0) : lastTime;
+                const startValue = lastTime === -Infinity ? (e.startValue ?? value) : lastValue;
+                if (t <= startTime) return startValue;
+                const p = (t - startTime) / (e.time - startTime);
+                if (startValue > 0 && e.value > 0) {
+                    return startValue * Math.pow(e.value / startValue, p);
+                }
+                return startValue + (e.value - startValue) * p;
+            } else {
+                break;
+            }
+        }
+        return value;
+    }
 }
 
 class MockNode {
@@ -30,11 +102,13 @@ class MockNode {
     playbackRate = new MockParam(1);
     type = '';
     buffer: MockBuffer | null = null;
+    /** 记录 source.stop 的绝对时间，验证先 ramp 再 stop */
+    stoppedAt: number[] = [];
 
     connect() {}
     disconnect() {}
     start() {}
-    stop() {}
+    stop(t?: number) { this.stoppedAt.push(t ?? 0); }
 }
 
 class MockBuffer {
@@ -53,7 +127,9 @@ class MockBuffer {
 }
 
 class MockAudioContext {
-    currentTime = 0;
+    /** 与 MockParam 共用的模拟时钟 */
+    get currentTime(): number { return mockNow; }
+    set currentTime(v: number) { mockNow = v; }
     sampleRate = 44100;
     state = 'running';
     destination = new MockNode();
@@ -80,7 +156,7 @@ class MockAudioContext {
     /** 测试辅助：拿到按创建顺序排列的 source（读 playbackRate 用） */
     getSources(): MockNode[] { return this.sources; }
 
-    /** 测试辅助：gains[0]=masterGain，gains[1]=单音的 mixGain */
+    /** 测试辅助：gains[0]=masterGain，gains[1]=mixGain，gains[2]=envGain，gains[3]=delayGain */
     getGains(): MockNode[] { return this.gains; }
 
     /** 测试辅助：每个音按顺序创建 bodyFilter / resonance */
@@ -95,6 +171,7 @@ function rms(d: Float32Array): number {
 
 describe('GuitarEngine.playNote', () => {
     beforeEach(() => {
+        mockNow = 0;
         (globalThis as Record<string, unknown>).window = { AudioContext: MockAudioContext };
     });
 
@@ -151,6 +228,63 @@ describe('GuitarEngine.playNote', () => {
         ge.dispose();
     });
 
+    it('playNote 在结束前安排 gain 淡出，再停止 source', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        ge.playNote({ frequency: 440, duration: 0.5, volume: 0.5, string: 1 });
+
+        const envGain = ctx.getGains()[2];
+        expect(envGain.gain.ramps).toContain(0.001); // 释音包络已排期
+        // 释音在收尾前才启动：音符中段（0.35s）包络仍应为满值
+        mockNow = 0.35;
+        expect(envGain.gain.value).toBeCloseTo(1, 5);
+        const source = ctx.getSources()[0];
+        expect(source.stoppedAt).toHaveLength(1);
+        expect(source.stoppedAt[0]).toBeCloseTo(0.7, 5); // 时值 0.5 + 尾音 0.2
+        ge.dispose();
+    });
+
+    it('stopNote 先安排 gain 淡出，再把 source.stop 推后到淡出结束', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 440, duration: 0.5, volume: 0.5, string: 1 });
+        const mixGain = ctx.getGains()[1];
+        const source = ctx.getSources()[0];
+        // 清掉 playNote 的原有排期日志，只看 stopNote 自己做了什么
+        source.stoppedAt.length = 0;
+        mixGain.gain.clearLog();
+
+        ge.stopNote(noteId);
+
+        expect(mixGain.gain.ramps).toContain(0.001);
+        expect(source.stoppedAt[0]).toBeCloseTo(KARPLUS_ARTICULATION.releaseSec + 0.005, 5);
+        ge.dispose();
+    });
+
+    it('stopNote 在 gain 淡出进行中读取当前电平，不因 cancel 回跳到原始音量', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 440, duration: 0.5, volume: 0.5, string: 1 });
+        const mixGain = ctx.getGains()[1];
+        // dampNote 在 0.1s 后开始淡出、0.13s 结束；0.12s 正处在淡出中段
+        ge.dampNote(noteId, 0.1);
+        mockNow = 0.12;
+        const duringFade = mixGain.gain.value;
+        expect(duringFade).toBeLessThan(0.2); // 已明显低于 0.5
+        mixGain.gain.clearLog();
+
+        ge.stopNote(noteId);
+
+        // stop 的起点应是淡出中的当前电平，而不是 0.5
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(duringFade, 3);
+        expect(mixGain.gain.scheduled[0]).toBeLessThan(0.2);
+        ge.dispose();
+    });
+
     it('dampNote：技法连接后把闷音作用到当前发声的音符上', () => {
         const ge = new GuitarEngine();
         ge.init();
@@ -164,7 +298,7 @@ describe('GuitarEngine.playNote', () => {
 
         // 第一次 setValueAtTime 是音量系数后的电平，之后 ramp 到 0.001 收尾
         expect(mixGain.gain.scheduled[0]).toBeCloseTo(before * 0.7, 5);
-        expect(ctx.getFilters()[0].frequency.value).toBe(1800);
+        expect(ctx.getFilters()[0].frequency.ramps).toContain(1800);
         ge.dispose();
     });
 });

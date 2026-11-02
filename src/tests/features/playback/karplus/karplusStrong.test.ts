@@ -41,11 +41,10 @@ describe('generateStringData', () => {
         expect(ks.sampleRate).toBe(SR);
     });
 
-    it('输出长度至少覆盖请求时值，且不超时值+0.06s', () => {
+    it('输出长度等于请求时值（缓冲区末尾与 source.stop 对齐，结尾淡出会被播放）', () => {
         const duration = 0.5;
         const ks = generateStringData({ frequency: 440, duration, sampleRate: SR, string: 1 });
-        expect(ks.data.length).toBeGreaterThanOrEqual(Math.round(SR * duration));
-        expect(ks.data.length).toBeLessThanOrEqual(Math.round(SR * (duration + 0.06)) + 2);
+        expect(ks.data.length).toBe(Math.round(SR * duration));
     });
 
     it('频率无效时返回 1 采样静音（无 AudioContext 副作用）', () => {
@@ -110,34 +109,126 @@ describe('generateStringData', () => {
     });
 });
 
+function rmsRange(data: Float32Array, from: number, to: number): number {
+    let sum = 0;
+    let n = 0;
+    for (let i = from; i < to; i++) { sum += data[i] * data[i]; n++; }
+    return Math.sqrt(sum / Math.max(1, n));
+}
+
+describe('衰减包络、去直流与结尾淡出', () => {
+    beforeEach(() => {
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+    });
+
+    afterEach(() => {
+        vi.restoreAllMocks();
+    });
+
+    it('短 sustain 比长 sustain 更早收干', () => {
+        const base = { frequency: 330, duration: 1, sampleRate: SR, string: 3 };
+        const long = generateStringData({ ...base, sustain: 1 });
+        // 固定噪声种子，保证两条曲线起音一致，只比较衰减
+        vi.spyOn(Math, 'random').mockImplementation(seededRandom(3));
+        const short = generateStringData({ ...base, sustain: 0.2 });
+
+        const from = Math.round(SR * 0.3);
+        const to = Math.round(SR * 0.4);
+        expect(rmsRange(short.data, from, to)).toBeLessThan(
+            rmsRange(long.data, from, to) * 0.5,
+        );
+    });
+
+    it('长音整体能量在 sustain 末尾明显下降，而不是几乎不收', () => {
+        const ks = generateStringData({
+            frequency: 220, duration: 1, sampleRate: SR, string: 4, sustain: 1,
+        });
+        const head = rmsRange(ks.data, 0, Math.round(SR * 0.1));
+        const tail = rmsRange(ks.data, Math.round(SR * 0.9), SR);
+        const ratio = tail / head;
+        // RMS 含快速衰减的泛音，会比基频的 -20dB 目标更低
+        expect(ratio).toBeGreaterThan(0.01); // 仍有可听延音
+        expect(ratio).toBeLessThan(0.15);    // 但明显低于起音
+    });
+
+    it('输出无明显直流偏移', () => {
+        const ks = generateStringData({
+            frequency: 110, duration: 1, sampleRate: SR, string: 6,
+        });
+        let sum = 0;
+        for (const v of ks.data) sum += v;
+        const mean = sum / ks.data.length;
+        const rms = rmsRange(ks.data, 0, ks.data.length);
+        expect(Math.abs(mean)).toBeLessThan(rms * 0.02);
+    });
+
+    it('缓冲区最后一个采样淡出到 0，避免硬切咔哒', () => {
+        const ks = generateStringData({ frequency: 440, duration: 0.3, sampleRate: SR, string: 1 });
+        expect(Math.abs(ks.data[ks.data.length - 1])).toBeLessThan(1e-6);
+    });
+});
+
 /**
- * 用自相关 + 抛物线插值估计基频。
+ * YIN 基频估计（累积均值归一化差分）。
  *
- * 整数滞后分辨率不足以看出「四舍五入延迟线」造成的音高误差
- * （高把位能偏 20 音分以上），抛物线插值可把分辨率压到 0.05 采样以内。
+ * 旧的自相关峰值法在泛音较强的音上会选中 2 倍周期（880Hz 实测被读成 440Hz），
+ * 而 YIN 取第一个低于阈值的谷，能稳定落在真实周期上。
+ * 抛物线插值把滞后分辨率压到 0.05 采样以内。
  */
 function estimateFrequency(data: Float32Array, sampleRate: number): number {
     const start = Math.floor(sampleRate * 0.05);
     const win = Math.floor(sampleRate * 0.1);
     const minLag = Math.floor(sampleRate / 1600);
     const maxLag = Math.ceil(sampleRate / 70);
-    const corr = (lag: number): number => {
+    const diff = (lag: number): number => {
         let sum = 0;
-        for (let i = start; i < start + win; i++) sum += data[i] * data[i + lag];
+        for (let i = start; i < start + win; i++) {
+            const d = data[i] - data[i + lag];
+            sum += d * d;
+        }
         return sum;
     };
-    let bestLag = minLag;
-    let best = -Infinity;
-    for (let lag = minLag; lag <= maxLag; lag++) {
-        const v = corr(lag);
-        if (v > best) { best = v; bestLag = lag; }
+    const cmnd = new Float64Array(maxLag + 2);
+    cmnd[0] = 1;
+    let running = 0;
+    for (let lag = 1; lag <= maxLag + 1; lag++) {
+        running += diff(lag);
+        cmnd[lag] = running === 0 ? 1 : (diff(lag) * lag) / running;
     }
-    const y0 = corr(bestLag - 1);
-    const y1 = best;
-    const y2 = corr(bestLag + 1);
+    let bestLag = -1;
+    for (let lag = minLag; lag <= maxLag; lag++) {
+        if (cmnd[lag] < 0.15) {
+            while (lag + 1 <= maxLag && cmnd[lag + 1] < cmnd[lag]) lag++;
+            bestLag = lag;
+            break;
+        }
+    }
+    if (bestLag < 0) {
+        let best = Infinity;
+        for (let lag = minLag; lag <= maxLag; lag++) {
+            if (cmnd[lag] < best) { best = cmnd[lag]; bestLag = lag; }
+        }
+    }
+    const y0 = cmnd[bestLag - 1];
+    const y1 = cmnd[bestLag];
+    const y2 = cmnd[bestLag + 1];
     const denom = y0 - 2 * y1 + y2;
     const delta = denom !== 0 ? 0.5 * (y0 - y2) / denom : 0;
     return sampleRate / (bestLag + delta);
+}
+
+/** Goertzel：测单个频率在窗口内的幅值（基频包络回归用） */
+function goertzel(data: Float32Array, sampleRate: number, freq: number, from: number, to: number): number {
+    const w = 2 * Math.PI * freq / sampleRate;
+    const c = 2 * Math.cos(w);
+    let s1 = 0;
+    let s2 = 0;
+    for (let i = from; i < to; i++) {
+        const s0 = data[i] + c * s1 - s2;
+        s2 = s1;
+        s1 = s0;
+    }
+    return Math.sqrt(Math.max(0, s1 * s1 + s2 * s2 - c * s1 * s2));
 }
 
 describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
@@ -148,6 +239,8 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
             [440, 3],     // A4
             [587.33, 2],  // D5（旧实现偏低 0.8%）
             [880, 1],     // A5（旧实现偏低 1.5%）
+            [1046.5, 1],  // C6
+            [1318.5, 6],  // E6 低弦高把位
         ];
         for (const [freq, stringNum] of cases) {
             const ks = generateStringData({
@@ -158,6 +251,28 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
             });
             const measured = estimateFrequency(ks.data, SR48);
             expect(Math.abs(measured - freq) / freq).toBeLessThan(0.002);
+        }
+    });
+
+    it('高音区基频在 sustain 末尾仍接近目标，不被滤波与插值损失拖到 -60dB', () => {
+        const SR48 = 48000;
+        for (const [freq, stringNum] of [[880, 1], [1046.5, 1], [1318.5, 1], [1318.5, 6]] as Array<[number, number]>) {
+            const sustain = 1;
+            const ks = generateStringData({
+                frequency: freq,
+                duration: sustain + 0.2,
+                sampleRate: SR48,
+                string: stringNum,
+                sustain,
+            });
+            const win = Math.round(SR48 * 0.05);
+            const head = goertzel(ks.data, SR48, freq, 0, win);
+            const end = Math.round(SR48 * sustain);
+            const tail = goertzel(ks.data, SR48, freq, end - win, end);
+            const db = 20 * Math.log10(tail / head);
+            // 目标 -20dB：允许 ±10dB 的音区偏差，但不能再出现 -60dB 的“早死”
+            expect(db).toBeGreaterThan(-30);
+            expect(db).toBeLessThan(-10);
         }
     });
 });

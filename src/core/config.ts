@@ -168,6 +168,22 @@ export const KARPLUS_ARTICULATION = {
     palmMuteLowpassFreq: 1800,
     /** 手掌闷音的共振增益上限（不超过琴体预设） */
     palmMuteResonanceGain: 2.0,
+    /** 正常音在记谱时值内衰减到的电平比例（仅 Karplus） */
+    normalDecayTarget: 0.1,
+    /**
+     * 高音区反馈滤波衰减的起止频率（Hz）。
+     *
+     * 反馈低通在基频处的衰减会按圈数累计：880Hz 以上若不减弱滤波，
+     * sustain 末尾会比 {@link normalDecayTarget} 低几十 dB，高音会“早死”。
+     */
+    highFreqDampingStartHz: 150,
+    highFreqDampingEndHz: 900,
+    /** 高音区反馈滤波强度保留比例（0 = 完全不滤，1 = 保留原权重） */
+    highFreqDampingFloor: 0.05,
+    /** 缓冲区结尾淡出时长（秒），避免硬切咔哒 */
+    tailFadeSec: 0.02,
+    /** 音符停止/释放的淡出时长（秒） */
+    releaseSec: 0.03,
     /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
     bendStartSec: 0.05,
     /** 推弦上弯时长（秒） */

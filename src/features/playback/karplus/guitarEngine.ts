@@ -16,6 +16,11 @@
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
 
+/** source.stop 相对淡出结束的余量（秒），确保淡出完全生效 */
+const STOP_MARGIN_SEC = 0.005;
+/** 节点断开的延迟余量（秒），等 source.stop 与淡出走完 */
+const DISCONNECT_MARGIN_SEC = 0.05;
+
 export interface NoteOptions {
     frequency?: number;
     duration?: number;
@@ -103,9 +108,14 @@ export class GuitarEngine {
         const buffer = toAudioBuffer(ctx, ks);
 
         // ---- 2) 构建音频信号链 ----
+        // mixGain 承载音量与技法增益；envGain 只负责音符收尾的释音包络。
+        // 两者分开，技法在起音后改写 mixGain 时不会让释音把电平拉回初始 volume。
         const mixGain = ctx.createGain();
         mixGain.gain.value = volume;
-        mixGain.connect(this.masterGain);
+        const envGain = ctx.createGain();
+        envGain.gain.value = 1;
+        mixGain.connect(envGain);
+        envGain.connect(this.masterGain);
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
@@ -135,11 +145,21 @@ export class GuitarEngine {
         bodyFilter.connect(resonance);
         resonance.connect(mixGain);
 
-        source.start(now);
-        // 按发声时长截止（自然衰减尾音后静音）
-        source.stop(now + soundDur);
+        // 释音包络：在发声结束前淡出，避免 source.stop 在非零采样处硬切。
+        // 必须先用 setValueAtTime 锚定 releaseStart：新建 GainNode 上直接
+        // exponentialRampToValueAtTime 没有前置事件，会从调用时刻（≈now）
+        // 开始淡，整段音符提前收干。
+        const stopTime = now + soundDur;
+        const releaseSec = Math.min(KARPLUS_ARTICULATION.releaseSec, soundDur);
+        const releaseStart = stopTime - releaseSec;
+        envGain.gain.setValueAtTime(1, releaseStart);
+        envGain.gain.exponentialRampToValueAtTime(0.001, stopTime);
 
-        const allNodes: AudioNode[] = [source, bodyFilter, resonance, mixGain];
+        source.start(now);
+        // 按发声时长截止；增益已在 stopTime 前淡到 0.001
+        source.stop(stopTime);
+
+        const allNodes: AudioNode[] = [source, bodyFilter, resonance, mixGain, envGain];
 
         // ---- 3) 混响（单延迟线） ----
         // 手掌闷音要干、要收紧，不加混响
@@ -149,7 +169,8 @@ export class GuitarEngine {
             const delayGain = ctx.createGain();
             // 回响压到极低，音符更干、前后音更分得开
             delayGain.gain.value = volume * 0.04;
-            mixGain.connect(delay);
+            // 从包络之后取送：收尾淡出时混响尾音一起收
+            envGain.connect(delay);
             delay.connect(delayGain);
             delayGain.connect(this.masterGain);
             allNodes.push(delay, delayGain);
@@ -346,37 +367,50 @@ export class GuitarEngine {
     // 停止 & 释放
     // ============================================================
 
-    /** 停止单个活跃音符（快速淡出） */
+    /** 停止单个活跃音符（先淡出，再停 source） */
     stopNote(noteId: symbol): void {
         const note = this.activeNotes.get(noteId);
         if (!note || !this.ctx) return;
         const now = this.ctx.currentTime;
+        const fadeSec = KARPLUS_ARTICULATION.releaseSec;
         try {
+            // 顺序必须反过来：先让 gain 淡到接近 0，再停 source。
+            // 必须先读 gain.value 再 cancel：cancelScheduledValues 会删掉进行中的
+            // release ramp，参数回退到上一个 setValueAtTime，再读就会从被抬高的
+            // 电平起淡，产生一次上跳。
+            const gain = note.gain.gain;
+            const current = Math.max(0.001, gain.value);
+            gain.cancelScheduledValues(now);
+            gain.setValueAtTime(current, now);
+            gain.exponentialRampToValueAtTime(0.001, now + fadeSec);
             if (note.source) {
-                try { note.source.stop(now); } catch {}
+                try { note.source.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
             }
-            note.gain.gain.cancelScheduledValues(now);
-            note.gain.gain.setValueAtTime(note.gain.gain.value, now);
-            note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
         } catch {}
         this.activeNotes.delete(noteId);
-        // 延迟断开节点
+        // 延迟断开节点，等淡出与 source.stop 完成
         setTimeout(() => {
             for (const n of note.nodes) {
                 try { n.disconnect(); } catch {}
             }
-        }, 50);
+        }, (fadeSec + DISCONNECT_MARGIN_SEC) * 1000);
     }
 
     stopAll(): void {
         if (!this.ctx) return;
         const now = this.ctx.currentTime;
+        const fadeSec = KARPLUS_ARTICULATION.releaseSec;
         for (const [, note] of this.activeNotes) {
             try {
+                const gain = note.gain.gain;
+                // 同 stopNote：先读当前电平，再清掉进行中的 release
+                const current = Math.max(0.001, gain.value);
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(current, now);
+                gain.exponentialRampToValueAtTime(0.001, now + fadeSec);
                 if (note.source) {
-                    note.source.stop(now);
+                    note.source.stop(now + fadeSec + STOP_MARGIN_SEC);
                 }
-                note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
             } catch {}
         }
         this.activeNotes.clear();
