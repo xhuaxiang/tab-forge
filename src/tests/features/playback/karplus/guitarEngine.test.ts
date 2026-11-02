@@ -14,9 +14,11 @@ class MockParam {
     value: number;
     /** 记录 setValueAtTime 的调度值（dampNote 断言用；value 最终会被 ramp 覆盖） */
     scheduled: number[] = [];
+    /** 记录 ramp 目标值（推弦/滑弦断言用） */
+    ramps: number[] = [];
     constructor(v = 0) { this.value = v; }
     setValueAtTime(v: number) { this.value = v; this.scheduled.push(v); }
-    exponentialRampToValueAtTime(v: number) { this.value = v; }
+    exponentialRampToValueAtTime(v: number) { this.value = v; this.ramps.push(v); }
     cancelScheduledValues() {}
 }
 
@@ -75,6 +77,9 @@ class MockAudioContext {
         return this.sources.map(s => s.buffer).filter((b): b is MockBuffer => b !== null);
     }
 
+    /** 测试辅助：拿到按创建顺序排列的 source（读 playbackRate 用） */
+    getSources(): MockNode[] { return this.sources; }
+
     /** 测试辅助：gains[0]=masterGain，gains[1]=单音的 mixGain */
     getGains(): MockNode[] { return this.gains; }
 
@@ -129,6 +134,20 @@ describe('GuitarEngine.playNote', () => {
         const bodyFilter = ctx.getFilters()[0];
         // 6 弦预设 2500Hz，被 palmMuteLowpassFreq=1800 压住
         expect(bodyFilter.frequency.value).toBe(1800);
+        ge.dispose();
+    });
+
+    it('bendNote：按半音数把 playbackRate 弯到 2^(n/12)，释放时回到原速', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        const noteId = ge.playNote({ frequency: 440, duration: 0.5, volume: 0.5, string: 1 });
+        ge.bendNote(noteId, 2, 0.5, true);
+
+        const rate = ctx.getSources()[0].playbackRate;
+        expect(rate.ramps[0]).toBeCloseTo(Math.pow(2, 2 / 12), 5); // 上弯 2 个半音
+        expect(rate.ramps[rate.ramps.length - 1]).toBeCloseTo(1, 5); // 释放回原音高
         ge.dispose();
     });
 

@@ -146,6 +146,20 @@ export const KARPLUS_ARTICULATION = {
     palmMuteLowpassFreq: 1800,
     /** 手掌闷音的共振增益上限（不超过琴体预设） */
     palmMuteResonanceGain: 2.0,
+    /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
+    bendStartSec: 0.05,
+    /** 推弦上弯时长（秒） */
+    bendTimeSec: 0.12,
+    /** 推弦释放：在音符结束前多久开始回弹（秒） */
+    bendReleaseLeadSec: 0.15,
+    /** 推弦释放回弹时长（秒） */
+    bendReleaseTimeSec: 0.1,
+    /** 揉弦深度（playbackRate 调制幅度，0.012 ≈ ±20 音分） */
+    vibratoDepth: 0.012,
+    /** 揉弦频率（Hz） */
+    vibratoRate: 5.5,
+    /** 揉弦在拨弦后多久开始（秒），避开起音 */
+    vibratoStartSec: 0.08,
 } as const;
 
 // ============================================================

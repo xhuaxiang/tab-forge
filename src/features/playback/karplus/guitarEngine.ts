@@ -241,28 +241,54 @@ export class GuitarEngine {
         return noteId;
     }
 
-    /** 推弦：从当前频率向上弯曲到目标频率 */
-    bendTo(toFreq: number, bendDuration: number = 0.12, noteId: symbol | null = null): symbol {
-        if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+    /**
+     * 推弦：在该音符自身音高基础上向上弯曲 semitones 个半音。
+     *
+     * 与 hammerOn/pullOff/slide 的「技法连接」不同：推弦是技法音符**自己发声**。
+     * 前一个同弦音可能已经停止或在别的弦上，不能借用它的声音。
+     * 全部用 AudioParam 的绝对时间排程，不走 setTimeout，避免与调度层抢时序。
+     *
+     * @param semitones 推弦幅度（半音，向上为正）
+     * @param holdSec   从拨弦起算的持音时长（用于计算回弹时机）
+     * @param release   是否在时值末尾回弹到原音高
+     */
+    bendNote(noteId: symbol, semitones: number, holdSec: number, release = false): void {
+        const note = this.activeNotes.get(noteId);
+        if (!note || !note.source || !this.ctx || semitones === 0) return;
+        const now = this.ctx.currentTime;
+        const rate = note.source.playbackRate;
+        const target = Math.pow(2, semitones / 12);
+        const start = now + KARPLUS_ARTICULATION.bendStartSec;
+        const peak = start + KARPLUS_ARTICULATION.bendTimeSec;
+
+        rate.cancelScheduledValues(now);
+        rate.setValueAtTime(1, now);
+        rate.setValueAtTime(1, start);
+        rate.exponentialRampToValueAtTime(target, peak);
+
+        if (release) {
+            // 回弹不能早于推弦到达峰值，否则会被吞掉
+            const releaseStart = Math.max(
+                peak,
+                now + holdSec - KARPLUS_ARTICULATION.bendReleaseLeadSec,
+            );
+            rate.setValueAtTime(target, releaseStart);
+            rate.exponentialRampToValueAtTime(
+                1,
+                releaseStart + KARPLUS_ARTICULATION.bendReleaseTimeSec,
+            );
         }
-        const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            // 推弦只向上弯曲，不回落
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / note.frequency, now + bendDuration);
-        }
+
         // 推弦时稍微增大音量模拟张力增加
         note.gain.gain.setValueAtTime(0.65, now);
-        note.frequency = toFreq;
-        return noteId;
+        note.frequency *= target;
     }
 
-    /** 揉弦：通过 LFO 调制 playbackRate 产生音高波动 */
-    vibrato(noteId: symbol, depth: number = 0.015, rate: number = 5.5): void {
+    /**
+     * 揉弦：通过 LFO 调制 playbackRate 产生音高波动。
+     * @param startDelaySec 拨弦后多久开始揉（秒），避开起音
+     */
+    vibrato(noteId: symbol, depth: number = 0.015, rate: number = 5.5, startDelaySec = 0): void {
         const note = this.activeNotes.get(noteId);
         if (!note || !note.source || !this.ctx) return;
         const ctx = this.ctx;
@@ -279,15 +305,15 @@ export class GuitarEngine {
         lfo.connect(lfoGain);
         lfoGain.connect(note.source.playbackRate);
 
-        lfo.start(now);
+        lfo.start(now + Math.max(0, startDelaySec));
         note.nodes.push(lfo, lfoGain);
     }
 
     /**
      * 对已发声的音符施加奏法收尾。
      *
-     * 技法连接（击弦/勾弦/滑弦/推弦/揉弦）只调制上一个音的播放速率、不重新拨弦，
-     * 所以闷音/断音无法通过重新生成缓冲区实现，只能直接写在当前音的包络上。
+     * 击弦/勾弦/滑弦复用上一个同弦音；推弦/揉弦作用于自身的新起音。
+     * 技法都不重新生成缓冲区，所以闷音/断音无法通过重新生成实现，只能直接写在当前音的包络上。
      * @param afterSec 从当前时刻起多久开始快速淡出（秒）
      * @param volumeFactor 起始音量系数（手掌闷音）
      * @param darken 是否压低琴体低通的截止频率（手掌闷音音色）
