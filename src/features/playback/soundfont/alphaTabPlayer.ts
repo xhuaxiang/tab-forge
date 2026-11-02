@@ -38,6 +38,7 @@ class AlphaTabPlayer {
     private mod: AlphaTabModule | null = null;
     private synth: AlphaSynthHandle | null = null;
     private callbacks: PlaybackCallbacks = {};
+    private state: PlaybackState = 'idle';
     private measureStarts: number[] = [];
     private lastMeasure = -1;
     private initializing: Promise<void> | null = null;
@@ -45,6 +46,11 @@ class AlphaTabPlayer {
 
     setCallbacks(callbacks: PlaybackCallbacks): void {
         this.callbacks = callbacks;
+    }
+
+    /** 当前播放状态（供切引擎时判断是否需要先停掉本引擎） */
+    getState(): PlaybackState {
+        return this.state;
     }
 
     async play(score: TabScore): Promise<void> {
@@ -73,6 +79,7 @@ class AlphaTabPlayer {
 
     stop(): void {
         if (this.synth) this.synth.stop();
+        this.state = 'stopped';
         this.lastMeasure = -1;
         this.callbacks.onPositionChange?.(0, 0);
     }
@@ -85,6 +92,7 @@ class AlphaTabPlayer {
         this.synth?.destroy();
         this.synth = null;
         this.mod = null;
+        this.state = 'idle';
         this.measureStarts = [];
     }
 
@@ -144,6 +152,7 @@ class AlphaTabPlayer {
     }
 
     private emitState(state: PlaybackState): void {
+        this.state = state;
         this.callbacks.onStateChange?.(state);
     }
 

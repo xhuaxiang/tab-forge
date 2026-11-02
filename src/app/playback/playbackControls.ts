@@ -27,8 +27,24 @@ export function initPlaybackControls(): void {
         // 取值不合法（HTML 与 PLAYBACK_ENGINES 漂了）就回落到默认引擎，而不是静默变成别的
         const engineValue = ($('engineSelect') as HTMLSelectElement | null)?.value;
         const engine = isPlaybackEngine(engineValue) ? engineValue : DEFAULT_PLAYBACK_ENGINE;
+        // 两个引擎各自独立出声，若另一个还在播，换引擎播放会叠成两轨（听感：节奏错乱）
+        const stopOtherEngine = async (target: 'alphatab' | 'karplus') => {
+            if (target === 'alphatab') {
+                const { currentAudioEngine } = await import('../../features/playback/karplus/index.ts');
+                if (currentAudioEngine.getState() === 'playing' || currentAudioEngine.getState() === 'paused') {
+                    currentAudioEngine.stop();
+                }
+            } else {
+                const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
+                if (alphaTabPlayer.getState() === 'playing' || alphaTabPlayer.getState() === 'paused') {
+                    alphaTabPlayer.stop();
+                }
+            }
+        };
+
         if (engine === 'alphatab') {
             try {
+                await stopOtherEngine('alphatab');
                 const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
                 alphaTabPlayer.setCallbacks(callbacks);
                 await alphaTabPlayer.play(scoreStore.score);
@@ -38,6 +54,7 @@ export function initPlaybackControls(): void {
                 setStatus('SoundFont 播放失败，已回退合成器', 'error');
             }
         }
+        await stopOtherEngine('karplus');
         const audioEngine = (await import('../../features/playback/karplus/index.ts')).currentAudioEngine;
         audioEngine.setCallbacks(callbacks);
         await audioEngine.play(scoreStore.score);
