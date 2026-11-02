@@ -48,14 +48,35 @@ export function generateStringData(params: KSParams): KSBufferData {
         return { data: new Float32Array(1), sampleRate, duration: 0 };
     }
 
-    const delaySamples = Math.max(2, Math.round(sampleRate / frequency));
-    const totalSamples = Math.max(delaySamples + 1, Math.round(sampleRate * (duration + 0.05)));
-
-    const data = new Float32Array(totalSamples);
-
     const str = stringNum ?? 3;
     const isLow = str >= 4;
     const isHigh = str <= 2;
+
+    // 反馈低通权重：决定音色，也决定滤波器的群延迟
+    const [w1, w2, w3] = mute
+        ? [0.5, 0.5, 0]             // 制音：两级平均，最快收干
+        : palmMute
+            ? [0.5, 0.32, 0.18]     // 手掌闷音：更强低通，闷而短
+            : isLow
+                ? [0.55, 0.25, 0.2] // 低音：三点低通，圆润原声
+                : isHigh
+                    ? [0.7, 0.2, 0.1] // 高音：稍加低通，亮而不尖
+                    : [0.7, 0.3, 0];  // 中音：适中
+
+    // ---- 延迟线长度：分数延迟 + 滤波群延迟补偿 ----
+    // 低通会在延迟线之外再引入约 g 个采样的群延迟。若只按
+    // round(sampleRate / frequency) 取整数，实际周期 = 延迟线 + g，音高偏低；
+    // 高把位周期短，取整误差能让音准偏出 20 音分以上。
+    // 因此按「总延迟 = 采样率 / 频率」反推延迟线长度，小数部分用线性插值补上。
+    const filterDelay = (w2 + 2 * w3) / (w1 + w2 + w3);
+    const period = sampleRate / frequency;
+    const totalDelay = Math.max(2, period - filterDelay);
+    const delaySamples = Math.floor(totalDelay);
+    const frac = totalDelay - delaySamples;
+
+    const totalSamples = Math.max(delaySamples + 2, Math.round(sampleRate * (duration + 0.05)));
+
+    const data = new Float32Array(totalSamples);
 
     // ---- 第1步：拨弦激励（短噪声） ----
     for (let i = 0; i < delaySamples; i++) {
@@ -88,30 +109,19 @@ export function generateStringData(params: KSParams): KSBufferData {
             ? palmMuteDecay
             : normalDecay;
 
-    if (mute) {
-        // 闷音：快速衰减 + 两级平均
-        for (let i = delaySamples; i < totalSamples; i++) {
-            const prev = data[i - delaySamples];
-            const avg = (prev + (i - delaySamples - 1 >= 0 ? data[i - delaySamples - 1] : prev)) * 0.5;
-            data[i] = avg * decay;
-        }
-    } else {
-        // 正常琴弦：不同弦用不同低通量——低音弦多低通（更暖更原声），高音弦少低通（更亮）。
-        const [w1, w2, w3] = palmMute
-            ? [0.5, 0.32, 0.18]   // 手掌闷音：更强低通，闷而短
-            : isLow
-                ? [0.55, 0.25, 0.2]   // 低音：三点低通，圆润原声
-                : isHigh
-                    ? [0.7, 0.2, 0.1] // 高音：稍加低通，亮而不尖
-                    : [0.7, 0.3, 0];  // 中音：适中
-        for (let i = delaySamples; i < totalSamples; i++) {
-            const s1 = data[i - delaySamples];
-            const s2 = (i - delaySamples - 1 >= 0) ? data[i - delaySamples - 1] : s1;
-            const s3 = (i - delaySamples - 2 >= 0) ? data[i - delaySamples - 2] : s1;
-            const avg = (s1 * w1 + s2 * w2 + s3 * w3) * decay;
-            // 轻微随机调制（±0.5%）模拟泛音微颤，噪声小、音色干净
-            data[i] = avg * (1 + 0.005 * (Math.random() * 2 - 1));
-        }
+    // 从 delaySamples + 1 开始：分数延迟插值需要读到 i - delaySamples - 1
+    for (let i = delaySamples + 1; i < totalSamples; i++) {
+        const a = data[i - delaySamples];
+        const b = data[i - delaySamples - 1];
+        const c = i - delaySamples - 2 >= 0 ? data[i - delaySamples - 2] : b;
+        const d = i - delaySamples - 3 >= 0 ? data[i - delaySamples - 3] : c;
+        // 三个低通抽头都在分数延迟位置上取值（半径由 frac 决定）
+        const s1 = a + (b - a) * frac;
+        const s2 = b + (c - b) * frac;
+        const s3 = c + (d - c) * frac;
+        const avg = (s1 * w1 + s2 * w2 + s3 * w3) * decay;
+        // 轻微随机调制（±0.5%）模拟泛音微颤，噪声小、音色干净；制音不调制
+        data[i] = mute ? avg : avg * (1 + 0.005 * (Math.random() * 2 - 1));
     }
 
     return { data, sampleRate, duration };

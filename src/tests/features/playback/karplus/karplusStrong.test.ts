@@ -110,6 +110,58 @@ describe('generateStringData', () => {
     });
 });
 
+/**
+ * 用自相关 + 抛物线插值估计基频。
+ *
+ * 整数滞后分辨率不足以看出「四舍五入延迟线」造成的音高误差
+ * （高把位能偏 20 音分以上），抛物线插值可把分辨率压到 0.05 采样以内。
+ */
+function estimateFrequency(data: Float32Array, sampleRate: number): number {
+    const start = Math.floor(sampleRate * 0.05);
+    const win = Math.floor(sampleRate * 0.1);
+    const minLag = Math.floor(sampleRate / 1600);
+    const maxLag = Math.ceil(sampleRate / 70);
+    const corr = (lag: number): number => {
+        let sum = 0;
+        for (let i = start; i < start + win; i++) sum += data[i] * data[i + lag];
+        return sum;
+    };
+    let bestLag = minLag;
+    let best = -Infinity;
+    for (let lag = minLag; lag <= maxLag; lag++) {
+        const v = corr(lag);
+        if (v > best) { best = v; bestLag = lag; }
+    }
+    const y0 = corr(bestLag - 1);
+    const y1 = best;
+    const y2 = corr(bestLag + 1);
+    const denom = y0 - 2 * y1 + y2;
+    const delta = denom !== 0 ? 0.5 * (y0 - y2) / denom : 0;
+    return sampleRate / (bestLag + delta);
+}
+
+describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
+    it('各弦基频误差 < 0.5%', () => {
+        const SR48 = 48000;
+        const cases: Array<[number, number]> = [
+            [82.41, 6],   // 空弦 E2
+            [440, 3],     // A4
+            [587.33, 2],  // D5（旧实现偏低 0.8%）
+            [880, 1],     // A5（旧实现偏低 1.5%）
+        ];
+        for (const [freq, stringNum] of cases) {
+            const ks = generateStringData({
+                frequency: freq,
+                duration: 0.6,
+                sampleRate: SR48,
+                string: stringNum,
+            });
+            const measured = estimateFrequency(ks.data, SR48);
+            expect(Math.abs(measured - freq) / freq).toBeLessThan(0.002);
+        }
+    });
+});
+
 describe('getBodyFilterPreset', () => {
     it('低音弦低通频率更低（更暖）、高音弦更高（更亮）', () => {
         const low = getBodyFilterPreset(6);
