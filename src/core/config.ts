@@ -4,10 +4,11 @@
  * 集中定义乐谱全局默认与 AI 即兴生成配置，页面 UI 与业务逻辑统一从这里读。
  */
 
-import { STANDARD_TUNING, type Tuning } from './types/index.ts';
+import { STANDARD_TUNING, type Note, type Tuning } from './types/index.ts';
 import type {
     LocalImprovConfig,
     ProgressionStep,
+    SlotRole,
 } from './types/improv.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
@@ -97,6 +98,27 @@ export const ARPEGGIO_INTERVAL_MS = 40;
 export const DYNAMICS_VOLUME_FACTOR: Record<'soft' | 'accent', number> = {
     soft: 0.65,
     accent: 1.35,
+};
+
+/**
+ * 拍位自动重音总开关。
+ *
+ * 开启后，未显式标注 `dynamics` 的音符在强拍上按 {@link METRIC_ACCENT_DYNAMICS}
+ * 派生重音；显式标注永远优先。置 false 即回滚到旧行为。
+ */
+export const AUTO_METRIC_ACCENT = true;
+
+/**
+ * 拍位角色 → 派生力度（唯一策略表）。
+ *
+ * 只派生强拍重音：4/4 的第 2、4 拍是 backbeat，按理论弱拍压成 soft 会把律动压反；
+ * “轻音”仍只由显式 `dynamics: 'soft'` 触发。
+ * 角色判定复用 `core/utils/improv/rhythm.ts` 的 classifySlotRole，不另写拍号规则。
+ */
+export const METRIC_ACCENT_DYNAMICS: Record<SlotRole, Note['dynamics']> = {
+    strong: 'accent',
+    weak: undefined,
+    passing: undefined,
 };
 
 /**

@@ -14,6 +14,7 @@
 
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
+import { resolveNoteDynamics } from '../../../core/utils/metricAccent.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
 /** 单条播放事件 */
@@ -24,6 +25,8 @@ export interface ScheduledEvent {
     /** 记谱时值对应的秒数（技法释放时间、音符时长用） */
     duration: number;
     volume: number;
+    /** 生效力度（显式优先，否则拍位派生）；volume 已含对应系数，消费方不要再乘一次 */
+    dynamics: Note['dynamics'];
 }
 
 export interface PlaybackSchedule {
@@ -64,18 +67,30 @@ export function buildSchedule(
     let cursorMs = startDelayMs;
 
     for (const measure of measures) {
+        const signature = `${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}`;
         const measureStartMs = cursorMs;
+        // 拍位偏移（全音符 = 1），用于按拍位派生重音；休止符也照常推进
+        let slotOffset = 0;
 
         forEachSlot(measure, (notes) => {
-            const durSec = beat * (DURATION_TO_BEATS[notes[0].duration] ?? 1);
+            const first = notes[0];
+            const slotStart = slotOffset;
+            slotOffset += first.duration;
+
+            const durSec = beat * (DURATION_TO_BEATS[first.duration] ?? 1);
             const durMs = durSec * 1000;
 
             // 和弦音量补偿：多个音符同时播放时适当降低避免削波
             // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
             const chordVolume = 0.5 / (1 + (notes.length - 1) * 0.25);
+            // 该拍位组的派生力度：显式标注优先，否则按拍位（强拍 → accent）
+            const slotDynamics = resolveNoteDynamics(first.dynamics, slotStart, first.duration, signature);
             // 力度：每个音各按自己的 dynamics 缩放（重音抬、轻音压）——律动感就靠这个对比
-            const volumeOf = (n: Note): number =>
-                chordVolume * (n.dynamics ? DYNAMICS_VOLUME_FACTOR[n.dynamics] : 1);
+            const dynamicsOf = (n: Note): Note['dynamics'] => n.dynamics ?? slotDynamics;
+            const volumeOf = (n: Note): number => {
+                const d = dynamicsOf(n);
+                return chordVolume * (d ? DYNAMICS_VOLUME_FACTOR[d] : 1);
+            };
 
             const arpeggio = notes.length > 1 ? notes[0].arpeggio : undefined;
             const strum = notes.length > 1 ? notes[0].strum : undefined;
@@ -96,6 +111,7 @@ export function buildSchedule(
                         delayMs: cursorMs + i * STRUM_INTERVAL_MS,
                         duration: durSec,
                         volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
                     });
                 }
             } else if (arpeggio) {
@@ -113,13 +129,20 @@ export function buildSchedule(
                         delayMs: cursorMs + i * ARPEGGIO_INTERVAL_MS,
                         duration: durSec,
                         volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
                     });
                 }
             } else {
                 // 普通和弦或单音：同时播放
                 for (const note of notes) {
                     if (note.isRest || (note.tieToNext && !note.technique)) continue;
-                    events.push({ note, delayMs: cursorMs, duration: durSec, volume: volumeOf(note) });
+                    events.push({
+                        note,
+                        delayMs: cursorMs,
+                        duration: durSec,
+                        volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
+                    });
                 }
             }
 
