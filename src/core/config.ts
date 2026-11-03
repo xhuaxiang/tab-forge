@@ -256,6 +256,56 @@ export const KARPLUS_ARTICULATION = {
 } as const;
 
 /**
+ * Karplus 混音总线（琴体三频段、限幅、共享混响与声像）。
+ *
+ * 与 {@link KARPLUS_ARTICULATION} 的分工：那边管单个音符的技法与包络，
+ * 这里管所有音符汇入 master 之前的整体音色与空间。SoundFont 侧不读。
+ */
+export const KARPLUS_MIX = {
+    /** 低音弦（5–6 弦）高通截止（Hz），去掉次低频隆隆声 */
+    highpassLowStringHz: 55,
+    /** 中音弦（3–4 弦）高通截止（Hz） */
+    highpassMidStringHz: 70,
+    /** 高音弦（1–2 弦）高通截止（Hz） */
+    highpassHighStringHz: 90,
+    /** 高通 Q（0.7 ≈ Butterworth，无明显峰） */
+    highpassQ: 0.7,
+    /** 总线限幅器阈值（dB） */
+    limiterThresholdDb: -3,
+    /** 限幅器拐点宽度（dB），0 = 硬拐点，只削峰值 */
+    limiterKneeDb: 0,
+    /** 限幅比 */
+    limiterRatio: 20,
+    /** 起音时间（秒），要短于拨弦瞬态 */
+    limiterAttackSec: 0.003,
+    /** 释放时间（秒） */
+    limiterReleaseSec: 0.15,
+    /** 共享混响：湿声返回电平（相对干声） */
+    roomWet: 0.1,
+    /** IR 时长（秒） */
+    roomDurationSec: 1.2,
+    /** IR 指数衰减强度：越大衰减越快 */
+    roomDecay: 2.5,
+    /** IR 随机种子，保证每次启动得到同一脉冲响应 */
+    roomSeed: 0x5eed,
+    /** IR 起音前留白（秒），让混响只做湿声 */
+    roomPreDelaySec: 0.003,
+    /** IR 噪声低通（Hz），避免混响过亮 */
+    roomLowpassHz: 5000,
+    /** 声像步进：每根弦相对中心的偏移量 */
+    panStep: 0.08,
+    /** 声像中心弦号（3.5 = 3/4 弦之间），低弦偏左、高弦偏右 */
+    panCenterString: 3.5,
+    /**
+     * 声像后补偿增益。StereoPanner 中心位按等功率定律每声道 0.707，
+     * 相对旧链路（mono up-mix 到左右两声道）整体低约 3dB；乘 √2 补平。
+     */
+    panCompensationGain: Math.SQRT2,
+    /** stop/pause 时把共享混响返回压掉的时长（秒），避免残留空间尾巴 */
+    roomStopFadeSec: 0.03,
+} as const;
+
+/**
  * Karplus-Strong 激励与弦参数（可调音色旋钮）。
  *
  * 与 {@link KARPLUS_ARTICULATION} 的分工：那边管技法时长/音量，

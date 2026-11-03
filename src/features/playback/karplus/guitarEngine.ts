@@ -14,7 +14,9 @@
  */
 
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
-import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
+import { KARPLUS_ARTICULATION, KARPLUS_MIX } from '../../../core/config.ts';
+import { generateRoomImpulse } from '../../../core/utils/roomImpulse.ts';
+import { highpassHzForString, panForString } from '../../../core/utils/karplusMix.ts';
 
 /** source.stop 相对淡出结束的余量（秒），确保淡出完全生效 */
 const STOP_MARGIN_SEC = 0.005;
@@ -61,13 +63,58 @@ export class GuitarEngine {
     private ctx: AudioContext | null = null;
     private activeNotes: Map<symbol, ActiveNote> = new Map();
     private masterGain: GainNode | null = null;
+    private limiter: DynamicsCompressorNode | null = null;
+    /** 所有非闷音音符共用一条混响发送总线 */
+    private reverbSend: GainNode | null = null;
+    private reverbReturn: GainNode | null = null;
+    /** stopAll 是否把湿声压掉了；下一次发声前需恢复，避免旧尾音回涌 */
+    private reverbDucked = false;
 
     init(): AudioContext {
         if (!this.ctx) {
             this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            this.masterGain = this.ctx.createGain();
+            const ctx = this.ctx;
+
+            this.masterGain = ctx.createGain();
             this.masterGain.gain.value = KARPLUS_ARTICULATION.masterGain;
-            this.masterGain.connect(this.ctx.destination);
+
+            // 总线限幅：6 音和弦/重音叠加时只削峰值，不压整体动态
+            this.limiter = ctx.createDynamicsCompressor();
+            this.limiter.threshold.value = KARPLUS_MIX.limiterThresholdDb;
+            this.limiter.knee.value = KARPLUS_MIX.limiterKneeDb;
+            this.limiter.ratio.value = KARPLUS_MIX.limiterRatio;
+            this.limiter.attack.value = KARPLUS_MIX.limiterAttackSec;
+            this.limiter.release.value = KARPLUS_MIX.limiterReleaseSec;
+            this.masterGain.connect(this.limiter);
+            this.limiter.connect(ctx.destination);
+
+            // 共享短混响：所有音符共用一个 Convolver，IR 由纯函数生成
+            // （不依赖外部音频资源，双构建都成立）。
+            this.reverbSend = ctx.createGain();
+            this.reverbReturn = ctx.createGain();
+            this.reverbReturn.gain.value = KARPLUS_MIX.roomWet;
+            const convolver = ctx.createConvolver();
+            convolver.normalize = true;
+            const impulses = generateRoomImpulse({
+                sampleRate: ctx.sampleRate,
+                durationSec: KARPLUS_MIX.roomDurationSec,
+                decay: KARPLUS_MIX.roomDecay,
+                seed: KARPLUS_MIX.roomSeed,
+                channels: 2,
+                preDelaySec: KARPLUS_MIX.roomPreDelaySec,
+                lowpassHz: KARPLUS_MIX.roomLowpassHz,
+            });
+            const ir = ctx.createBuffer(impulses.length, impulses[0].length, ctx.sampleRate);
+            impulses.forEach((data, channel) => ir.getChannelData(channel).set(data));
+            convolver.buffer = ir;
+            this.reverbSend.connect(convolver);
+            convolver.connect(this.reverbReturn);
+            // 湿声回到 master 前，和干声一起过限幅，混响尾音也不会顶出峰值
+            this.reverbReturn.connect(this.masterGain);
+            this.reverbDucked = false;
+        } else {
+            // stopAll 会把湿声返回压掉；重新开始播放时恢复 roomWet
+            this.ensureReverbWet();
         }
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
@@ -77,6 +124,27 @@ export class GuitarEngine {
 
     getContext(): AudioContext | null {
         return this.ctx;
+    }
+
+    /**
+     * 恢复被 stopAll 压掉的混响湿声。
+     *
+     * 用短 ramp 而不是瞬时跳回：Convolver 里可能还有上一轮未衰减完的尾音，
+     * 直接跳回会让旧尾音瞬间回涌（重播间隔短时尤其明显）。read-before-cancel
+     * 保证压降进行到一半时也从中途电平接着升，不产生跳变。
+     */
+    private ensureReverbWet(): void {
+        if (!this.reverbDucked || !this.reverbReturn || !this.ctx) return;
+        const gain = this.reverbReturn.gain;
+        const now = this.ctx.currentTime;
+        const current = Math.max(0.0001, gain.value);
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(current, now);
+        gain.linearRampToValueAtTime(
+            KARPLUS_MIX.roomWet,
+            now + KARPLUS_MIX.roomStopFadeSec,
+        );
+        this.reverbDucked = false;
     }
 
     /** 该音符是否仍在发声（供技法连接判断，避免读私有 activeNotes） */
@@ -93,6 +161,8 @@ export class GuitarEngine {
     playNote(options: NoteOptions = {}): symbol {
         const ctx = this.ctx;
         if (!ctx || !this.masterGain) throw new Error('请先调用 init()');
+        // 直接调用 playNote（不经 init）时也要恢复被 stopAll 压掉的湿声
+        this.ensureReverbWet();
 
         const {
             frequency = 440,
@@ -143,13 +213,27 @@ export class GuitarEngine {
         const envGain = ctx.createGain();
         envGain.gain.value = 1;
         mixGain.connect(envGain);
-        envGain.connect(this.masterGain);
+
+        // 轻微声像：低弦偏左、高弦偏右；envGain 之后取声，混响仍为居中的湿声
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = panForString(stringNum);
+        // StereoPanner 中心位是等功率 -3dB，补偿回来，切换 SoundFont 时响度不跳
+        const panComp = ctx.createGain();
+        panComp.gain.value = KARPLUS_MIX.panCompensationGain;
+        envGain.connect(panner);
+        panner.connect(panComp);
+        panComp.connect(this.masterGain);
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
 
-        // 琴体共鸣滤波器组
+        // 琴体三频段：高通去隆隆声 → 低通收高频 → peaking 补共鸣
         const preset = getBodyFilterPreset(stringNum);
+        const highpass = ctx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = highpassHzForString(stringNum);
+        highpass.Q.value = KARPLUS_MIX.highpassQ;
+
         const bodyFilter = ctx.createBiquadFilter();
         bodyFilter.type = 'lowpass';
         bodyFilter.frequency.value = mute
@@ -169,7 +253,8 @@ export class GuitarEngine {
                 ? Math.min(preset.resonanceGain, KARPLUS_ARTICULATION.palmMuteResonanceGain)
                 : preset.resonanceGain;
 
-        source.connect(bodyFilter);
+        source.connect(highpass);
+        highpass.connect(bodyFilter);
         bodyFilter.connect(resonance);
         resonance.connect(mixGain);
 
@@ -187,24 +272,15 @@ export class GuitarEngine {
         // 按发声时长截止；增益已在 stopTime 前淡到 0.001
         source.stop(stopTime);
 
-        const allNodes: AudioNode[] = [source, bodyFilter, resonance, mixGain, envGain];
+        const allNodes: AudioNode[] = [
+            source, highpass, bodyFilter, resonance, mixGain, envGain, panner, panComp,
+        ];
 
-        // ---- 3) 混响（单延迟线） ----
-        // 手掌闷音要干、要收紧，不加混响
-        if (!mute && !palmMute) {
-            const delay = ctx.createDelay(0.1);
-            delay.delayTime.value = 0.025;
-            const delayGain = ctx.createGain();
-            // 回响压到极低，音符更干、前后音更分得开
-            delayGain.gain.value = volume * 0.04;
-            // 从包络之后取送：收尾淡出时混响尾音一起收
-            envGain.connect(delay);
-            delay.connect(delayGain);
-            delayGain.connect(this.masterGain);
-            allNodes.push(delay, delayGain);
-            setTimeout(() => {
-                try { delay.disconnect(); delayGain.disconnect(); } catch {}
-            }, (duration + 0.5) * 1000);
+        // ---- 3) 共享混响发送 ----
+        // 手掌闷音/制音要干、要收紧，不送混响。发送电平已在 reverbReturn 上
+        // 统一控制（roomWet），单个音符不再各自缩放，保证干湿比稳定。
+        if (!mute && !palmMute && this.reverbSend) {
+            envGain.connect(this.reverbSend);
         }
 
         // ---- 4) 记录 & 清理 ----
@@ -554,6 +630,19 @@ export class GuitarEngine {
             for (const osc of note.oscillators) {
                 try { osc.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
             }
+        }
+        // 共享混响的湿声不受上游干声 gain 影响：停止时把返回电平压掉，
+        // 否则 pause/stop 后还会拖出约半秒的空间尾巴。下一次 init（播放开始）
+        // 会恢复 roomWet；这里不能 disconnect 总线，否则后续音符没有混响。
+        if (this.reverbReturn) {
+            try {
+                const gain = this.reverbReturn.gain;
+                const current = Math.max(0.0001, gain.value);
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(current, now);
+                gain.exponentialRampToValueAtTime(0.0001, now + KARPLUS_MIX.roomStopFadeSec);
+                this.reverbDucked = true;
+            } catch {}
         }
         this.activeNotes.clear();
     }
