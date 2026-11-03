@@ -57,7 +57,7 @@ export class GuitarEngine {
         if (!this.ctx) {
             this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
             this.masterGain = this.ctx.createGain();
-            this.masterGain.gain.value = 0.5;
+            this.masterGain.gain.value = KARPLUS_ARTICULATION.masterGain;
             this.masterGain.connect(this.ctx.destination);
         }
         if (this.ctx.state === 'suspended') {

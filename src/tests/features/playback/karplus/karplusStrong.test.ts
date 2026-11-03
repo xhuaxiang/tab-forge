@@ -146,9 +146,9 @@ describe('衰减包络、去直流与结尾淡出', () => {
         const head = rmsRange(ks.data, 0, Math.round(SR * 0.1));
         const tail = rmsRange(ks.data, Math.round(SR * 0.9), SR);
         const ratio = tail / head;
-        // RMS 含快速衰减的泛音，会比基频的 -20dB 目标更低
-        expect(ratio).toBeGreaterThan(0.01); // 仍有可听延音
-        expect(ratio).toBeLessThan(0.15);    // 但明显低于起音
+        // RMS 含快速衰减的泛音，会比基频的 -6dB 目标更低
+        expect(ratio).toBeGreaterThan(0.05); // 仍有可听延音
+        expect(ratio).toBeLessThan(0.35);    // 但明显低于起音
     });
 
     it('输出无明显直流偏移', () => {
@@ -287,7 +287,15 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
 
     it('高音区基频在 sustain 末尾仍接近目标，不被滤波与插值损失拖到 -60dB', () => {
         const SR48 = 48000;
-        for (const [freq, stringNum] of [[880, 1], [1046.5, 1], [1318.5, 1], [1318.5, 6]] as Array<[number, number]>) {
+        // 880Hz 单例用紧下界守住 normalDecayTarget 的标定（回退到 0.3 时约
+        // -12.6dB，会被拦下）；高音区叠加滤波损失本就更低，只保留宽松下界防“早死”。
+        const cases: Array<[frequency: number, string: number, minDb: number]> = [
+            [880, 1, -11],
+            [1046.5, 1, -20],
+            [1318.5, 1, -20],
+            [1318.5, 6, -20],
+        ];
+        for (const [freq, stringNum, minDb] of cases) {
             const sustain = 1;
             const ks = generateStringData({
                 frequency: freq,
@@ -301,9 +309,9 @@ describe('音准（分数延迟 + 滤波群延迟补偿）', () => {
             const end = Math.round(SR48 * sustain);
             const tail = goertzel(ks.data, SR48, freq, end - win, end);
             const db = 20 * Math.log10(tail / head);
-            // 目标 -20dB：允许 ±10dB 的音区偏差，但不能再出现 -60dB 的“早死”
-            expect(db).toBeGreaterThan(-30);
-            expect(db).toBeLessThan(-10);
+            // 目标 -6dB（normalDecayTarget=0.5）：允许音区偏差，但不能早死
+            expect(db).toBeGreaterThan(minDb);
+            expect(db).toBeLessThan(-5);
         }
     });
 });
@@ -373,16 +381,17 @@ describe('力度响应', () => {
     });
 
     it('soft 收得更快、accent 延音更长（基频包络）', () => {
+        // 取 0.9s 附近：衰减目标改成 -6dB 后，0.7s 时三个力度还挨得太近
         const decayRatio = (d: Float32Array) =>
-            goertzel(d, SR48, 330, Math.round(SR48 * 0.7), Math.round(SR48 * 0.75)) /
+            goertzel(d, SR48, 330, Math.round(SR48 * 0.9), Math.round(SR48 * 0.95)) /
             goertzel(d, SR48, 330, Math.round(SR48 * 0.1), Math.round(SR48 * 0.15));
 
         const soft = decayRatio(byDynamics('soft'));
         const normal = decayRatio(byDynamics());
         const accent = decayRatio(byDynamics('accent'));
 
-        expect(soft).toBeLessThan(normal * 0.85);
-        expect(accent).toBeGreaterThan(normal * 1.05);
+        expect(soft).toBeLessThan(normal * 0.96);
+        expect(accent).toBeGreaterThan(normal * 1.03);
     });
 });
 

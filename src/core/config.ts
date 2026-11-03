@@ -140,12 +140,19 @@ export const HARMONIC_FRET_MIN = 1;
 export const HARMONIC_FRET_MAX = 24;
 
 /**
- * P0 奏法在 Karplus 引擎里的近似参数。
+ * Karplus 引擎的奏法与输出音量参数。
  *
  * SoundFont 侧由 alphaTab 的 MIDI 生成器处理，不读这里；
  * 这些值只决定合成器听起来是否像那么回事，别当成乐理规则。
  */
 export const KARPLUS_ARTICULATION = {
+    /**
+     * Karplus 输出总增益。
+     *
+     * KS 缓冲本身已与 SoundFont 同量级（起音约 -20dBFS），但单音
+     * volume 0.5 与 masterGain 0.5 会再压 12dB；这里补回链路衰减。
+     */
+    masterGain: 2.0,
     /** 手掌闷音的最长发声（秒） */
     palmMuteMaxSec: 0.18,
     /** 制音/死音的最长发声（秒） */
@@ -168,8 +175,12 @@ export const KARPLUS_ARTICULATION = {
     palmMuteLowpassFreq: 1800,
     /** 手掌闷音的共振增益上限（不超过琴体预设） */
     palmMuteResonanceGain: 2.0,
-    /** 正常音在记谱时值内衰减到的电平比例（仅 Karplus） */
-    normalDecayTarget: 0.1,
+    /**
+     * 正常音在记谱时值内衰减到的电平比例（仅 Karplus）。
+     * 基频理论目标是 0.5 ≈ -6dB；叠加反馈滤波损失后实测末尾
+     * -8 ~ -14dB（音区相关）。0.1 会让半秒以上的音明显偏短。
+     */
+    normalDecayTarget: 0.5,
     /**
      * 高音区反馈滤波衰减的起止频率（Hz）。
      *
