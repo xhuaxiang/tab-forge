@@ -17,6 +17,8 @@ import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplu
 import { KARPLUS_ARTICULATION, KARPLUS_MIX } from '../../../core/config.ts';
 import { generateRoomImpulse } from '../../../core/utils/roomImpulse.ts';
 import { highpassHzForString, panForString } from '../../../core/utils/karplusMix.ts';
+import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
+import { semitonesToRate } from '../../../core/utils/frequency.ts';
 
 /** source.stop 相对淡出结束的余量（秒），确保淡出完全生效 */
 const STOP_MARGIN_SEC = 0.005;
@@ -36,6 +38,17 @@ export interface NoteOptions {
     dynamics?: 'soft' | 'accent';
     /** 把位（0 = 空弦）：影响拨弦位置与延音 */
     fret?: number;
+    /**
+     * 该音自身推弦后 playbackRate 会到达的倍率。
+     *
+     * 变速只会让缓冲区按倍率**提前**放完：推弦音因此比记谱时值短、衰减也更快。
+     * 传入目标倍率后，缓冲区内容（长度与 sustain）按同一倍率拉长，
+     * 实时发声长度与停止时刻仍按原时长走，音高上弯不再吞掉时值。
+     *
+     * 只覆盖本音自身的推弦峰值：后续同弦击/勾/滑把速率抬得更高时，
+     * 缓冲仍可能提前耗尽（技法链的速率由调度层另行推导，暂未纳入）。
+     */
+    playbackRateScale?: number;
     onEnd?: () => void;
 }
 
@@ -173,6 +186,7 @@ export class GuitarEngine {
             palmMute = false,
             dynamics,
             fret,
+            playbackRateScale = 1,
             onEnd = null,
         } = options;
 
@@ -187,19 +201,24 @@ export class GuitarEngine {
         // 音符发声时长 = 记谱时值 + 短衰减尾音。
         // 技法是"音高调制"，只作用于播放中的音符，不延长时值；
         // 这里只用短尾音让拨弦自然衰减，避免之前"统一拉长到 1.2s"导致的时值错乱。
-        const soundDur = Math.max(duration, 0.05) + 0.2;
+        // 变速播放（推弦）会把缓冲区按倍率预拉长，实时时长仍按 soundDur 走。
+        const { soundDur, bufferDur, sustain } = karplusBufferTiming(
+            duration,
+            playbackRateScale,
+        );
 
         // ---- 1) 调用 Karplus-Strong 生成琴弦振动 ----
         // 算法层输出裸采样数据，这里包装为 AudioBuffer
         const ks = generateStringData({
             frequency,
-            duration: soundDur,
+            duration: bufferDur,
             sampleRate: ctx.sampleRate,
             string: stringNum,
             mute,
             palmMute,
-            // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音
-            sustain: duration,
+            // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音；
+            // 缓冲区预拉长时同步放大，否则衰减会先于实时时值收干
+            sustain,
             dynamics,
             fret,
         });
@@ -438,7 +457,11 @@ export class GuitarEngine {
         if (!note || !note.source || !this.ctx || semitones === 0) return;
         const now = this.ctx.currentTime;
         const rate = note.source.playbackRate;
-        const target = Math.pow(2, semitones / 12);
+        // 与缓冲区预拉长共用同一上限，两侧不同步会提前耗尽缓冲（见 karplusBufferTiming）
+        const target = Math.min(
+            semitonesToRate(semitones),
+            KARPLUS_ARTICULATION.maxPlaybackRateScale,
+        );
         // 短音按比例提前并缩短上弯：16 分音符也要在下一个音前到达目标音高。
         // 极短音不能套用 bendMinHoldSec 把时值反向拉长，否则回弹会越过记谱结束。
         const hold = holdSec > 0 ? holdSec : KARPLUS_ARTICULATION.bendMinHoldSec;

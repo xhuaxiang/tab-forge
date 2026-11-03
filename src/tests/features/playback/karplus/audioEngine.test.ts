@@ -22,7 +22,13 @@ vi.mock('../../../../features/playback/karplus/guitarEngine.ts', () => ({
         activeNotes = new Map<symbol, { frequency: number }>();
         init() { return {}; }
         playNote(
-            options: { frequency?: number; duration?: number; palmMute?: boolean; mute?: boolean },
+            options: {
+                frequency?: number;
+                duration?: number;
+                palmMute?: boolean;
+                mute?: boolean;
+                playbackRateScale?: number;
+            },
             ...rest: unknown[]
         ) {
             playedNotes(options, ...rest);
@@ -162,10 +168,16 @@ describe('推弦 / 揉弦作用于音符自身', () => {
             fret: 5,
             dynamics: 'soft',
         });
+        // 缓冲区按推弦目标倍率预拉长，音高上弯不再提前放完缓冲
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBeCloseTo(Math.pow(2, 1 / 12), 5);
         expect(bentNotes).toHaveBeenCalledTimes(1);
         const [noteId, semitones, holdSec, release] = bentNotes.mock.calls[0];
         expect(typeof noteId).toBe('symbol');
         expect(semitones).toBeCloseTo(1, 5); // 0.5 全音 = 1 半音
+        // 缓冲预拉长倍率必须与推弦目标速率同源，否则缓冲按 A 拉长、音高按 B 弯
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBeCloseTo(Math.pow(2, semitones / 12), 5);
         expect(holdSec).toBeCloseTo(0.5, 5); // 四分音符 @120bpm
         expect(release).toBe(true);
         expect(vibratoNotes).not.toHaveBeenCalled();
@@ -180,6 +192,8 @@ describe('推弦 / 揉弦作用于音符自身', () => {
         vi.advanceTimersByTime(120);
 
         expect(playedNotes).toHaveBeenCalledTimes(1);
+        // 揉弦是围绕原速的对称调制，平均速率不变，不需要拉长缓冲
+        expect(playedNotes.mock.calls[0][0].playbackRateScale).toBe(1);
         expect(vibratoNotes).toHaveBeenCalledTimes(1);
         const [noteId, depth, rate, startDelay, holdSec] = vibratoNotes.mock.calls[0];
         expect(typeof noteId).toBe('symbol');

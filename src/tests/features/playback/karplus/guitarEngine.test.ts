@@ -8,6 +8,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GuitarEngine } from '../../../../features/playback/karplus/guitarEngine.ts';
+import { generateStringData } from '../../../../features/playback/karplus/karplusStrong.ts';
 import { KARPLUS_ARTICULATION, KARPLUS_MIX } from '../../../../core/config.ts';
 
 // ---- 最小 AudioContext mock ----
@@ -223,6 +224,15 @@ function rms(d: Float32Array): number {
     return Math.sqrt(sum / d.length);
 }
 
+/** 确定性随机数：KS 激励用 Math.random，逐样本比对需要可复现的缓冲内容 */
+function seededRandom(seed: number): () => number {
+    let state = seed >>> 0;
+    return () => {
+        state = (state * 1664525 + 1013904223) >>> 0;
+        return state / 4294967296;
+    };
+}
+
 describe('GuitarEngine.playNote', () => {
     beforeEach(() => {
         mockNow = 0;
@@ -433,6 +443,89 @@ describe('GuitarEngine.playNote', () => {
         const rate = ctx.getSources()[0].playbackRate;
         expect(rate.ramps[0]).toBeCloseTo(Math.pow(2, 2 / 12), 5); // 上弯 2 个半音
         expect(rate.ramps[rate.ramps.length - 1]).toBeCloseTo(1, 5); // 释放回原音高
+        ge.dispose();
+    });
+
+    it('playNote：变速播放按倍率拉长缓冲，停止时刻仍按实时时长', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        // 推弦到 2 个半音：播放速率最高 2^(2/12)，缓冲内容同步拉长
+        const rateScale = Math.pow(2, 2 / 12);
+        const soundDur = 0.5 + KARPLUS_ARTICULATION.noteTailSec;
+        const noteId = ge.playNote({
+            frequency: 220, duration: 0.5, volume: 0.5, string: 3,
+            playbackRateScale: rateScale,
+        });
+
+        const expectedSamples = Math.round(ctx.sampleRate * soundDur * rateScale);
+        expect(Math.abs(ctx.getSourceBuffers()[0].length - expectedSamples)).toBeLessThanOrEqual(2);
+        // 实时发声时长不跟着拉长：duration + 尾音
+        expect(ctx.getSources()[0].stoppedAt[0]).toBeCloseTo(soundDur, 5);
+        // audibleUntil 同样按实时时长失效，而不是按拉长后的缓冲长度
+        mockNow = soundDur - 0.01;
+        expect(ge.isNoteActive(noteId)).toBe(true);
+        mockNow = soundDur + 0.01;
+        expect(ge.isNoteActive(noteId)).toBe(false);
+        ge.dispose();
+    });
+
+    it('playNote：未指定变速倍率时缓冲长度保持原值', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        ge.playNote({ frequency: 220, duration: 0.5, volume: 0.5, string: 3 });
+
+        const expectedSamples = Math.round(
+            ctx.sampleRate * (0.5 + KARPLUS_ARTICULATION.noteTailSec),
+        );
+        expect(Math.abs(ctx.getSourceBuffers()[0].length - expectedSamples)).toBeLessThanOrEqual(2);
+        ge.dispose();
+    });
+
+    it('playNote：缓冲预拉长时 sustain 同步放大，衰减不会提前收干', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const duration = 0.7;
+        const rateScale = Math.pow(2, 2 / 12);
+
+        let actual: Float32Array;
+        const renderSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(7));
+        try {
+            ge.playNote({
+                frequency: 220, duration, volume: 0.5, string: 3,
+                playbackRateScale: rateScale,
+            });
+            actual = ctx.getSourceBuffers()[0].getChannelData().slice();
+        } finally {
+            renderSpy.mockRestore();
+        }
+
+        // 期望：长度与 sustain 一起按倍率拉长后的 KS 输出。
+        // 若漏掉 sustain 缩放，衰减按实时时值提前收干，后半段电平会明显偏低。
+        let expected: Float32Array;
+        const expectedSpy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(7));
+        try {
+            expected = generateStringData({
+                frequency: 220,
+                duration: (duration + KARPLUS_ARTICULATION.noteTailSec) * rateScale,
+                sustain: duration * rateScale,
+                sampleRate: ctx.sampleRate,
+                string: 3,
+            }).data;
+        } finally {
+            expectedSpy.mockRestore();
+        }
+
+        expect(actual.length).toBe(expected.length);
+        let maxDiff = 0;
+        for (let i = 0; i < actual.length; i++) {
+            maxDiff = Math.max(maxDiff, Math.abs(actual[i] - expected[i]));
+        }
+        expect(maxDiff).toBeLessThan(1e-6);
         ge.dispose();
     });
 

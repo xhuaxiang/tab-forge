@@ -195,6 +195,18 @@ export const KARPLUS_ARTICULATION = {
     tailFadeSec: 0.02,
     /** 音符停止/释放的淡出时长（秒） */
     releaseSec: 0.03,
+    /** 实时发声时长的下限（秒）：极短音也留出起音与释音 */
+    minSoundSec: 0.05,
+    /** 记谱时值之后的自然衰减尾音（秒）；缓冲区预拉长时随内容一起放大 */
+    noteTailSec: 0.2,
+    /**
+     * 推弦变速倍率的上限，缓冲区预拉长与 playbackRate 目标**两侧共用**。
+     *
+     * UI/本地即兴最多推一个全音（约 1.12×），alphaTab 导入最多 3 个全音
+     * （约 1.41×）；封顶只防异常输入把缓冲区/音高拉到不可控范围。
+     * 两侧不同步会让缓冲先于实时时值放完，等于退回「推弦吞时值」。
+     */
+    maxPlaybackRateScale: 2,
     /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
     bendStartSec: 0.05,
     /** 推弦上弯时长（秒） */
@@ -203,7 +215,10 @@ export const KARPLUS_ARTICULATION = {
     bendReleaseLeadSec: 0.15,
     /** 推弦释放回弹时长（秒） */
     bendReleaseTimeSec: 0.1,
-    /** 揉弦深度（playbackRate 调制幅度，0.012 ≈ ±20 音分） */
+    /**
+     * 揉弦深度（playbackRate 相对 1 的调制幅度，0.012 ≈ ±20 音分）。
+     * 揉弦是对原速的对称调制，与推弦的缓冲预拉长倍率无关。
+     */
     vibratoDepth: 0.012,
     /** 揉弦频率（Hz） */
     vibratoRate: 5.5,

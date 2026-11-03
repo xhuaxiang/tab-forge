@@ -25,7 +25,12 @@ export interface KSParams {
     mute?: boolean;
     /** 手掌闷音：比正常音更快衰减、更暗，但不至于像制音那样只剩打击感 */
     palmMute?: boolean;
-    /** 记谱时值（秒）。KS 衰减按此时值缩放：短音快速收干、长音自然延音 */
+    /**
+     * 衰减时值（秒），只作用于正常音：KS 衰减按此时值缩放，短音快速收干、
+     * 长音自然延音。palmMute/制音走固定包络，不读本值。
+     * 变速播放（推弦）会把 `duration` 预拉长，此时它必须同步乘同一倍率，
+     * 否则衰减先于实时时值收干（换算见 core/utils/karplusTiming.ts）。
+     */
     sustain?: number;
     /** 拨弦力度：影响激励亮度、起音瞬态、反馈阻尼与延音；未标注按 normal */
     dynamics?: 'soft' | 'accent';

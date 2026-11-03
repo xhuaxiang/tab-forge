@@ -11,6 +11,7 @@ import { DEFAULT_HARMONIC_FRET, KARPLUS_ARTICULATION } from '../../../core/confi
 import { deltaFretToHarmonicValue, harmonicValueToSemitones } from '../../../core/utils/scoreMapping.ts';
 import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
 import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
+import { semitonesToRate } from '../../../core/utils/frequency.ts';
 import { GuitarEngine } from './guitarEngine.ts';
 import { buildSchedule, computeForceRepluck, computeTechniqueRing } from './scheduling.ts';
 
@@ -93,7 +94,7 @@ export class AudioEngine {
                     ? (note.fret ?? 0)
                     : (note.harmonicFret ?? DEFAULT_HARMONIC_FRET);
                 const semitones = harmonicValueToSemitones(deltaFretToHarmonicValue(deltaFret));
-                frequency = baseFrequency * Math.pow(2, semitones / 12);
+                frequency = baseFrequency * semitonesToRate(semitones);
             }
         }
 
@@ -119,6 +120,8 @@ export class AudioEngine {
         if ((note.technique === 'bend' || note.technique === 'vibrato')
             && !note.deadNote && !note.harmonic) {
             if (lastNoteId) this.guitar.stopNote(lastNoteId);
+            // bendAmount 以全音为单位（1 全音 = 2 个半音）
+            const bendSemitones = (note.bendAmount ?? 1) * 2;
             const noteId = this.guitar.playNote({
                 frequency,
                 duration: ringDuration,
@@ -128,12 +131,16 @@ export class AudioEngine {
                 palmMute: !!note.palmMute,
                 dynamics,
                 fret: note.fret ?? 0,
+                // 推弦会把播放速率抬到目标音高的倍率；缓冲区要按时长预拉长，
+                // 否则音高上弯的同时时值变短、衰减变快
+                playbackRateScale: note.technique === 'bend'
+                    ? semitonesToRate(bendSemitones)
+                    : 1,
             });
             if (note.technique === 'bend') {
-                // bendAmount 以全音为单位（1 全音 = 2 个半音）
                 this.guitar.bendNote(
                     noteId,
-                    (note.bendAmount ?? 1) * 2,
+                    bendSemitones,
                     effectiveDuration,
                     !!note.bendRelease,
                 );
