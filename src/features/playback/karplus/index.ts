@@ -23,7 +23,13 @@ export {
     buildSchedule,
     beatDurationSec,
     computeForceRepluck,
+    computeTechniqueChainInfo,
     computeTechniqueRing,
     DURATION_TO_BEATS,
 } from './scheduling.ts';
-export type { ScheduledEvent, PlaybackSchedule, SilenceSpan } from './scheduling.ts';
+export type {
+    ScheduledEvent,
+    PlaybackSchedule,
+    SilenceSpan,
+    TechniqueChainInfo,
+} from './scheduling.ts';

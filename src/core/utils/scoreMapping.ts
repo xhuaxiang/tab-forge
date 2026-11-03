@@ -183,7 +183,7 @@ export function deltaFretToHarmonicValue(deltaFret: number): number {
  *
  * 与 `deltaFretToHarmonicValue` 不构成简单逆映射：alphaTab 发声时按区间查表，
  * 例如 12 品泛音升高 12 个半音，而 5 品泛音升高 24 个半音（两个八度）。
- * 自然泛音再叠加空弦音高，人工/捏弦泛音叠加按弦音高（见 Karplus audioEngine）。
+ * 自然泛音再叠加空弦音高，人工/捏弦泛音叠加按弦音高（见 core/utils/noteFrequency）。
  */
 export function harmonicValueToSemitones(value: number): number {
     const is = (v: number): boolean => Math.abs(value - v) < 1e-6;

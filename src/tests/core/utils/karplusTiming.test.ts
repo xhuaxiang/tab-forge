@@ -6,7 +6,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
+import {
+    clampPlaybackRateScale,
+    karplusBufferTiming,
+} from '../../../core/utils/karplusTiming.ts';
 import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
 
 describe('karplusBufferTiming', () => {
@@ -66,5 +69,29 @@ describe('karplusBufferTiming', () => {
                 10,
             );
         }
+    });
+});
+
+describe('clampPlaybackRateScale', () => {
+    it('范围内的倍率原样返回', () => {
+        expect(clampPlaybackRateScale(1.5)).toBe(1.5);
+        expect(clampPlaybackRateScale(1)).toBe(1);
+    });
+
+    it('小于 1 抬到 1（缓冲只预拉长、不缩短）', () => {
+        expect(clampPlaybackRateScale(0.5)).toBe(1);
+        expect(clampPlaybackRateScale(0)).toBe(1);
+        expect(clampPlaybackRateScale(-2)).toBe(1);
+    });
+
+    it('非有限值回落到 1', () => {
+        for (const bad of [NaN, Infinity, -Infinity]) {
+            expect(clampPlaybackRateScale(bad)).toBe(1);
+        }
+    });
+
+    it('超过上限时封顶', () => {
+        expect(clampPlaybackRateScale(100))
+            .toBe(KARPLUS_ARTICULATION.maxPlaybackRateScale);
     });
 });

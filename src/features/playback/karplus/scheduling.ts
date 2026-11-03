@@ -78,8 +78,16 @@ function crossesSilence(
     return silenceSpansMs.some(span => span.startMs < toMs && span.endMs > fromMs);
 }
 
+/** 技法链扫描结果：ring 与链上最高播放倍率同源 */
+export interface TechniqueChainInfo {
+    /** 每个事件作为源音需要**额外**保持发声的时长（秒，相对该事件起点） */
+    ring: number[];
+    /** 每个事件作为源音缓冲区需要承受的最高播放倍率（≥1，未夹上限） */
+    rateScales: number[];
+}
+
 /**
- * 计算每个事件作为「源音」需要**额外**保持发声的时长（秒，相对该事件起点）。
+ * 扫描同弦技法链，一次遍历同时产出 ring 与最高播放倍率。
  *
  * 击/勾/滑目标音复用源音的缓冲区，不重新拨弦；源音若按自己的时值提前
  * 结束，目标音就只剩缓冲末尾的一点残余。这里向后扫描同弦事件，遇到连续
@@ -89,13 +97,27 @@ function crossesSilence(
  * 衰减殆尽，目标音几乎无声，不如让播放层回落到重新拨弦。palmMute/制音/
  * 断音源音由 {@link canSourceTechnique} 直接排除，ring 恒为 0。
  *
- * 返回 0 表示无需额外延长；调用方再与自身实际发声时长取 max。
+ * 倍率是「目标实际频率 / 源音缓冲区原始频率」：目标音本身不能是泛音
+ * （{@link isConnectingTarget} 排除），但源音可以是泛音，所以频率必须由
+ * 调用方传入（与播放层共用同一份泛音换算），不能只用品位差。
+ * 低于 1 的目标（勾弦到低品位）不会缩短缓冲，rateScales 保持 1。
+ *
+ * 传了 `frequencyOf` 时，频率解析为 0 的事件（非法品位/弦号）按播放层
+ * 的处理**跳过**：播放层会直接不发声、也不更新弦上记录，所以它既不能
+ * 当源音/目标，也不打断链。不传时保持纯 ring 的旧语义（不跳过）。
  */
-export function computeTechniqueRing(
+function scanTechniqueChains(
     events: ScheduledEvent[],
     silenceSpansMs: readonly SilenceSpan[],
-): number[] {
+    frequencyOf?: (note: Note) => number,
+): TechniqueChainInfo {
     const ring = events.map(() => 0);
+    const rateScales = events.map(() => 1);
+    const frequencies = frequencyOf ? events.map(e => frequencyOf(e.note)) : null;
+    // 播放层只对能解析出频率的音符发声（audioEngine.playNote 频率为 0 即返回）
+    const playable = frequencies
+        ? frequencies.map(f => Number.isFinite(f) && f > 0)
+        : null;
     const order = orderByDelay(events);
 
     for (let oi = 0; oi < order.length; oi++) {
@@ -103,10 +125,15 @@ export function computeTechniqueRing(
         const source = events[i];
         // 缺 string 的事件在播放层不会发声，也不能参与任何弦的技法链
         if (source.note.string == null || !canSourceTechnique(source.note)) continue;
+        if (playable && !playable[i]) continue;
         const stringNum = source.note.string;
+        const sourceFreq = frequencies?.[i] ?? 0;
+        const canRatio = Number.isFinite(sourceFreq) && sourceFreq > 0;
         for (let oj = oi + 1; oj < order.length; oj++) {
             const j = order[oj];
             if (events[j].note.string !== stringNum) continue;
+            // 播放层跳过不可发声的事件，它不打断也不参与技法链
+            if (playable && !playable[j]) continue;
             if (!isConnectingTarget(events[j].note)) break;
             // 目标音在静默之后才出现：缓冲区已衰减，连接没有意义
             if (crossesSilence(silenceSpansMs, source.delayMs, events[j].delayMs)) break;
@@ -115,9 +142,46 @@ export function computeTechniqueRing(
             const targetEnd = startRelSec
                 + resolvePlayDuration(events[j].note, events[j].duration);
             ring[i] = Math.max(ring[i], targetEnd);
+            if (!canRatio) continue;
+            const targetFreq = frequencies?.[j] ?? 0;
+            if (!Number.isFinite(targetFreq) || targetFreq <= 0) continue;
+            const ratio = targetFreq / sourceFreq;
+            if (Number.isFinite(ratio)) rateScales[i] = Math.max(rateScales[i], ratio);
         }
     }
-    return ring;
+    return { ring, rateScales };
+}
+
+/**
+ * 计算每个事件作为「源音」需要**额外**保持发声的时长（秒，相对该事件起点）。
+ *
+ * 返回 0 表示无需额外延长；调用方再与自身实际发声时长取 max。
+ * 播放层走 {@link computeTechniqueChainInfo}（ring + 倍率一次扫描）；
+ * 这里保留 ring-only 入口，供只需要延音的调用方与既有测试使用。
+ *
+ * @see scanTechniqueChains 断链规则与 ring 语义
+ */
+export function computeTechniqueRing(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+): number[] {
+    return scanTechniqueChains(events, silenceSpansMs).ring;
+}
+
+/**
+ * 计算每个事件作为源音时，缓冲需要承受的最高播放倍率（与 ring 同一套断链规则）。
+ *
+ * 技法链复用同一段缓冲，链上目标把 playbackRate 抬到目标音高/源音原始音高；
+ * 缓冲若只按源音自身时值生成，速率一高就会提前放完（目标音后半段静音）。
+ *
+ * @param frequencyOf 音符基频解析（与播放层共用；泛音源必须给实际泛音频率）
+ */
+export function computeTechniqueChainInfo(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+    frequencyOf: (note: Note) => number,
+): TechniqueChainInfo {
+    return scanTechniqueChains(events, silenceSpansMs, frequencyOf);
 }
 
 /**

@@ -8,6 +8,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { STANDARD_TUNING, type Note, type TabScore } from '../../../../core/types/index.ts';
+import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 
 const { playedNotes, bentNotes, vibratoNotes, hammerOns } = vi.hoisted(() => ({
     playedNotes: vi.fn(),
@@ -245,6 +246,76 @@ describe('推弦 / 揉弦作用于音符自身', () => {
         // 目标 0.25s 处开始、时值 1s → 源音缓冲区需撑 1.25s
         const options = playedNotes.mock.calls[0][0] as { duration?: number };
         expect(options.duration).toBeCloseTo(1.25, 5);
+        engine.dispose();
+    });
+
+    it('同弦升品击弦按链上倍率预拉长源音缓冲', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 5, duration: 0.125 },
+            { string: 1, fret: 7, duration: 0.25, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(120); // 只触发源音
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        // 目标高 2 个半音：缓冲要按同一倍率拉长，否则滑到目标后提前放完
+        // （频率表是等律近似值，尾数有几位误差）
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBeCloseTo(Math.pow(2, 2 / 12), 4);
+        engine.dispose();
+    });
+
+    it('推弦源音与链上更高目标取较大倍率', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 5, duration: 0.125, technique: 'bend', bendAmount: 1 },
+            { string: 1, fret: 12, duration: 0.25, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        // 推弦自身 2 个半音；链上目标 7 个半音 → 取 7
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBeCloseTo(Math.pow(2, 7 / 12), 4);
+        engine.dispose();
+    });
+
+    it('推弦峰值高于链上目标时取推弦倍率', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            // 推 2 个全音 = 4 个半音；目标只高 1 个半音
+            { string: 1, fret: 5, duration: 0.125, technique: 'bend', bendAmount: 2 },
+            { string: 1, fret: 6, duration: 0.25, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBeCloseTo(Math.pow(2, 4 / 12), 5);
+        engine.dispose();
+    });
+
+    it('勾弦下滑的链倍率保持 1（缓冲只拉长不缩短）', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 12, duration: 0.125 },
+            { string: 1, fret: 5, duration: 0.25, technique: 'pullOff' },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes.mock.calls[0][0].playbackRateScale).toBe(1);
+        engine.dispose();
+    });
+
+    it('超出上限的链倍率夹到 maxPlaybackRateScale', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            // 30 品超出 UI 合法范围，仅用于验证异常输入不会把缓冲拉到不可控大小
+            { string: 1, fret: 0, duration: 0.125 },
+            { string: 1, fret: 30, duration: 0.25, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes.mock.calls[0][0].playbackRateScale)
+            .toBe(KARPLUS_ARTICULATION.maxPlaybackRateScale);
         engine.dispose();
     });
 

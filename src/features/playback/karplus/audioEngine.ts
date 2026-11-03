@@ -6,14 +6,15 @@
  */
 
 import type { TabScore, Note, Tuning, Measure, PlaybackState } from '../../../core/types/index.ts';
-import { getNoteFromFret, getNoteFrequency, STANDARD_TUNING } from '../../../core/types/index.ts';
-import { DEFAULT_HARMONIC_FRET, KARPLUS_ARTICULATION } from '../../../core/config.ts';
-import { deltaFretToHarmonicValue, harmonicValueToSemitones } from '../../../core/utils/scoreMapping.ts';
+import { STANDARD_TUNING } from '../../../core/types/index.ts';
+import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
 import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
 import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
 import { semitonesToRate } from '../../../core/utils/frequency.ts';
+import { clampPlaybackRateScale } from '../../../core/utils/karplusTiming.ts';
+import { resolveNoteFrequency } from '../../../core/utils/noteFrequency.ts';
 import { GuitarEngine } from './guitarEngine.ts';
-import { buildSchedule, computeForceRepluck, computeTechniqueRing } from './scheduling.ts';
+import { buildSchedule, computeForceRepluck, computeTechniqueChainInfo } from './scheduling.ts';
 
 /** 播放回调 */
 export interface PlaybackCallbacks {
@@ -68,6 +69,9 @@ export class AudioEngine {
      * @param ringSec 该音作为源音需要保持发声的最短时长（秒），
      *                供后续同弦击/勾/滑目标音延续
      * @param forceRepluck 调度层判定该技法目标被静默隔开，必须重新拨弦
+     * @param chainPlaybackRateScale 该音作为源音时，后续同弦技法链上最高
+     *                目标倍率（≥1）。缓冲区要按它预拉长，否则链上目标把
+     *                playbackRate 抬高后缓冲会提前放完、尾部静音。
      */
     private playNote(
         note: Note,
@@ -76,27 +80,13 @@ export class AudioEngine {
         dynamics?: Note['dynamics'],
         ringSec?: number,
         forceRepluck = false,
+        chainPlaybackRateScale = 1,
     ): symbol | null {
-        const str = note.string ?? 1;
-        const noteName = getNoteFromFret(this.tuning, str, note.fret ?? 0);
-        let frequency = getNoteFrequency(noteName);
-
-        if (!frequency || !note.string) return null;
-
-        // 泛音：自然泛音从空弦叠加，人工/捏弦从按弦音叠加（半音数由节点品位查表）
-        if (note.harmonic) {
-            const baseName = note.harmonic === 'natural'
-                ? getNoteFromFret(this.tuning, str, 0)
-                : noteName;
-            const baseFrequency = getNoteFrequency(baseName);
-            if (baseFrequency > 0) {
-                const deltaFret = note.harmonic === 'natural'
-                    ? (note.fret ?? 0)
-                    : (note.harmonicFret ?? DEFAULT_HARMONIC_FRET);
-                const semitones = harmonicValueToSemitones(deltaFretToHarmonicValue(deltaFret));
-                frequency = baseFrequency * semitonesToRate(semitones);
-            }
-        }
+        if (!note.string) return null;
+        const str = note.string;
+        // 频率解析（含泛音换算）与调度层共用 core/utils，避免两套公式漂移
+        const frequency = resolveNoteFrequency(this.tuning, note);
+        if (!frequency) return null;
 
         // 奏法对发声时值/音量的修正（记谱时值仍用于技法释放的时机）
         const effectiveDuration = resolvePlayDuration(note, duration);
@@ -132,10 +122,12 @@ export class AudioEngine {
                 dynamics,
                 fret: note.fret ?? 0,
                 // 推弦会把播放速率抬到目标音高的倍率；缓冲区要按时长预拉长，
-                // 否则音高上弯的同时时值变短、衰减变快
-                playbackRateScale: note.technique === 'bend'
-                    ? semitonesToRate(bendSemitones)
-                    : 1,
+                // 否则音高上弯的同时时值变短、衰减变快。链上目标可能比本音
+                // 推弦更高，取两者最大值。
+                playbackRateScale: clampPlaybackRateScale(Math.max(
+                    note.technique === 'bend' ? semitonesToRate(bendSemitones) : 1,
+                    chainPlaybackRateScale,
+                )),
             });
             if (note.technique === 'bend') {
                 this.guitar.bendNote(
@@ -211,6 +203,8 @@ export class AudioEngine {
             palmMute: !!note.palmMute,
             dynamics,
             fret: note.fret ?? 0,
+            // 后续同弦技法目标复用这段缓冲，按链上最高倍率预拉长
+            playbackRateScale: clampPlaybackRateScale(chainPlaybackRateScale),
         });
         this.stringNoteMap.set(str, noteId);
         this.stringConnectable.set(str, canSourceTechnique(note));
@@ -269,7 +263,13 @@ export class AudioEngine {
         const { events, totalDurationMs, silenceSpansMs } = buildSchedule(this.measures, this.bpm);
         // 源音要撑到后续同弦技法目标音的结尾，否则击/勾/滑只剩一点残余。
         // 休止/空小节会打断连接，避免把源音拉过整段静默。
-        const ringSecs = computeTechniqueRing(events, silenceSpansMs);
+        // 同一次扫描还给出链上最高播放倍率：目标音把 playbackRate 抬到
+        // 自身音高/源音频率，缓冲必须预先拉长，否则会在实时时值前放完。
+        const { ring: ringSecs, rateScales } = computeTechniqueChainInfo(
+            events,
+            silenceSpansMs,
+            note => resolveNoteFrequency(this.tuning, note),
+        );
         // 短静默内源音缓冲区可能还没过期，必须显式要求目标重拨
         const forceReplucks = computeForceRepluck(events, silenceSpansMs);
 
@@ -284,6 +284,7 @@ export class AudioEngine {
                     item.dynamics,
                     ringSecs[index],
                     forceReplucks[index],
+                    rateScales[index],
                 );
             }, item.delayMs));
         });

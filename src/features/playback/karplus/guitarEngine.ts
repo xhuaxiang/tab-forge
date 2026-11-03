@@ -39,14 +39,15 @@ export interface NoteOptions {
     /** 把位（0 = 空弦）：影响拨弦位置与延音 */
     fret?: number;
     /**
-     * 该音自身推弦后 playbackRate 会到达的倍率。
+     * 本音缓冲区需要承受的最高 playbackRate 倍率。
      *
-     * 变速只会让缓冲区按倍率**提前**放完：推弦音因此比记谱时值短、衰减也更快。
-     * 传入目标倍率后，缓冲区内容（长度与 sustain）按同一倍率拉长，
-     * 实时发声长度与停止时刻仍按原时长走，音高上弯不再吞掉时值。
+     * 变速只会让缓冲区按倍率**提前**放完：推弦 / 同弦击勾滑目标因此比记谱
+     * 时值短、衰减也更快。传入目标倍率后，缓冲区内容（长度与 sustain）按
+     * 同一倍率拉长，实时发声长度与停止时刻仍按原时长走。
      *
-     * 只覆盖本音自身的推弦峰值：后续同弦击/勾/滑把速率抬得更高时，
-     * 缓冲仍可能提前耗尽（技法链的速率由调度层另行推导，暂未纳入）。
+     * 由调用方取「本音推弦峰值」与「后续同弦技法链最高目标倍率」的最大值；
+     * 缓冲区侧与所有 playbackRate 目标（bendNote / glideTo）共用
+     * {@link KARPLUS_ARTICULATION.maxPlaybackRateScale} 上限。
      */
     playbackRateScale?: number;
     onEnd?: () => void;
@@ -355,13 +356,27 @@ export class GuitarEngine {
      * 终点按「目标频率 / 缓冲区原始频率」绝对换算，而不是相对当前速率：
      * 上一段滑动还没走完时，当前速率停在中间值，相对换算会把整条技法链
      * 的音高带偏。起点仍读当前速率，保证滑动过程连续、不跳变。
+     *
+     * `cancelScheduledValues` 取消的是尚未发生的推弦上弯/回弹（新技法接管
+     * 音高轨迹），先读 `rate.value` 再取消，进行中的 ramp 会在当前值处平滑
+     * 转接，不会跳变。
+     *
+     * 上限与缓冲区预拉长共用 maxPlaybackRateScale：缓冲只按夹过的倍率拉长，
+     * 若这里写入更高速度，缓冲会先于实时时值放完。注意只夹上界——勾弦
+     * 下滑到低品位需要真实的 <1 倍率。
      */
     private glideTo(note: ActiveNote, toFreq: number, seconds: number): void {
         if (!note.source) return;
         const rate = note.source.playbackRate;
         const now = this.ctx!.currentTime;
         const current = Math.max(0.001, rate.value);
-        const target = Math.max(0.001, toFreq / note.baseFrequency);
+        const rawTarget = toFreq / note.baseFrequency;
+        const target = Number.isFinite(rawTarget)
+            ? Math.min(
+                Math.max(0.001, rawTarget),
+                KARPLUS_ARTICULATION.maxPlaybackRateScale,
+            )
+            : 0.001;
         // 复用前先停掉源音上的揉弦 LFO，否则目标音会一直带着抖动
         this.stopOscillators(note);
         rate.cancelScheduledValues(now);

@@ -200,13 +200,19 @@ export const KARPLUS_ARTICULATION = {
     /** 记谱时值之后的自然衰减尾音（秒）；缓冲区预拉长时随内容一起放大 */
     noteTailSec: 0.2,
     /**
-     * 推弦变速倍率的上限，缓冲区预拉长与 playbackRate 目标**两侧共用**。
+     * 播放变速倍率的上限，缓冲区预拉长与 playbackRate 目标**两侧共用**。
      *
-     * UI/本地即兴最多推一个全音（约 1.12×），alphaTab 导入最多 3 个全音
-     * （约 1.41×）；封顶只防异常输入把缓冲区/音高拉到不可控范围。
-     * 两侧不同步会让缓冲先于实时时值放完，等于退回「推弦吞时值」。
+     * 覆盖推弦与技法链（击/勾/滑）：合法品位 0–24，同弦 0→24 品的频率比
+     * 正好是 2^(24/12) = 4×。上限压得太低会把大跨度滑音夹低一个八度
+     * （音高错比静音更隐蔽），只用来防异常输入把缓冲区/音高拉到不可控范围。
+     * 两侧不同步会让缓冲先于实时时值放完，等于退回「技法吞时值」。
+     *
+     * 使用点（改这个值时必须一起核对）：
+     *   - karplusTiming.clampPlaybackRateScale / karplusBufferTiming（缓冲拉长）
+     *   - guitarEngine.bendNote（推弦速率，只夹上界）
+     *   - guitarEngine.glideTo（击/勾/滑速率，只夹上界以保留下滑的 <1）
      */
-    maxPlaybackRateScale: 2,
+    maxPlaybackRateScale: 4,
     /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
     bendStartSec: 0.05,
     /** 推弦上弯时长（秒） */

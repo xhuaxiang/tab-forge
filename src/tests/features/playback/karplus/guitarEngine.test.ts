@@ -485,6 +485,25 @@ describe('GuitarEngine.playNote', () => {
         ge.dispose();
     });
 
+    it('playNote：超上限的变速倍率按 maxPlaybackRateScale 封顶', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+
+        ge.playNote({
+            frequency: 220, duration: 0.5, volume: 0.5, string: 3,
+            playbackRateScale: 100,
+        });
+
+        const expectedSamples = Math.round(
+            ctx.sampleRate
+            * (0.5 + KARPLUS_ARTICULATION.noteTailSec)
+            * KARPLUS_ARTICULATION.maxPlaybackRateScale,
+        );
+        expect(Math.abs(ctx.getSourceBuffers()[0].length - expectedSamples)).toBeLessThanOrEqual(2);
+        ge.dispose();
+    });
+
     it('playNote：缓冲预拉长时 sustain 同步放大，衰减不会提前收干', () => {
         const ge = new GuitarEngine();
         ge.init();
@@ -700,6 +719,103 @@ describe('GuitarEngine.playNote', () => {
         // 终点必须按缓冲区原始音高绝对换算，不能相对中途的当前速率累乘
         const rate = ctx.getSources()[0].playbackRate;
         expect(rate.ramps.at(-1)).toBeCloseTo(c / a, 3);
+        ge.dispose();
+    });
+
+    it('滑音目标倍率超过上限时夹到 maxPlaybackRateScale（与缓冲预拉长同步）', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const a = 220;
+        const noteId = ge.playNote({ frequency: a, duration: 2, volume: 0.5, string: 4 });
+
+        // 原始倍率 8× 超出合法品位范围；写入的速率必须与缓冲侧同上限
+        ge.hammerOn(a * 8, noteId);
+
+        const rate = ctx.getSources()[0].playbackRate;
+        expect(rate.ramps.at(-1)).toBe(KARPLUS_ARTICULATION.maxPlaybackRateScale);
+        ge.dispose();
+    });
+
+    it('同弦 0→24 品（合法最大跨度）不会被上限明显夹低', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        // 2 弦空弦 B3 → 24 品；等律频率表取整后比值略高于 4
+        const noteId = ge.playNote({ frequency: 246.94, duration: 2, volume: 0.5, string: 2 });
+
+        ge.hammerOn(987.77, noteId);
+
+        const target = ctx.getSources()[0].playbackRate.ramps.at(-1)!;
+        expect(target).toBeLessThanOrEqual(KARPLUS_ARTICULATION.maxPlaybackRateScale);
+        // 被夹的偏差远小于 1 音分，听不出音高错误
+        expect(target).toBeCloseTo(4, 3);
+        ge.dispose();
+    });
+
+    it('下滑/勾弦保留小于 1 的真实倍率', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 2, volume: 0.5, string: 4 });
+
+        ge.pullOff(110, noteId);
+
+        expect(ctx.getSources()[0].playbackRate.ramps.at(-1)).toBeCloseTo(0.5, 5);
+        ge.dispose();
+    });
+
+    it('非法滑音目标频率回落到最小速率，不写入 NaN', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 2, volume: 0.5, string: 4 });
+
+        ge.slideTo(NaN, 0.1, noteId);
+
+        const target = ctx.getSources()[0].playbackRate.ramps.at(-1)!;
+        expect(Number.isFinite(target)).toBe(true);
+        expect(target).toBe(0.001);
+        ge.dispose();
+    });
+
+    it('推弦起飞前被技法接管：未执行的上弯与回弹一并取消', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const [a, b] = [220, 247];
+        const noteId = ge.playNote({ frequency: a, duration: 1, volume: 0.5, string: 4 });
+        const rate = ctx.getSources()[0].playbackRate;
+
+        ge.bendNote(noteId, 2, 1, true);
+        mockNow = 0.01; // 推弦上弯在 0.05s 才开始
+        ge.hammerOn(b, noteId);
+
+        // 之后不应再弯到推弦峰值，也不应回弹到 1
+        mockNow = 1.5;
+        expect(rate.value).toBeCloseTo(b / a, 5);
+        ge.dispose();
+    });
+
+    it('推弦峰值后被技法接管：从当前速率平滑接续，不被旧回弹拉回', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const [a, b] = [220, 330];
+        const noteId = ge.playNote({ frequency: a, duration: 1, volume: 0.5, string: 4 });
+        const rate = ctx.getSources()[0].playbackRate;
+
+        ge.bendNote(noteId, 2, 1, true);
+        mockNow = 0.4; // 已过峰值（0.17），尚未回弹（0.85）
+        const peak = Math.pow(2, 2 / 12);
+        expect(rate.value).toBeCloseTo(peak, 5);
+
+        ge.hammerOn(b, noteId);
+
+        // 新滑动从推弦峰值起步，未执行的回弹被取消
+        expect(rate.lastRampStart).toBeCloseTo(peak, 5);
+        mockNow = 1.5;
+        expect(rate.value).toBeCloseTo(b / a, 5);
         ge.dispose();
     });
 

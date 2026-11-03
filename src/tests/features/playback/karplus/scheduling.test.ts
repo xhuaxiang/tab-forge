@@ -7,10 +7,13 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { Measure, Note } from '../../../../core/types/index.ts';
+import { STANDARD_TUNING, type Measure, type Note } from '../../../../core/types/index.ts';
+import { semitonesToRate } from '../../../../core/utils/frequency.ts';
+import { resolveNoteFrequency } from '../../../../core/utils/noteFrequency.ts';
 import {
     buildSchedule,
     computeForceRepluck,
+    computeTechniqueChainInfo,
     computeTechniqueRing,
 } from '../../../../features/playback/karplus/scheduling.ts';
 
@@ -306,6 +309,141 @@ describe('computeTechniqueRing', () => {
             ])], BPM);
             expect(computeTechniqueRing(s.events, s.silenceSpansMs)[0]).toBe(0);
         }
+    });
+});
+
+describe('computeTechniqueChainInfo', () => {
+    const frequencyOf = (n: Note) => resolveNoteFrequency(STANDARD_TUNING, n);
+
+    it('无技法链时倍率全为 1 且 ring 无延伸', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.25, string: 2, fret: 3 }),
+            note({ duration: 0.25, string: 1, fret: 7 }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        expect(info.rateScales).toEqual([1, 1, 1]);
+        // 同弦下一个音重新拨弦，ring 不应延伸
+        expect(info.ring).toEqual([0, 0, 0]);
+    });
+
+    it('同弦升品击弦：源音倍率 = 目标频率 / 源音频率', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.25, string: 1, fret: 7, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        // 同弦相差 2 品 = 2 个半音（频率表是等律近似值，尾数有几位误差）
+        expect(info.rateScales[0]).toBeCloseTo(semitonesToRate(2), 4);
+        expect(info.rateScales[1]).toBe(1);
+    });
+
+    it('连续技法链取相对源音的最高目标倍率', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.125, string: 1, fret: 7, technique: 'hammerOn' }),
+            note({ duration: 0.25, string: 1, fret: 12, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        // 源音 5 品：最高目标是 12 品（7 个半音）
+        expect(info.rateScales[0]).toBeCloseTo(semitonesToRate(7), 4);
+        // 第二个音作为链中新源音，只到 12 品（5 个半音）
+        expect(info.rateScales[1]).toBeCloseTo(semitonesToRate(5), 4);
+        expect(info.rateScales[2]).toBe(1);
+    });
+
+    it('勾弦到低品位不缩短缓冲，倍率保持 1', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 12 }),
+            note({ duration: 0.25, string: 1, fret: 5, technique: 'pullOff' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        expect(info.rateScales[0]).toBe(1);
+    });
+
+    it('其他弦上的技法不抬高本弦倍率', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.25, string: 2, fret: 7, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        expect(info.rateScales[0]).toBe(1);
+    });
+
+    it('同弦重新拨弦、静默、不可连接的源音都断开倍率链', () => {
+        const cases: Note[][] = [
+            // 同弦下一个音重新拨弦
+            [
+                note({ duration: 0.125, string: 1, fret: 5 }),
+                note({ duration: 0.125, string: 1, fret: 7 }),
+                note({ duration: 0.25, string: 1, fret: 9, technique: 'hammerOn' }),
+            ],
+            // 休止
+            [
+                note({ duration: 0.125, string: 1, fret: 5 }),
+                note({ duration: 0.125, string: 1, isRest: true }),
+                note({ duration: 0.25, string: 1, fret: 7, technique: 'hammerOn' }),
+            ],
+            // 断音 / 手掌闷音源音
+            [
+                note({ duration: 0.125, string: 1, fret: 5, staccato: true }),
+                note({ duration: 0.25, string: 1, fret: 7, technique: 'hammerOn' }),
+            ],
+            [
+                note({ duration: 0.125, string: 1, fret: 5, palmMute: true }),
+                note({ duration: 0.25, string: 1, fret: 7, technique: 'hammerOn' }),
+            ],
+        ];
+        for (const notes of cases) {
+            const s = buildSchedule([measure(notes)], BPM);
+            const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+            expect(info.rateScales[0]).toBe(1);
+        }
+    });
+
+    it('events 乱序时仍按时间推导倍率', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.25, string: 1, fret: 7, technique: 'hammerOn' }),
+        ])], BPM);
+        const reversed = [s.events[1], s.events[0]];
+        const info = computeTechniqueChainInfo(reversed, [], frequencyOf);
+        expect(info.rateScales[1]).toBeCloseTo(semitonesToRate(2), 4);
+        expect(info.rateScales[0]).toBe(1);
+    });
+
+    it('不可发声的事件与播放层一致：跳过而不是断链', () => {
+        // 7.5 品解析不出音名 → 频率 0，播放层会跳过它（不更新弦上记录）
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 5 }),
+            note({ duration: 0.125, string: 1, fret: 7.5 }),
+            note({ duration: 0.25, string: 1, fret: 12, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        // 源音到目标音的倍率链不应被跳过的事件打断
+        expect(info.rateScales[0]).toBeCloseTo(semitonesToRate(7), 4);
+        expect(info.rateScales[1]).toBe(1);
+    });
+
+    it('源音频率不可解时倍率保持 1', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, fret: 7.5 }),
+            note({ duration: 0.25, string: 1, fret: 12, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        expect(info.rateScales[0]).toBe(1);
+    });
+
+    it('泛音源音按实际泛音频率换算（不能用品位差）', () => {
+        const s = buildSchedule([measure([
+            // 自然泛音 7 品 = 空弦 + 19 半音 ≈ 988Hz
+            note({ duration: 0.125, string: 1, fret: 7, harmonic: 'natural' }),
+            // 目标 24 品 = 空弦 + 24 半音 ≈ 1319Hz
+            note({ duration: 0.25, string: 1, fret: 24, technique: 'hammerOn' }),
+        ])], BPM);
+        const info = computeTechniqueChainInfo(s.events, s.silenceSpansMs, frequencyOf);
+        // 实际相差 5 个半音；按品位差 7→24 误算会得到 17 个半音
+        expect(info.rateScales[0]).toBeCloseTo(semitonesToRate(5), 4);
     });
 });
 
