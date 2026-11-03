@@ -19,5 +19,11 @@ export type { PlaybackState } from '../../../core/types/index.ts';
 export { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 export type { KSParams, KSBufferData } from './karplusStrong.ts';
 export { GuitarEngine } from './guitarEngine.ts';
-export { buildSchedule, beatDurationSec, DURATION_TO_BEATS } from './scheduling.ts';
-export type { ScheduledEvent, PlaybackSchedule } from './scheduling.ts';
+export {
+    buildSchedule,
+    beatDurationSec,
+    computeForceRepluck,
+    computeTechniqueRing,
+    DURATION_TO_BEATS,
+} from './scheduling.ts';
+export type { ScheduledEvent, PlaybackSchedule, SilenceSpan } from './scheduling.ts';

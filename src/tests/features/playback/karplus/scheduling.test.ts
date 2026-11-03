@@ -8,7 +8,11 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Measure, Note } from '../../../../core/types/index.ts';
-import { buildSchedule } from '../../../../features/playback/karplus/scheduling.ts';
+import {
+    buildSchedule,
+    computeForceRepluck,
+    computeTechniqueRing,
+} from '../../../../features/playback/karplus/scheduling.ts';
 
 const BPM = 120; // 一拍 = 0.5s
 
@@ -162,6 +166,191 @@ describe('buildSchedule', () => {
         expect(s.events[1].delayMs).toBeCloseTo(100 + 2000, 0);
         // 小节2（二分）再补齐到 4 拍
         expect(s.totalDurationMs).toBeCloseTo(100 + 2000 + 2000, 0);
+    });
+});
+
+describe('computeTechniqueRing', () => {
+    it('8 分源音 + 同弦击弦 2 分：源音保持到目标结束', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        // 目标 0.25s 处开始、时值 1s → 源音额外撑到 1.25s
+        expect(ring[0]).toBeCloseTo(1.25, 5);
+        // 没有后续技法目标：无需额外延长
+        expect(ring[1]).toBe(0);
+    });
+
+    it('连续技法链延伸到最后一个目标音', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.25, string: 1, technique: 'hammerOn' }),
+            note({ duration: 0.5, string: 1, technique: 'pullOff' }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        // A: 0.25 + B 0.5 → 0.75；再到 C 0.75 + 1 → 1.75
+        expect(ring[0]).toBeCloseTo(1.75, 5);
+        // B: C 从 0.5 处开始、时值 1 → 1.5
+        expect(ring[1]).toBeCloseTo(1.5, 5);
+        expect(ring[2]).toBe(0);
+    });
+
+    it('同弦下一个音重新拨弦时不延伸', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.5, string: 1 }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        expect(ring[0]).toBe(0);
+        expect(ring[1]).toBe(0);
+    });
+
+    it('其他弦上的技法不延长本弦源音', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.5, string: 2, technique: 'hammerOn' }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        expect(ring[0]).toBe(0);
+    });
+
+    it('小节填满时跨小节按绝对时间延伸', () => {
+        const fillers = Array.from({ length: 7 }, () =>
+            note({ duration: 0.125, string: 2 }));
+        const s = buildSchedule([
+            measure([note({ duration: 0.125, string: 1 }), ...fillers]),
+            measure([note({ duration: 0.5, string: 1, technique: 'hammerOn' })]),
+        ], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        // 小节 1 填满 4 拍：目标在 2.0s 处开始，时值 1s
+        expect(ring[0]).toBeCloseTo(2 + 1, 5);
+        expect(ring[1]).toBe(0);
+    });
+
+    it('小节内容不足时，补齐的空白同样打断连接', () => {
+        const s = buildSchedule([
+            measure([note({ duration: 0.125, string: 1 })]),
+            measure([note({ duration: 0.5, string: 1, technique: 'hammerOn' })]),
+        ], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        // 小节 1 补齐到 4 拍，目标在 2.0s 才开始：缓冲区早已衰减
+        expect(ring[0]).toBe(0);
+    });
+
+    it('staccato 源音的缩短不被延音覆盖', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, staccato: true }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        expect(computeTechniqueRing(s.events, s.silenceSpansMs)[0]).toBe(0);
+    });
+
+    it('events 乱序时仍按时间计算', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        const reversed = [s.events[1], s.events[0]];
+        const ring = computeTechniqueRing(reversed, []);
+        expect(ring[1]).toBeCloseTo(1.25, 5);
+        expect(ring[0]).toBe(0);
+    });
+
+    it('目标音的 letRing 计入延伸时长', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn', letRing: true }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        // 0.25 + (1 + 0.8)
+        expect(ring[0]).toBeCloseTo(0.25 + 1.8, 5);
+    });
+
+    it('休止会打断连接，不把源音拉过静默', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.25, string: 1, isRest: true }),
+            note({ duration: 0.125, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        expect(ring[0]).toBe(0);
+    });
+
+    it('空小节同样打断连接', () => {
+        const s = buildSchedule([
+            measure([note({ duration: 0.125, string: 1 })]),
+            measure([]),
+            measure([note({ duration: 0.5, string: 1, technique: 'hammerOn' })]),
+        ], BPM);
+        const ring = computeTechniqueRing(s.events, s.silenceSpansMs);
+        expect(ring[0]).toBe(0);
+    });
+
+    it('palmMute 源音的衰减包络固定，不作为连接基础', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1, palmMute: true }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        expect(computeTechniqueRing(s.events, s.silenceSpansMs)[0]).toBe(0);
+    });
+
+    it('死音/泛音目标音必须重新拨弦，不延长源音', () => {
+        for (const target of [
+            note({ duration: 0.5, string: 1, technique: 'hammerOn', deadNote: true }),
+            note({ duration: 0.5, string: 1, technique: 'hammerOn', harmonic: 'natural' }),
+        ]) {
+            const s = buildSchedule([measure([
+                note({ duration: 0.125, string: 1 }),
+                target,
+            ])], BPM);
+            expect(computeTechniqueRing(s.events, s.silenceSpansMs)[0]).toBe(0);
+        }
+    });
+});
+
+describe('computeForceRepluck', () => {
+    it('短休止后的技法目标强制重拨（此时源音缓冲区可能还没过期）', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.0625, string: 1, isRest: true }),
+            note({ duration: 0.0625, string: 1, technique: 'hammerOn' }),
+        ])], BPM);
+        const forced = computeForceRepluck(s.events, s.silenceSpansMs);
+        // 休止不产生事件，目标音是第 2 个事件（索引 1）
+        expect(forced[1]).toBe(true);
+    });
+
+    it('无静默的连续技法链不强制重拨', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.125, string: 1 }),
+            note({ duration: 0.25, string: 1, technique: 'hammerOn' }),
+            note({ duration: 0.125, string: 1, technique: 'pullOff' }),
+        ])], BPM);
+        expect(computeForceRepluck(s.events, s.silenceSpansMs)).toEqual([false, false, false]);
+    });
+
+    it('跨小节补齐的静默同样强制重拨', () => {
+        const s = buildSchedule([
+            measure([note({ duration: 0.125, string: 1 })]),
+            measure([note({ duration: 0.5, string: 1, technique: 'hammerOn' })]),
+        ], BPM);
+        const forced = computeForceRepluck(s.events, s.silenceSpansMs);
+        expect(forced[1]).toBe(true);
+    });
+
+    it('events 乱序时仍按时间判断', () => {
+        const s = buildSchedule([
+            measure([note({ duration: 0.125, string: 1 })]),
+            measure([note({ duration: 0.5, string: 1, technique: 'hammerOn' })]),
+        ], BPM);
+        // 反序后目标音是索引 0，源音是索引 1
+        const forced = computeForceRepluck(
+            [s.events[1], s.events[0]],
+            s.silenceSpansMs,
+        );
+        expect(forced[0]).toBe(true);
+        expect(forced[1]).toBe(false);
     });
 });
 

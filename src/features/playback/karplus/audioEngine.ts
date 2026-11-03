@@ -9,8 +9,10 @@ import type { TabScore, Note, Tuning, Measure, PlaybackState } from '../../../co
 import { getNoteFromFret, getNoteFrequency, STANDARD_TUNING } from '../../../core/types/index.ts';
 import { DEFAULT_HARMONIC_FRET, KARPLUS_ARTICULATION } from '../../../core/config.ts';
 import { deltaFretToHarmonicValue, harmonicValueToSemitones } from '../../../core/utils/scoreMapping.ts';
+import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
+import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
 import { GuitarEngine } from './guitarEngine.ts';
-import { buildSchedule } from './scheduling.ts';
+import { buildSchedule, computeForceRepluck, computeTechniqueRing } from './scheduling.ts';
 
 /** 播放回调 */
 export interface PlaybackCallbacks {
@@ -39,6 +41,8 @@ export class AudioEngine {
     private measures: Measure[] = [];
     /** 记录每个弦上最后一个活跃的 noteId，用于击弦/勾弦/滑弦 */
     private stringNoteMap: Map<number, symbol | null> = new Map();
+    /** 该弦上最后一个音能否作为连接基础（palmMute/断音/制音为 false） */
+    private stringConnectable: Map<number, boolean> = new Map();
 
     /** 获取当前状态 */
     getState(): PlaybackState {
@@ -57,12 +61,20 @@ export class AudioEngine {
         this.callbacks = callbacks;
     }
 
-    /** 播放音符 (使用 GuitarEngine，支持技法连接) */
+    /**
+     * 播放音符 (使用 GuitarEngine，支持技法连接)
+     *
+     * @param ringSec 该音作为源音需要保持发声的最短时长（秒），
+     *                供后续同弦击/勾/滑目标音延续
+     * @param forceRepluck 调度层判定该技法目标被静默隔开，必须重新拨弦
+     */
     private playNote(
         note: Note,
         duration: number,
         volume?: number,
         dynamics?: Note['dynamics'],
+        ringSec?: number,
+        forceRepluck = false,
     ): symbol | null {
         const str = note.string ?? 1;
         const noteName = getNoteFromFret(this.tuning, str, note.fret ?? 0);
@@ -86,20 +98,14 @@ export class AudioEngine {
         }
 
         // 奏法对发声时值/音量的修正（记谱时值仍用于技法释放的时机）
-        let effectiveDuration = duration;
+        const effectiveDuration = resolvePlayDuration(note, duration);
+        // 后续同弦技法目标音复用这段缓冲，源音至少要撑到最后一个目标结束
+        const ringDuration = Math.max(effectiveDuration, ringSec ?? 0);
         let effectiveVolume = volume ?? 0.5;
-        // 断音优先于自由延音：两者同时开时，断音不应被 +0.8s 抵消
-        if (note.staccato) {
-            effectiveDuration *= KARPLUS_ARTICULATION.staccatoDurationFactor;
-        } else if (note.letRing) {
-            effectiveDuration += KARPLUS_ARTICULATION.letRingExtraSec;
-        }
         if (note.palmMute) {
-            effectiveDuration = Math.min(effectiveDuration, KARPLUS_ARTICULATION.palmMuteMaxSec);
             effectiveVolume *= KARPLUS_ARTICULATION.palmMuteVolumeFactor;
         }
         if (note.deadNote) {
-            effectiveDuration = Math.min(effectiveDuration, KARPLUS_ARTICULATION.deadNoteMaxSec);
             effectiveVolume *= KARPLUS_ARTICULATION.deadNoteVolumeFactor;
         }
         if (note.harmonic) effectiveVolume *= KARPLUS_ARTICULATION.harmonicVolumeFactor;
@@ -115,7 +121,7 @@ export class AudioEngine {
             if (lastNoteId) this.guitar.stopNote(lastNoteId);
             const noteId = this.guitar.playNote({
                 frequency,
-                duration: effectiveDuration,
+                duration: ringDuration,
                 volume: effectiveVolume,
                 string: str,
                 mute: false,
@@ -137,30 +143,50 @@ export class AudioEngine {
                     KARPLUS_ARTICULATION.vibratoDepth,
                     KARPLUS_ARTICULATION.vibratoRate,
                     KARPLUS_ARTICULATION.vibratoStartSec,
+                    effectiveDuration,
                 );
             }
-            this.stringNoteMap.set(str, noteId);
-            return this.finishTechniqueNote(noteId, note, effectiveDuration, str);
+            return this.finishTechniqueNote(
+                noteId,
+                note,
+                effectiveDuration,
+                str,
+                canSourceTechnique(note),
+            );
         }
 
         // 击弦/勾弦/滑弦：目标音不重新拨弦，靠前一个同弦音的技法连接发声。
-        // 制音/泛音必须重新发声，不能借用前一个音的调制。
-        if (lastNoteId && note.technique && !note.deadNote && !note.harmonic) {
-            const ge = this.guitar as any;
-            const activeNote = ge.activeNotes?.get(lastNoteId);
-            if (activeNote) {
-                const lastFreq = activeNote.frequency || frequency;
-                switch (note.technique) {
-                    case 'hammerOn':
-                        this.guitar.hammerOn(lastFreq, frequency, lastNoteId);
-                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
-                    case 'pullOff':
-                        this.guitar.pullOff(lastFreq, frequency, lastNoteId);
-                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
-                    case 'slide':
-                        this.guitar.slideTo(frequency, 0.15, lastNoteId);
-                        return this.finishTechniqueNote(lastNoteId, note, effectiveDuration, str);
-                }
+        // 制音/泛音必须重新发声；palmMute/断音/制音的源音衰减包络不适合复用。
+        // 调度层判定被静默隔开（forceRepluck）时同样回落到重新拨弦。
+        // 注意：复用模型下目标音的调度音量/力度不生效，增益只来自源音的 baseVolume × 技法系数。
+        if (lastNoteId && isConnectingTarget(note) && !forceRepluck
+            && this.stringConnectable.get(str) === true
+            && this.guitar.isNoteActive(lastNoteId)) {
+            // 目标音自己带 palmMute/断音时会把复用中的缓冲压短，之后不能再连接
+            const connectableAfter = canSourceTechnique(note);
+            switch (note.technique) {
+                case 'hammerOn':
+                    this.guitar.hammerOn(frequency, lastNoteId);
+                    return this.finishTechniqueNote(
+                        lastNoteId, note, effectiveDuration, str, connectableAfter,
+                    );
+                case 'pullOff':
+                    this.guitar.pullOff(frequency, lastNoteId);
+                    return this.finishTechniqueNote(
+                        lastNoteId, note, effectiveDuration, str, connectableAfter,
+                    );
+                case 'slide':
+                    this.guitar.slideTo(
+                        frequency,
+                        Math.min(
+                            KARPLUS_ARTICULATION.slideSec,
+                            Math.max(KARPLUS_ARTICULATION.slideMinSec, effectiveDuration),
+                        ),
+                        lastNoteId,
+                    );
+                    return this.finishTechniqueNote(
+                        lastNoteId, note, effectiveDuration, str, connectableAfter,
+                    );
             }
         }
 
@@ -171,7 +197,7 @@ export class AudioEngine {
         }
         const noteId = this.guitar.playNote({
             frequency,
-            duration: effectiveDuration,
+            duration: ringDuration,
             volume: effectiveVolume,
             string: str,
             mute: !!note.deadNote,
@@ -180,6 +206,7 @@ export class AudioEngine {
             fret: note.fret ?? 0,
         });
         this.stringNoteMap.set(str, noteId);
+        this.stringConnectable.set(str, canSourceTechnique(note));
         return noteId;
     }
 
@@ -187,9 +214,19 @@ export class AudioEngine {
      * 技法音符的奏法收尾。
      * 击/勾/滑复用前一个同弦音；推/揉弦作用于自身新拨响的音。
      * 闷音/断音的时值与音色修正落到当前正在发声的音符上，避免被技法分支静默吞掉。
+     *
+     * `connectable` 表示当前发声的音符还能不能继续连接下一个技法：
+     * 目标音自己带 palmMute/断音时，会把复用中的缓冲压短，后续也得重拨。
      */
-    private finishTechniqueNote(noteId: symbol, note: Note, durationSec: number, str: number): symbol {
+    private finishTechniqueNote(
+        noteId: symbol,
+        note: Note,
+        durationSec: number,
+        str: number,
+        connectable: boolean,
+    ): symbol {
         this.stringNoteMap.set(str, noteId);
+        this.stringConnectable.set(str, connectable);
         if (note.palmMute || note.staccato) {
             this.guitar.dampNote(
                 noteId,
@@ -219,17 +256,30 @@ export class AudioEngine {
 
         // 清空弦记录
         this.stringNoteMap.clear();
+        this.stringConnectable.clear();
 
         // 构建播放调度（纯函数层：时值→秒、扫弦/琶音、音量补偿、空小节兜底）
-        const { events, totalDurationMs } = buildSchedule(this.measures, this.bpm);
+        const { events, totalDurationMs, silenceSpansMs } = buildSchedule(this.measures, this.bpm);
+        // 源音要撑到后续同弦技法目标音的结尾，否则击/勾/滑只剩一点残余。
+        // 休止/空小节会打断连接，避免把源音拉过整段静默。
+        const ringSecs = computeTechniqueRing(events, silenceSpansMs);
+        // 短静默内源音缓冲区可能还没过期，必须显式要求目标重拨
+        const forceReplucks = computeForceRepluck(events, silenceSpansMs);
 
         // 调度播放所有音符；代次校验同时挡住 stop/pause 后残留的旧回调
-        for (const item of events) {
+        events.forEach((item, index) => {
             this.eventTimers.push(setTimeout(() => {
                 if (this.runId !== runId || this.state !== 'playing') return;
-                this.playNote(item.note, item.duration, item.volume, item.dynamics);
+                this.playNote(
+                    item.note,
+                    item.duration,
+                    item.volume,
+                    item.dynamics,
+                    ringSecs[index],
+                    forceReplucks[index],
+                );
             }, item.delayMs));
-        }
+        });
 
         // 计算总时长后停止
         this.startTime = performance.now();

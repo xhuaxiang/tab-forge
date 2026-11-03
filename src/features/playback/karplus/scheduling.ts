@@ -15,6 +15,8 @@
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
 import { resolveNoteDynamics } from '../../../core/utils/metricAccent.ts';
+import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
+import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
 /** 单条播放事件 */
@@ -29,10 +31,18 @@ export interface ScheduledEvent {
     dynamics: Note['dynamics'];
 }
 
+/** 一段全曲静默（休止 / 空小节 / 内容不足补齐）的绝对时间范围（毫秒） */
+export interface SilenceSpan {
+    startMs: number;
+    endMs: number;
+}
+
 export interface PlaybackSchedule {
     events: ScheduledEvent[];
     /** 整曲预计时长（毫秒） */
     totalDurationMs: number;
+    /** 休止、空小节与内容不足补齐造成的静默区间，技法延音不能跨过 */
+    silenceSpansMs: SilenceSpan[];
 }
 
 /** 一拍（四分音符）的秒数 */
@@ -51,6 +61,97 @@ export const DURATION_TO_BEATS: Record<number, number> = {
 };
 
 /**
+ * buildSchedule 的扫弦/琶音偏移在极端速度下可能越过下一个 slot，
+ * 不能假定 events 已严格按时间排序。
+ */
+function orderByDelay(events: ScheduledEvent[]): number[] {
+    return events
+        .map((_, index) => index)
+        .sort((a, b) => (events[a].delayMs - events[b].delayMs) || (a - b));
+}
+
+function crossesSilence(
+    silenceSpansMs: readonly SilenceSpan[],
+    fromMs: number,
+    toMs: number,
+): boolean {
+    return silenceSpansMs.some(span => span.startMs < toMs && span.endMs > fromMs);
+}
+
+/**
+ * 计算每个事件作为「源音」需要**额外**保持发声的时长（秒，相对该事件起点）。
+ *
+ * 击/勾/滑目标音复用源音的缓冲区，不重新拨弦；源音若按自己的时值提前
+ * 结束，目标音就只剩缓冲末尾的一点残余。这里向后扫描同弦事件，遇到连续
+ * 技法链就继续延伸，直到遇到下一个重新拨弦的音。
+ *
+ * 静默区间（休止/空小节/补齐段）会打断连接：缓冲区跨过整段静默后已经
+ * 衰减殆尽，目标音几乎无声，不如让播放层回落到重新拨弦。palmMute/制音/
+ * 断音源音由 {@link canSourceTechnique} 直接排除，ring 恒为 0。
+ *
+ * 返回 0 表示无需额外延长；调用方再与自身实际发声时长取 max。
+ */
+export function computeTechniqueRing(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+): number[] {
+    const ring = events.map(() => 0);
+    const order = orderByDelay(events);
+
+    for (let oi = 0; oi < order.length; oi++) {
+        const i = order[oi];
+        const source = events[i];
+        // 缺 string 的事件在播放层不会发声，也不能参与任何弦的技法链
+        if (source.note.string == null || !canSourceTechnique(source.note)) continue;
+        const stringNum = source.note.string;
+        for (let oj = oi + 1; oj < order.length; oj++) {
+            const j = order[oj];
+            if (events[j].note.string !== stringNum) continue;
+            if (!isConnectingTarget(events[j].note)) break;
+            // 目标音在静默之后才出现：缓冲区已衰减，连接没有意义
+            if (crossesSilence(silenceSpansMs, source.delayMs, events[j].delayMs)) break;
+            const startRelSec = (events[j].delayMs - source.delayMs) / 1000;
+            // 目标音的奏法时值也要算进去（如 letRing 的额外延长）
+            const targetEnd = startRelSec
+                + resolvePlayDuration(events[j].note, events[j].duration);
+            ring[i] = Math.max(ring[i], targetEnd);
+        }
+    }
+    return ring;
+}
+
+/**
+ * 标记「因静默而必须重新拨弦」的技法目标。
+ *
+ * ring 只决定源音预生成多长；短休止里源音缓冲区尚未结束，播放层仅靠
+ * `isNoteActive` 仍会把目标连到旧缓冲上。这里把调度层的静默语义显式传给
+ * 播放层，命中后跳过连接分支。
+ */
+export function computeForceRepluck(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+): boolean[] {
+    const forced = events.map(() => false);
+    const order = orderByDelay(events);
+    const lastIndexByString = new Map<number, number>();
+
+    for (const j of order) {
+        const event = events[j];
+        // 与 computeTechniqueRing / 播放层一致：缺 string 的事件不参与弦链
+        if (event.note.string == null) continue;
+        const stringNum = event.note.string;
+        const previous = lastIndexByString.get(stringNum);
+        if (previous !== undefined
+            && isConnectingTarget(event.note)
+            && crossesSilence(silenceSpansMs, events[previous].delayMs, event.delayMs)) {
+            forced[j] = true;
+        }
+        lastIndexByString.set(stringNum, j);
+    }
+    return forced;
+}
+
+/**
  * 构建完整播放队列（按时间顺序）。
  *
  * @param measures      小节列表
@@ -64,6 +165,7 @@ export function buildSchedule(
 ): PlaybackSchedule {
     const beat = beatDurationSec(bpm);
     const events: ScheduledEvent[] = [];
+    const silenceSpansMs: SilenceSpan[] = [];
     let cursorMs = startDelayMs;
 
     for (const measure of measures) {
@@ -79,6 +181,11 @@ export function buildSchedule(
 
             const durSec = beat * (DURATION_TO_BEATS[first.duration] ?? 1);
             const durMs = durSec * 1000;
+
+            // 整拍静默（休止）会打断同弦技法连接
+            if (notes.every(n => n.isRest)) {
+                silenceSpansMs.push({ startMs: cursorMs, endMs: cursorMs + durMs });
+            }
 
             // 和弦音量补偿：多个音符同时播放时适当降低避免削波
             // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
@@ -155,10 +262,13 @@ export function buildSchedule(
         // 非法/零容量拍号回退旧的 4 拍，避免 NaN/Infinity 毒化总时长。
         const capacity = measureCapacity(measure);
         const measureBeats = Number.isFinite(capacity) && capacity > 0 ? capacity * 4 : 4;
-        if (cursorMs - measureStartMs < beat * measureBeats * 1000 - 1) {
-            cursorMs = measureStartMs + beat * measureBeats * 1000;
+        const capacityEndMs = measureStartMs + beat * measureBeats * 1000;
+        if (cursorMs < capacityEndMs - 1) {
+            // 内容不足时补齐的空白同样是静默：空小节也走这里（cursorMs 仍在起点）
+            silenceSpansMs.push({ startMs: cursorMs, endMs: capacityEndMs });
+            cursorMs = capacityEndMs;
         }
     }
 
-    return { events, totalDurationMs: cursorMs };
+    return { events, totalDurationMs: cursorMs, silenceSpansMs };
 }

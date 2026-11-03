@@ -6,7 +6,7 @@
  * 验证重构后浏览器侧接线没有静音/抛错。
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { GuitarEngine } from '../../../../features/playback/karplus/guitarEngine.ts';
 import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 
@@ -30,6 +30,8 @@ class MockParam {
     scheduled: number[] = [];
     /** 记录 ramp 目标值（推弦/滑弦/释放包络断言用） */
     ramps: number[] = [];
+    /** 记录 ramp 的目标值与绝对时间（短音缩放断言用） */
+    rampEvents: Array<{ value: number; time: number }> = [];
     /** 真实语义的自动化事件表：cancel 只删 >= 指定时间的事件 */
     private events: MockEvent[] = [];
 
@@ -45,6 +47,18 @@ class MockParam {
     // 真实 AudioParam 的 ramp 不会立刻改写当前值；valueAt 按时间插值
     exponentialRampToValueAtTime(v: number, t: number) {
         this.ramps.push(v);
+        this.rampEvents.push({ value: v, time: t });
+        this.events.push({
+            time: t,
+            value: v,
+            ramp: true,
+            startTime: mockNow,
+            startValue: this.valueAt(mockNow),
+        });
+    }
+    linearRampToValueAtTime(v: number, t: number) {
+        this.ramps.push(v);
+        this.rampEvents.push({ value: v, time: t });
         this.events.push({
             time: t,
             value: v,
@@ -136,12 +150,13 @@ class MockAudioContext {
     private sources: MockNode[] = [];
     private gains: MockNode[] = [];
     private filters: MockNode[] = [];
+    private oscillators: MockNode[] = [];
 
     createGain() { const n = new MockNode(); this.gains.push(n); return n; }
     createBufferSource() { const n = new MockNode(); this.sources.push(n); return n; }
     createBiquadFilter() { const n = new MockNode(); this.filters.push(n); return n; }
     createDelay() { return new MockNode(); }
-    createOscillator() { return new MockNode(); }
+    createOscillator() { const n = new MockNode(); this.oscillators.push(n); return n; }
     createBuffer(channels: number, length: number, sampleRate: number) {
         return new MockBuffer(channels, length, sampleRate);
     }
@@ -161,6 +176,9 @@ class MockAudioContext {
 
     /** 测试辅助：每个音按顺序创建 bodyFilter / resonance */
     getFilters(): MockNode[] { return this.filters; }
+
+    /** 测试辅助：揉弦 LFO */
+    getOscillators(): MockNode[] { return this.oscillators; }
 }
 
 function rms(d: Float32Array): number {
@@ -300,5 +318,208 @@ describe('GuitarEngine.playNote', () => {
         expect(mixGain.gain.scheduled[0]).toBeCloseTo(before * 0.7, 5);
         expect(ctx.getFilters()[0].frequency.ramps).toContain(1800);
         ge.dispose();
+    });
+
+    it('技法增益以调度音量为基准，不再覆盖成绝对值', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 0.5, volume: 0.4, string: 4 });
+        const mixGain = ctx.getGains()[1];
+
+        mixGain.gain.clearLog();
+        ge.hammerOn(247, noteId);
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(
+            0.4 * KARPLUS_ARTICULATION.hammerOnVolumeFactor,
+            5,
+        );
+
+        mixGain.gain.clearLog();
+        ge.pullOff(220, noteId);
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(
+            0.4 * KARPLUS_ARTICULATION.pullOffVolumeFactor,
+            5,
+        );
+
+        mixGain.gain.clearLog();
+        ge.slideTo(247, 0.1, noteId);
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(
+            0.4 * KARPLUS_ARTICULATION.slideVolumeFactor,
+            5,
+        );
+
+        mixGain.gain.clearLog();
+        ge.bendNote(noteId, 2, 0.5);
+        expect(mixGain.gain.scheduled[0]).toBeCloseTo(
+            0.4 * KARPLUS_ARTICULATION.bendVolumeFactor,
+            5,
+        );
+        ge.dispose();
+    });
+
+    it('16 分推弦在音符结束前到达目标音高', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const hold = 0.125;
+        const noteId = ge.playNote({ frequency: 220, duration: hold, string: 4 });
+        const rate = ctx.getSources()[0].playbackRate;
+        rate.rampEvents.length = 0;
+
+        ge.bendNote(noteId, 2, hold, true);
+
+        const peak = rate.rampEvents.find(e => e.value > 1);
+        expect(peak).toBeDefined();
+        expect(peak!.time).toBeLessThan(hold);
+        // 起始延迟与上弯都按 16 分时值压缩：0.025 + 0.0625
+        expect(peak!.time).toBeCloseTo(0.0875, 5);
+
+        // 回弹也要在记谱结束前完成，不能拖到下一个音
+        const release = rate.rampEvents.at(-1)!;
+        expect(release.value).toBeCloseTo(1, 5);
+        expect(release.time).toBeCloseTo(0.0875 + 0.125 * 0.2, 5);
+        expect(release.time).toBeLessThanOrEqual(hold);
+        ge.dispose();
+    });
+
+    it('连续技法链从当前速率继续滑动，不会跳回原始音高', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const [a, b, c] = [220, 246.94, 293.66];
+
+        const noteId = ge.playNote({ frequency: a, duration: 2, volume: 0.5, string: 4 });
+        const rate = ctx.getSources()[0].playbackRate;
+
+        mockNow = 0.5;
+        ge.hammerOn(b, noteId);
+        mockNow = 1.0;
+        ge.pullOff(c, noteId);
+
+        // 第二段从 B/A 起滑，最终应为相对源缓冲区的 C/A
+        expect(rate.ramps.at(-1)).toBeCloseTo(c / a, 3);
+        ge.dispose();
+    });
+
+    it('上一段滑动未完成时，下一段仍落在绝对目标音高', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const [a, b, c] = [220, 246.94, 293.66];
+        const noteId = ge.playNote({ frequency: a, duration: 2, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.hammerOn(b, noteId);
+        // 击弦滑动（0.025s）还没走完就接勾弦
+        mockNow = 0.505;
+        ge.pullOff(c, noteId);
+
+        // 终点必须按缓冲区原始音高绝对换算，不能相对中途的当前速率累乘
+        const rate = ctx.getSources()[0].playbackRate;
+        expect(rate.ramps.at(-1)).toBeCloseTo(c / a, 3);
+        ge.dispose();
+    });
+
+    it('推弦回弹后音高回到缓冲区原始值', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const noteId = ge.playNote({ frequency: 220, duration: 0.5, volume: 0.5, string: 4 });
+
+        ge.bendNote(noteId, 2, 0.5, true);
+        expect(ge.getNoteFrequency(noteId)).toBeCloseTo(220, 5);
+
+        const other = ge.playNote({ frequency: 330, duration: 0.5, volume: 0.5, string: 4 });
+        expect(ge.getNoteFrequency(other)).toBeCloseTo(330, 5);
+        ge.dispose();
+    });
+
+    it('32 分推弦的回弹不拖过记谱结束', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const hold = 0.03125;
+        const noteId = ge.playNote({ frequency: 220, duration: hold, string: 4 });
+        const rate = ctx.getSources()[0].playbackRate;
+        rate.rampEvents.length = 0;
+
+        ge.bendNote(noteId, 2, hold, true);
+
+        const release = rate.rampEvents.at(-1)!;
+        expect(release.value).toBeCloseTo(1, 5);
+        expect(release.time).toBeLessThanOrEqual(hold + 1e-9);
+        ge.dispose();
+    });
+
+    it('连接技法复用前会停掉源音上的揉弦 LFO', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+        ge.vibrato(noteId, 0.01, 5.5, 0, 1);
+        const lfo = ctx.getOscillators()[0];
+        expect(lfo.stoppedAt).toHaveLength(0);
+
+        ge.hammerOn(247, noteId);
+        expect(lfo.stoppedAt.length).toBeGreaterThan(0);
+        ge.dispose();
+    });
+
+    it('短音揉弦提高速率并做深度渐入', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const hold = 0.125;
+        const noteId = ge.playNote({ frequency: 220, duration: hold, string: 4 });
+
+        ge.vibrato(noteId, KARPLUS_ARTICULATION.vibratoDepth, KARPLUS_ARTICULATION.vibratoRate,
+            KARPLUS_ARTICULATION.vibratoStartSec, hold);
+
+        // 1.5 个周期 / 0.125s = 12Hz，正好触到上限
+        const lfo = ctx.getOscillators()[0];
+        expect(lfo.frequency.value).toBeCloseTo(12, 5);
+        // 起音延迟压到 0.03125s，渐入 0.05s
+        const lfoGain = ctx.getGains().at(-1)!;
+        const fade = lfoGain.gain.rampEvents[0];
+        expect(fade.value).toBeCloseTo(KARPLUS_ARTICULATION.vibratoDepth, 5);
+        expect(fade.time).toBeCloseTo(0.03125 + 0.05, 5);
+        ge.dispose();
+    });
+
+    it('activeNotes 与 source 生命周期对齐，停止后不再被技法误判', () => {
+        vi.useFakeTimers();
+        try {
+            const ge = new GuitarEngine();
+            ge.init();
+            const noteId = ge.playNote({ frequency: 220, duration: 0.1, string: 4 });
+            expect(ge.isNoteActive(noteId)).toBe(true);
+            expect(ge.getNoteFrequency(noteId)).toBe(220);
+
+            // 发声 0.3s + 50ms 断开余量后清理
+            vi.advanceTimersByTime(400);
+            expect(ge.isNoteActive(noteId)).toBe(false);
+            expect(ge.getNoteFrequency(noteId)).toBeNull();
+            ge.dispose();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('isNoteActive 在 source.stop 后立即失效，不等节点清理定时器', () => {
+        vi.useFakeTimers();
+        try {
+            const ge = new GuitarEngine();
+            ge.init();
+            const noteId = ge.playNote({ frequency: 220, duration: 0.1, string: 4 });
+            // 发声 0.1 + 0.2 = 0.3s；清理在 0.35s
+            expect(ge.isNoteActive(noteId)).toBe(true);
+
+            mockNow = 0.31;
+            expect(ge.isNoteActive(noteId)).toBe(false);
+            const internals = ge as unknown as { activeNotes: Map<symbol, unknown> };
+            expect(internals.activeNotes.has(noteId)).toBe(true); // 尚未清理
+            ge.dispose();
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

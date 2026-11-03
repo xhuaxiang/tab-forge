@@ -43,9 +43,18 @@ interface ActiveNote {
     /** 琴体低通：技法连接时手掌闷音要把它压暗 */
     bodyFilter: BiquadFilterNode | null;
     nodes: AudioNode[];
+    /** 揉弦 LFO：音符结束后必须显式 stop，否则会一直跑下去 */
+    oscillators: OscillatorNode[];
     startTime: number;
     duration: number;
+    /** 当前发声音高（推弦/滑弦后更新，供技法链读取） */
     frequency: number;
+    /** 缓冲区原始音高：技法滑动的终点必须相对它换算，链式滑动才不会累积误差 */
+    baseFrequency: number;
+    /** 调度层给的基准音量：技法增益以它为基准，避免绝对值覆盖力度 */
+    baseVolume: number;
+    /** 缓冲区实际可听终点；节点清理比它晚 50ms，连接判断不能用清理时间 */
+    audibleUntil: number;
 }
 
 export class GuitarEngine {
@@ -68,6 +77,17 @@ export class GuitarEngine {
 
     getContext(): AudioContext | null {
         return this.ctx;
+    }
+
+    /** 该音符是否仍在发声（供技法连接判断，避免读私有 activeNotes） */
+    isNoteActive(noteId: symbol): boolean {
+        const note = this.activeNotes.get(noteId);
+        return note !== undefined && (this.ctx?.currentTime ?? 0) < note.audibleUntil;
+    }
+
+    /** 活跃音符的当前频率；已停止返回 null */
+    getNoteFrequency(noteId: symbol): number | null {
+        return this.activeNotes.get(noteId)?.frequency ?? null;
     }
 
     playNote(options: NoteOptions = {}): symbol {
@@ -194,16 +214,30 @@ export class GuitarEngine {
             gain: mixGain,
             bodyFilter,
             nodes: allNodes,
+            oscillators: [],
             startTime: now,
             duration: soundDur,
             frequency,
+            baseFrequency: frequency,
+            baseVolume: volume,
+            audibleUntil: now + soundDur,
         });
 
-        const cleanupMs = (soundDur + 0.5) * 1000;
+        // source 在 soundDur 处停止；activeNotes 只需多留出断开节点的余量，
+        // 旧值多活的 0.5s 会被调度层误判为「仍可连接技法」，实际却没有声音。
+        const cleanupMs = (soundDur + DISCONNECT_MARGIN_SEC) * 1000;
         setTimeout(() => {
+            const active = this.activeNotes.get(noteId);
+            if (active) {
+                for (const osc of active.oscillators) {
+                    try { osc.stop(now); } catch {}
+                }
+            }
             try {
                 for (const n of allNodes) {
-                    if (n instanceof AudioBufferSourceNode) {
+                    // 单测环境没有 AudioBufferSourceNode 全局，浏览器侧才需要先 stop
+                    if (typeof AudioBufferSourceNode !== 'undefined'
+                        && n instanceof AudioBufferSourceNode) {
                         try { n.stop(now); } catch {}
                     }
                     try { n.disconnect(); } catch {}
@@ -220,52 +254,94 @@ export class GuitarEngine {
     // 演奏技巧
     // ============================================================
 
-    hammerOn(fromFreq: number, toFreq: number, noteId: symbol | null = null): symbol {
+    /**
+     * 让复用中的缓冲区滑到目标音高。
+     *
+     * 终点按「目标频率 / 缓冲区原始频率」绝对换算，而不是相对当前速率：
+     * 上一段滑动还没走完时，当前速率停在中间值，相对换算会把整条技法链
+     * 的音高带偏。起点仍读当前速率，保证滑动过程连续、不跳变。
+     */
+    private glideTo(note: ActiveNote, toFreq: number, seconds: number): void {
+        if (!note.source) return;
+        const rate = note.source.playbackRate;
+        const now = this.ctx!.currentTime;
+        const current = Math.max(0.001, rate.value);
+        const target = Math.max(0.001, toFreq / note.baseFrequency);
+        // 复用前先停掉源音上的揉弦 LFO，否则目标音会一直带着抖动
+        this.stopOscillators(note);
+        rate.cancelScheduledValues(now);
+        rate.setValueAtTime(current, now);
+        rate.exponentialRampToValueAtTime(target, now + Math.max(0.001, seconds));
+    }
+
+    /** 停掉音符上的调制振荡器（揉弦 LFO） */
+    private stopOscillators(note: ActiveNote): void {
+        if (note.oscillators.length === 0 || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        for (const osc of note.oscillators) {
+            try { osc.stop(now); } catch {}
+            try { osc.disconnect(); } catch {}
+        }
+        note.oscillators = [];
+    }
+
+    hammerOn(toFreq: number, noteId: symbol | null = null): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / fromFreq, now + 0.025);
-        }
-        note.gain.gain.setValueAtTime(0.6, now);
+        const now = this.ctx!.currentTime;
+        this.glideTo(note, toFreq, KARPLUS_ARTICULATION.hammerOnSec);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.hammerOnVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
 
-    pullOff(fromFreq: number, toFreq: number, noteId: symbol | null = null): symbol {
+    pullOff(toFreq: number, noteId: symbol | null = null): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.5, volume: 0.5 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / fromFreq, now + 0.02);
-        }
-        note.gain.gain.setValueAtTime(0.4, now);
+        const now = this.ctx!.currentTime;
+        this.glideTo(note, toFreq, KARPLUS_ARTICULATION.pullOffSec);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.pullOffVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
 
-    slideTo(toFreq: number, slideDuration: number = 0.15, noteId: symbol | null = null): symbol {
+    slideTo(
+        toFreq: number,
+        slideDuration: number = KARPLUS_ARTICULATION.slideSec,
+        noteId: symbol | null = null,
+    ): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / note.frequency, now + slideDuration);
-        }
-        note.gain.gain.setValueAtTime(0.6, now);
+        const now = this.ctx!.currentTime;
+        this.glideTo(note, toFreq, slideDuration);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.slideVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
@@ -287,8 +363,20 @@ export class GuitarEngine {
         const now = this.ctx.currentTime;
         const rate = note.source.playbackRate;
         const target = Math.pow(2, semitones / 12);
-        const start = now + KARPLUS_ARTICULATION.bendStartSec;
-        const peak = start + KARPLUS_ARTICULATION.bendTimeSec;
+        // 短音按比例提前并缩短上弯：16 分音符也要在下一个音前到达目标音高。
+        // 极短音不能套用 bendMinHoldSec 把时值反向拉长，否则回弹会越过记谱结束。
+        const hold = holdSec > 0 ? holdSec : KARPLUS_ARTICULATION.bendMinHoldSec;
+        const startDelay = Math.min(
+            KARPLUS_ARTICULATION.bendStartSec,
+            hold * KARPLUS_ARTICULATION.bendStartRatio,
+        );
+        const riseSec = Math.min(
+            KARPLUS_ARTICULATION.bendTimeSec,
+            Math.max(KARPLUS_ARTICULATION.bendMinRiseSec, hold * KARPLUS_ARTICULATION.bendRiseRatio),
+            Math.max(0.001, hold - startDelay),
+        );
+        const start = now + startDelay;
+        const peak = start + riseSec;
 
         rate.cancelScheduledValues(now);
         rate.setValueAtTime(1, now);
@@ -296,46 +384,86 @@ export class GuitarEngine {
         rate.exponentialRampToValueAtTime(target, peak);
 
         if (release) {
-            // 回弹不能早于推弦到达峰值，否则会被吞掉
-            const releaseStart = Math.max(
-                peak,
-                now + holdSec - KARPLUS_ARTICULATION.bendReleaseLeadSec,
+            // 回弹不能早于推弦到达峰值，否则会被吞掉；短音同样按时值压缩，
+            // 避免回弹拖到记谱结束之后
+            const releaseLead = Math.min(
+                KARPLUS_ARTICULATION.bendReleaseLeadSec,
+                hold * KARPLUS_ARTICULATION.bendReleaseLeadRatio,
             );
+            const releaseStart = Math.max(peak, now + hold - releaseLead);
+            // 回弹必须在记谱结束前走完；剩余时间不足时按剩余量压缩
+            const releaseTime = Math.max(0.001, Math.min(
+                KARPLUS_ARTICULATION.bendReleaseTimeSec,
+                hold * KARPLUS_ARTICULATION.bendReleaseTimeRatio,
+                now + hold - releaseStart,
+            ));
             rate.setValueAtTime(target, releaseStart);
-            rate.exponentialRampToValueAtTime(
-                1,
-                releaseStart + KARPLUS_ARTICULATION.bendReleaseTimeSec,
-            );
+            rate.exponentialRampToValueAtTime(1, releaseStart + releaseTime);
+            // 回弹后音高回到缓冲区原始值，后续同弦技法不能把推高的频率当作起点
+            note.frequency = note.baseFrequency;
+        } else {
+            note.frequency = note.baseFrequency * target;
         }
 
-        // 推弦时稍微增大音量模拟张力增加
-        note.gain.gain.setValueAtTime(0.65, now);
-        note.frequency *= target;
+        // 推弦时稍微增大音量模拟张力增加（以调度层基准音量为底，保留力度差异）
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.bendVolumeFactor,
+            now,
+        );
     }
 
     /**
      * 揉弦：通过 LFO 调制 playbackRate 产生音高波动。
      * @param startDelaySec 拨弦后多久开始揉（秒），避开起音
+     * @param holdSec       音符实际发声时长（秒）；短音按比例提前/提速并做渐入
      */
-    vibrato(noteId: symbol, depth: number = 0.015, rate: number = 5.5, startDelaySec = 0): void {
+    vibrato(
+        noteId: symbol,
+        depth: number = KARPLUS_ARTICULATION.vibratoDepth,
+        rate: number = KARPLUS_ARTICULATION.vibratoRate,
+        startDelaySec = 0,
+        holdSec = 0,
+    ): void {
         const note = this.activeNotes.get(noteId);
         if (!note || !note.source || !this.ctx) return;
         const ctx = this.ctx;
         const now = ctx.currentTime;
 
+        // 短音按比例压缩启动延迟与渐入，并提高速率凑够可辨识的周期数
+        const scaled = holdSec > 0;
+        const startDelay = scaled
+            ? Math.min(startDelaySec, holdSec * KARPLUS_ARTICULATION.vibratoStartRatio)
+            : startDelaySec;
+        const fadeIn = scaled
+            ? Math.min(
+                KARPLUS_ARTICULATION.vibratoFadeInSec,
+                holdSec * KARPLUS_ARTICULATION.vibratoFadeRatio,
+            )
+            : KARPLUS_ARTICULATION.vibratoFadeInSec;
+        const effectiveRate = scaled
+            ? Math.min(
+                KARPLUS_ARTICULATION.vibratoMaxRate,
+                Math.max(rate, KARPLUS_ARTICULATION.vibratoMinCycles / holdSec),
+            )
+            : rate;
+
         // 低频振荡器 → 增益 → playbackRate，产生周期性音高波动
         const lfo = ctx.createOscillator();
         lfo.type = 'sine';
-        lfo.frequency.value = rate;   // 揉弦频率 ~5.5Hz
+        lfo.frequency.value = effectiveRate;
 
         const lfoGain = ctx.createGain();
-        lfoGain.gain.value = depth;   // 调制深度（围绕当前 playbackRate 波动 ±depth）
+        const lfoStart = now + Math.max(0, startDelay);
+        // 渐入：直接满深度会像开关抖动；从 0 线性升到目标深度
+        lfoGain.gain.setValueAtTime(0, lfoStart);
+        lfoGain.gain.linearRampToValueAtTime(depth, lfoStart + Math.max(0.001, fadeIn));
 
         lfo.connect(lfoGain);
         lfoGain.connect(note.source.playbackRate);
 
-        lfo.start(now + Math.max(0, startDelaySec));
+        lfo.start(lfoStart);
         note.nodes.push(lfo, lfoGain);
+        note.oscillators.push(lfo);
     }
 
     /**
@@ -395,6 +523,9 @@ export class GuitarEngine {
                 try { note.source.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
             }
         } catch {}
+        for (const osc of note.oscillators) {
+            try { osc.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+        }
         this.activeNotes.delete(noteId);
         // 延迟断开节点，等淡出与 source.stop 完成
         setTimeout(() => {
@@ -420,6 +551,9 @@ export class GuitarEngine {
                     note.source.stop(now + fadeSec + STOP_MARGIN_SEC);
                 }
             } catch {}
+            for (const osc of note.oscillators) {
+                try { osc.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+            }
         }
         this.activeNotes.clear();
     }

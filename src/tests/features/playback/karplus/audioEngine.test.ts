@@ -21,15 +21,25 @@ vi.mock('../../../../features/playback/karplus/guitarEngine.ts', () => ({
         /** 记录正在发声的音符，供击/勾/滑弦的「前一个同弦音」回看 */
         activeNotes = new Map<symbol, { frequency: number }>();
         init() { return {}; }
-        playNote(options: { frequency?: number }) {
-            playedNotes(options);
+        playNote(
+            options: { frequency?: number; duration?: number; palmMute?: boolean; mute?: boolean },
+            ...rest: unknown[]
+        ) {
+            playedNotes(options, ...rest);
             const id = Symbol('note');
             this.activeNotes.set(id, { frequency: options.frequency ?? 0 });
+            // 与真实引擎一致：发声时长 + 0.2s 尾音 + 断开余量后不再活跃
+            const cleanupMs = ((options.duration ?? 0.8) + 0.2 + 0.05) * 1000;
+            setTimeout(() => this.activeNotes.delete(id), cleanupMs);
             return id;
         }
+        getNoteFrequency(id: symbol) {
+            return this.activeNotes.get(id)?.frequency ?? null;
+        }
+        isNoteActive(id: symbol) { return this.activeNotes.has(id); }
         stopNote(id: symbol) { this.activeNotes.delete(id); }
-        hammerOn(...args: unknown[]) { hammerOns(...args); return args[2] as symbol; }
-        pullOff(...args: unknown[]) { return args[2] as symbol; }
+        hammerOn(...args: unknown[]) { hammerOns(...args); return args[1] as symbol; }
+        pullOff(...args: unknown[]) { return args[1] as symbol; }
         slideTo(...args: unknown[]) { return args[2] as symbol; }
         bendNote(...args: unknown[]) { bentNotes(...args); }
         vibrato(...args: unknown[]) { vibratoNotes(...args); }
@@ -171,12 +181,56 @@ describe('推弦 / 揉弦作用于音符自身', () => {
 
         expect(playedNotes).toHaveBeenCalledTimes(1);
         expect(vibratoNotes).toHaveBeenCalledTimes(1);
-        const [noteId, depth, rate, startDelay] = vibratoNotes.mock.calls[0];
+        const [noteId, depth, rate, startDelay, holdSec] = vibratoNotes.mock.calls[0];
         expect(typeof noteId).toBe('symbol');
         expect(depth).toBeGreaterThan(0);
         expect(rate).toBeGreaterThan(0);
         expect(startDelay).toBeGreaterThan(0);
+        // 记谱时值（二分 @120 = 1s）传给合成器，用于短音缩放判定
+        expect(holdSec).toBeCloseTo(1, 5);
         expect(bentNotes).not.toHaveBeenCalled();
+        engine.dispose();
+    });
+
+    it('断音缩短发声时值，但没有技法目标时不影响源音缓冲', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 3, duration: 0.25, staccato: true },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        const options = playedNotes.mock.calls[0][0] as { duration?: number };
+        // 四分 @120 = 0.5s，断音 ×0.5
+        expect(options.duration).toBeCloseTo(0.25, 5);
+        engine.dispose();
+    });
+
+    it('手掌闷音把发声时值压到上限，但没有技法目标时不会被延音找回', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 6, fret: 0, duration: 0.5, palmMute: true },
+        ]));
+        vi.advanceTimersByTime(120);
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        const options = playedNotes.mock.calls[0][0] as { duration?: number };
+        expect(options.duration).toBeCloseTo(0.18, 5);
+        engine.dispose();
+    });
+
+    it('同弦击弦目标音让源音提前生成足够长的尾音', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 1, fret: 5, duration: 0.125 },
+            { string: 1, fret: 7, duration: 0.5, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(120); // 只触发第一个音
+
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        // 目标 0.25s 处开始、时值 1s → 源音缓冲区需撑 1.25s
+        const options = playedNotes.mock.calls[0][0] as { duration?: number };
+        expect(options.duration).toBeCloseTo(1.25, 5);
         engine.dispose();
     });
 
@@ -220,8 +274,70 @@ describe('推弦 / 揉弦作用于音符自身', () => {
 
         expect(playedNotes).toHaveBeenCalledTimes(1); // 只有起始音拨弦
         expect(hammerOns).toHaveBeenCalledTimes(1);
-        const [fromFreq, toFreq] = hammerOns.mock.calls[0];
-        expect(toFreq).toBeGreaterThan(fromFreq);
+        // 目标是 F3（string 3 第 7 品），且复用起始音的 noteId
+        const [toFreq, reusedId] = hammerOns.mock.calls[0];
+        expect(toFreq).toBeGreaterThan(0);
+        expect(typeof reusedId).toBe('symbol');
+        engine.dispose();
+    });
+
+    it('短休止后的击弦强制重拨，即使源音缓冲区尚未过期', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 3, fret: 5, duration: 0.125 },
+            { string: 3, fret: 0, duration: 0.0625, isRest: true },
+            { string: 3, fret: 7, duration: 0.0625, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(600); // 第 1 音 100ms，目标 475ms
+
+        expect(playedNotes).toHaveBeenCalledTimes(2);
+        expect(hammerOns).not.toHaveBeenCalled();
+        engine.dispose();
+    });
+
+    it('休止后的击弦不再延长源音，而是重新拨弦', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 3, fret: 5, duration: 0.125 },
+            { string: 3, fret: 0, duration: 0.25, isRest: true },
+            { string: 3, fret: 7, duration: 0.125, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(900); // 第 1 音 100ms，休止 500ms，第 3 音 850ms
+
+        // 源音没有被拉过休止
+        const source = playedNotes.mock.calls[0][0] as { duration?: number };
+        expect(source.duration).toBeCloseTo(0.25, 5);
+        // 目标音重新拨弦（源音已过期），技法不连接
+        expect(playedNotes).toHaveBeenCalledTimes(2);
+        expect(hammerOns).not.toHaveBeenCalled();
+        engine.dispose();
+    });
+
+    it('被静默强制重拨的目标音，之后仍能作为下一个技法链的源音', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 3, fret: 5, duration: 0.125 },
+            { string: 3, fret: 0, duration: 0.0625, isRest: true },
+            { string: 3, fret: 7, duration: 0.125, technique: 'hammerOn' },
+            { string: 3, fret: 9, duration: 0.125, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(800); // A 100ms，B 475ms，C 725ms
+
+        expect(playedNotes).toHaveBeenCalledTimes(2); // A + 被强制重拨的 B
+        expect(hammerOns).toHaveBeenCalledTimes(1); // C 继续复用 B
+        engine.dispose();
+    });
+
+    it('手掌闷音源音不能作为击弦基础，目标音重新拨弦', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf([
+            { string: 3, fret: 5, duration: 0.125, palmMute: true },
+            { string: 3, fret: 7, duration: 0.125, technique: 'hammerOn' },
+        ]));
+        vi.advanceTimersByTime(400); // 第 1 音 100ms，第 2 音 350ms
+
+        expect(playedNotes).toHaveBeenCalledTimes(2);
+        expect(hammerOns).not.toHaveBeenCalled();
         engine.dispose();
     });
 });

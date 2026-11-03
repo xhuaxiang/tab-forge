@@ -209,6 +209,50 @@ export const KARPLUS_ARTICULATION = {
     vibratoRate: 5.5,
     /** 揉弦在拨弦后多久开始（秒），避开起音 */
     vibratoStartSec: 0.08,
+    // ---- 技法连接：相对源音音量的系数 ----
+    /** 击弦相对源音音量的系数 */
+    hammerOnVolumeFactor: 1.2,
+    /** 勾弦相对源音音量的系数 */
+    pullOffVolumeFactor: 0.8,
+    /** 滑弦相对源音音量的系数 */
+    slideVolumeFactor: 1.2,
+    /** 推弦相对源音音量的系数 */
+    bendVolumeFactor: 1.3,
+    // ---- 短音缩放与技法时序 ----
+    /** 击弦滑动时长（秒） */
+    hammerOnSec: 0.025,
+    /** 勾弦滑动时长（秒） */
+    pullOffSec: 0.02,
+    /** 滑弦时长（秒）；短音按自身时值封顶 */
+    slideSec: 0.15,
+    /** 滑弦的最短时长（秒） */
+    slideMinSec: 0.02,
+    /** 缺少可复用音符时，技法目标音兜底发声时长（秒） */
+    techniqueFallbackDurationSec: 0.6,
+    /** 缺少可复用音符时，技法目标音兜底音量 */
+    techniqueFallbackVolume: 0.6,
+    /** 推弦持音的最短时长（秒），用于极短音的时序换算 */
+    bendMinHoldSec: 0.05,
+    /** 推弦起始延迟占时值的比例上限（短音按比例提前） */
+    bendStartRatio: 0.2,
+    /** 推弦上弯时长占时值的比例上限 */
+    bendRiseRatio: 0.5,
+    /** 推弦上弯的最短时长（秒） */
+    bendMinRiseSec: 0.02,
+    /** 推弦释放提前量占时值的比例上限 */
+    bendReleaseLeadRatio: 0.3,
+    /** 推弦回弹时长占时值的比例上限 */
+    bendReleaseTimeRatio: 0.2,
+    /** 揉弦起始延迟占时值的比例上限 */
+    vibratoStartRatio: 0.25,
+    /** 揉弦深度渐入时长（秒） */
+    vibratoFadeInSec: 0.08,
+    /** 揉弦渐入时长占时值的比例上限 */
+    vibratoFadeRatio: 0.4,
+    /** 短音也要保证的 LFO 周期数（用于提高速率） */
+    vibratoMinCycles: 1.5,
+    /** 揉弦速率上限（Hz） */
+    vibratoMaxRate: 12,
 } as const;
 
 /**
