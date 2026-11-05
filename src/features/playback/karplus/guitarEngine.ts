@@ -416,7 +416,8 @@ export class GuitarEngine {
      *
      * 持续段由旧缓冲区变速承担，但它在目标时刻已衰减约 14dB、高频只剩约 1/7；
      * 只靠增益台阶听起来仍是同一根弦滑过去。这里复用源缓冲开头的拨弦瞬态，
-     * 按目标倍率重放一次，再叠一个短包络：只补起音，不替代持续段。
+     * 按目标倍率重放一段目标音头（短起音 → 保持电平 → 短淡出），再交回旧缓冲。
+     * 包络必须保持电平，指数衰减到近零会把激励压成听不见的一声轻咔哒。
      *
      * 经过琴体链入口，因此与持续段共享 mixGain（音量/技法系数）、闷音滤波、
      * 声像与混响发送。临时节点并入 note.nodes，随音符一起清理。
@@ -430,22 +431,31 @@ export class GuitarEngine {
         source.playbackRate.value = this.techniquePlaybackRate(toFreq, note.baseFrequency);
 
         const attackGain = ctx.createGain();
-        // 指数收尾需要非零端点；起音用短线性段，避免增益硬起产生咔哒
         const targetLevel = Number.isFinite(level) ? Math.max(0.0001, level) : 0.0001;
+        // 配置倒挂（rise/release ≥ total）时把起音与淡出收紧到总时长内，
+        // 保证事件时间严格递增：起音 → 保持锚点 → 淡出。
+        const attackSec = Math.max(0, KARPLUS_ARTICULATION.techniqueAttackSec);
+        const releaseSec = Math.min(
+            KARPLUS_ARTICULATION.techniqueAttackReleaseSec,
+            attackSec,
+        );
+        const riseSec = Math.min(
+            KARPLUS_ARTICULATION.techniqueAttackRiseSec,
+            attackSec - releaseSec,
+        );
+        const attackEnd = now + attackSec;
+        const releaseStart = attackEnd - releaseSec;
+        // 短起音 → 保持电平 → 末段线性淡出。不能用「指数衰减到近零」：
+        // 那样能量在半衰期约 3ms 内就没了，重放只剩一声轻咔哒。
         attackGain.gain.setValueAtTime(0.0001, now);
-        attackGain.gain.linearRampToValueAtTime(
-            targetLevel,
-            now + KARPLUS_ARTICULATION.techniqueAttackRiseSec,
-        );
-        attackGain.gain.exponentialRampToValueAtTime(
-            0.0001,
-            now + KARPLUS_ARTICULATION.techniqueAttackSec,
-        );
+        attackGain.gain.linearRampToValueAtTime(targetLevel, now + riseSec);
+        attackGain.gain.setValueAtTime(targetLevel, releaseStart);
+        attackGain.gain.linearRampToValueAtTime(0.0001, attackEnd);
 
         source.connect(attackGain);
         attackGain.connect(note.input);
         source.start(now);
-        source.stop(now + KARPLUS_ARTICULATION.techniqueAttackSec + STOP_MARGIN_SEC);
+        source.stop(attackEnd + STOP_MARGIN_SEC);
         note.nodes.push(source, attackGain);
     }
 

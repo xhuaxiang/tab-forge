@@ -683,8 +683,11 @@ describe('GuitarEngine.playNote', () => {
             mockNow + KARPLUS_ARTICULATION.techniqueAttackSec + 0.02);
 
         const attackGain = ctx.getLastGain();
-        // 短线性起音 → 指数收到近零
+        // 短线性起音 → 保持电平 → 末段线性淡出；不能是快速指数塌缩
         expect(attackGain.gain.rampEvents[0].value)
+            .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
+        // 衰减前必须有一个保持电平的锚点，否则激励只剩几毫秒能量
+        expect(attackGain.gain.scheduled.at(-1))
             .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
         expect(attackGain.gain.rampEvents[0].time).toBeCloseTo(
             mockNow + KARPLUS_ARTICULATION.techniqueAttackRiseSec, 5);
@@ -693,6 +696,11 @@ describe('GuitarEngine.playNote', () => {
             mockNow + KARPLUS_ARTICULATION.techniqueAttackSec, 5);
         // 接在琴体链入口：与持续段共享 mixGain、闷音滤波、声像与混响
         expect(attackGain.connectedTo).toContain(ctx.getFilters()[0]);
+
+        // 保持段中点仍接近目标电平：只断言「有保持锚点」抓不到锚点被挪早
+        mockNow = 0.5 + KARPLUS_ARTICULATION.techniqueAttackSec / 2;
+        expect(attackGain.gain.value)
+            .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
         ge.dispose();
     });
 

@@ -263,10 +263,18 @@ export const KARPLUS_ARTICULATION = {
     hammerOnAttackGain: 0.4,
     /** 勾弦目标点的重新激励电平；勾弦本身带手指拨动，通常比击弦更亮更响 */
     pullOffAttackGain: 0.7,
-    /** 重新激励的衰减时长（秒）：只做起音瞬态，持续段仍由旧缓冲承担 */
-    techniqueAttackSec: 0.04,
-    /** 重新激励的起音时长（秒），避免增益硬起产生咔哒；必须小于 techniqueAttackSec */
+    /**
+     * 重新激励总时长（秒，起音 + 保持 + 淡出）：重放目标音头，之后交回旧缓冲。
+     * 真正保持电平的是 attackSec - rise - release（当前约 98ms）。
+     *
+     * 不要再用「指数衰减到近零」的短包络：0.04s 收到 0.0001 的半衰期只有约
+     * 3ms，听感是一声很轻的咔哒，之后只剩变暗的旧尾音，整体又轻又软。
+     */
+    techniqueAttackSec: 0.12,
+    /** 重新激励的起音时长（秒），避免增益硬起产生咔哒 */
     techniqueAttackRiseSec: 0.002,
+    /** 重新激励结束前的线性淡出时长（秒），避免硬切；rise + release 须小于 attackSec */
+    techniqueAttackReleaseSec: 0.02,
     /** 缺少可复用音符时，技法目标音兜底发声时长（秒） */
     techniqueFallbackDurationSec: 0.6,
     /** 缺少可复用音符时，技法目标音兜底音量 */
