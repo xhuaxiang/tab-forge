@@ -42,24 +42,40 @@ describe('detectTechnique', () => {
         expect(detectTechnique(n, 1).tech).toBe('vibrato');
     });
 
-    it('hammerOn → 前音符（origin）检测为 hammerOn + 目标品', () => {
+    it('hammerOn → 到达音检测为 hammerOn，目标品是自身品位（不是起点）', () => {
         const sc = tabScoreToAlphaTabScore(makeScore([measure([
-            note({ duration: 0.25 }),
+            note({ duration: 0.25, fret: 0 }),
             note({ duration: 0.25, fret: 2, technique: 'hammerOn' }),
         ])]));
-        const origin = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        const t = detectTechnique(origin, 1);
+        const beats = sc.tracks[0].staves[0].bars[0].voices[0].beats;
+        const t = detectTechnique(beats[1].notes[0], 1);
         expect(t.tech).toBe('hammerOn');
         expect(t.targetFret).toBe(2);
+        // 起点音在应用数据里是普通音，不应回读出技法（否则编辑应用会改写起点音）
+        expect(detectTechnique(beats[0].notes[0], 1).tech).toBe('none');
     });
 
-    it('slide → 前音符（origin）检测为 slide', () => {
+    it('pullOff → 到达音检测为 pullOff，目标品是自身品位（不是上方的起点品）', () => {
         const sc = tabScoreToAlphaTabScore(makeScore([measure([
-            note({ duration: 0.25 }),
+            note({ duration: 0.25, fret: 5 }),
+            note({ duration: 0.25, fret: 2, technique: 'pullOff' }),
+        ])]));
+        const beats = sc.tracks[0].staves[0].bars[0].voices[0].beats;
+        const t = detectTechnique(beats[1].notes[0], 1);
+        expect(t.tech).toBe('pullOff');
+        expect(t.targetFret).toBe(2);
+        expect(detectTechnique(beats[0].notes[0], 1).tech).toBe('none');
+    });
+
+    it('slide → 到达音检测为 slide，目标品是自身品位', () => {
+        const sc = tabScoreToAlphaTabScore(makeScore([measure([
+            note({ duration: 0.25, fret: 5 }),
             note({ duration: 0.25, fret: 2, technique: 'slide' }),
         ])]));
-        const origin = sc.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
-        const t = detectTechnique(origin, 1);
+        const beats = sc.tracks[0].staves[0].bars[0].voices[0].beats;
+        const t = detectTechnique(beats[1].notes[0], 1);
         expect(t.tech).toBe('slide');
+        expect(t.targetFret).toBe(2);
+        expect(detectTechnique(beats[0].notes[0], 1).tech).toBe('none');
     });
 });

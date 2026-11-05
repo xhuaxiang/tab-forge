@@ -20,6 +20,7 @@ import type { AppTechnique } from '../../core/types/index.ts';
 import { durationName } from '../../core/utils/duration.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 import { buildNoteGroup, nextChordGroupId, type NoteGroupBase } from '../../core/utils/noteGroup.ts';
+import { followTargetFret, isConnectingTechnique, resolveSoundingFret } from '../../core/utils/technique.ts';
 
 export type { AppTechnique } from '../../core/types/index.ts';
 
@@ -68,14 +69,17 @@ export function setFormDuration(d: NoteDuration): void {
 
 /** 更新技法按钮高亮 + 相关输入区显隐（与 tech-btn 点击逻辑一致） */
 export function updateTechniqueUI(tech: AppTechnique): void {
+    // 进入 H/P/S 时目标品默认跟当前品一致：目标品记的是到达音，
+    // 不该沿用上一次输入/初始 0，把正在编辑的音符写到别的品上。
+    const wasConnecting = isConnectingTechnique(uiStore.currentTechnique);
+
     document.querySelectorAll('.tech-btn').forEach(b => b.classList.remove('active'));
     const btn = document.querySelector(`.tech-btn[data-tech="${tech}"]`);
     if (btn) btn.classList.add('active');
     uiStore.setTechnique(tech);
 
     // H/P/S 只能作用在一根弦上：切换技法时同步限制弦号多选
-    const singleStringTech = tech === 'hammerOn' || tech === 'pullOff' || tech === 'slide';
-    setStringSelectionLimit(singleStringTech ? 1 : null);
+    setStringSelectionLimit(isConnectingTechnique(tech) ? 1 : null);
 
     const tfRow = (document.getElementById('targetFret') as HTMLElement | null)?.closest('.input-group') as HTMLElement | null;
     const bendOpts = document.getElementById('bendOptions');
@@ -88,7 +92,35 @@ export function updateTechniqueUI(tech: AppTechnique): void {
     } else {
         if (tfRow) tfRow.style.display = '';
         if (bendOpts) bendOpts.style.display = 'none';
+        if (!wasConnecting) {
+            const tf = document.getElementById('targetFret') as HTMLInputElement | null;
+            if (tf) tf.value = String(getSearchSelectValue('fretSelect'));
+        }
     }
+}
+
+/**
+ * 「品」改变时让「目标品」跟随（H/P/S 且目标品未被显式改过时）。
+ *
+ * capture 阶段先取旧品，微任务里等单选处理器写回新品后再算；
+ * 只响应用户点击——程序化回填（loadAlphaNoteIntoForm）不触发 click。
+ */
+export function initTargetFretFollow(): void {
+    const list = document.querySelector('#fretSelect .options-list');
+    if (!list) return;
+    list.addEventListener('click', () => {
+        const prevFret = getSearchSelectValue('fretSelect');
+        queueMicrotask(() => {
+            const tf = document.getElementById('targetFret') as HTMLInputElement | null;
+            if (!tf) return;
+            const target = parseInt(tf.value, 10);
+            if (isNaN(target)) return;
+            const next = followTargetFret(
+                getSearchSelectValue('fretSelect'), prevFret, target, uiStore.currentTechnique,
+            );
+            if (next !== target) tf.value = String(next);
+        });
+    }, { capture: true });
 }
 
 /** 设置完整技法状态（按钮 + 推弦幅度/释放 + 目标品 + 延音） */
@@ -220,11 +252,15 @@ export function buildNotesFromForm(prevFretCheck = true): { notes: Note[]; error
     const targetFret = hasTech ? getTargetFret() : undefined;
 
     // 防御：H/P/S 是双音过渡技法，一对弦只能有一个目标弦
-    if ((tech === 'hammerOn' || tech === 'pullOff' || tech === 'slide') && strings.length > 1) {
+    if (isConnectingTechnique(tech) && strings.length > 1) {
         return { notes: [], error: '击/勾/滑弦只能选一根弦' };
     }
+    // 到达品是连接类技法唯一的音高来源，缺失时不能回退成「无位移连接」
+    if (isConnectingTechnique(tech) && targetFret === undefined) {
+        return { notes: [], error: '请选择目标品（0-24）' };
+    }
 
-    if (prevFretCheck && !isTie && hasTech && tech !== 'bend' && tech !== 'vibrato') {
+    if (prevFretCheck && !isTie && isConnectingTechnique(tech)) {
         const measure = scoreStore.getActiveMeasure();
         const prev = measure.notes[measure.notes.length - 1];
         const prevFret = prev?.targetFret || prev?.fret;
@@ -243,7 +279,11 @@ export function buildNotesFromForm(prevFretCheck = true): { notes: Note[]; error
         ...getArticulationFields(),
     };
 
-    const members = strings.map(s => ({ string: s, fret }));
+    // H/P/S：表单的「品」是起点、「目标品」是到达点，而谱面/播放只读 Note.fret，
+    // 所以写入的音符必须落在到达品上。若仍写起点，弧线会连到下一拍音符的品
+    // （先击后勾看起来全是击弦），目标品也永远不会被渲染。
+    const soundingFret = resolveSoundingFret(fret, tech, targetFret);
+    const members = strings.map(s => ({ string: s, fret: soundingFret }));
     const chordGroup = members.length > 1
         ? nextChordGroupId(scoreStore.score.measures)
         : undefined;

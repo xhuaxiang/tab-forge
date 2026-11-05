@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import type { Note } from '../../../core/types/index.ts';
 import {
     canSourceTechnique,
+    followTargetFret,
     isConnectingTarget,
     isConnectingTechnique,
+    resolveSoundingFret,
 } from '../../../core/utils/technique.ts';
 
 function note(partial: Partial<Note> = {}): Note {
@@ -25,6 +27,46 @@ describe('isConnectingTechnique', () => {
     it('无技法或未知值返回 false', () => {
         expect(isConnectingTechnique(undefined)).toBe(false);
         expect(isConnectingTechnique(null as unknown as undefined)).toBe(false);
+    });
+});
+
+describe('resolveSoundingFret', () => {
+    it('H/P/S 落在目标品（到达音）上，而非表单里的起点品', () => {
+        for (const technique of ['hammerOn', 'pullOff', 'slide'] as const) {
+            expect(resolveSoundingFret(5, technique, 7)).toBe(7);
+        }
+    });
+
+    it('推弦/揉弦/无技法不读目标品', () => {
+        expect(resolveSoundingFret(5, 'bend', 7)).toBe(5);
+        expect(resolveSoundingFret(5, 'vibrato', 7)).toBe(5);
+        expect(resolveSoundingFret(5, undefined, 7)).toBe(5);
+    });
+
+    it('目标品缺失时回退到原品', () => {
+        expect(resolveSoundingFret(5, 'hammerOn', undefined)).toBe(5);
+    });
+
+    it('目标品等于原品时保持原值', () => {
+        expect(resolveSoundingFret(7, 'pullOff', 7)).toBe(7);
+    });
+});
+
+describe('followTargetFret', () => {
+    it('目标品还停在旧品上（未被显式改过）时跟着新品质走', () => {
+        for (const technique of ['hammerOn', 'pullOff', 'slide'] as const) {
+            expect(followTargetFret(7, 5, 5, technique)).toBe(7);
+        }
+    });
+
+    it('用户显式改过目标品后不再覆盖', () => {
+        expect(followTargetFret(7, 5, 9, 'hammerOn')).toBe(9);
+    });
+
+    it('非连接类技法不读目标品', () => {
+        expect(followTargetFret(7, 5, 5, 'bend')).toBe(5);
+        expect(followTargetFret(7, 5, 5, 'none')).toBe(5);
+        expect(followTargetFret(7, 5, 5, undefined)).toBe(5);
     });
 });
 

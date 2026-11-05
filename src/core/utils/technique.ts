@@ -5,18 +5,54 @@
  * 调度层的延音计算与播放层的连接分支必须共用这一份判断。
  */
 
-import type { Note } from '../types/index.ts';
+import type { Note, AppTechnique } from '../types/index.ts';
 
 export const CONNECTING_TECHNIQUES = ['hammerOn', 'pullOff', 'slide'] as const satisfies
     ReadonlyArray<NonNullable<Note['technique']>>;
 
 export type ConnectingTechnique = typeof CONNECTING_TECHNIQUES[number];
 
+/** 接受 AppTechnique（含 'none'），表单状态与音符字段都能直接传入 */
 export function isConnectingTechnique(
-    technique: Note['technique'] | undefined,
+    technique: AppTechnique | undefined,
 ): technique is ConnectingTechnique {
     return technique !== undefined
         && (CONNECTING_TECHNIQUES as readonly string[]).includes(technique);
+}
+
+/**
+ * 连接类技法（H/P/S）的音符实际落在哪个品上。
+ *
+ * 应用模型里每个 Note 都代表「某一拍真实响的音」：H/P/S 的到达音落在当前拍，
+ * 起点音是前一个同弦音。因此谱面/播放只读 `fret`，它必须是**到达品**；
+ * 表单里的「品」是起点、「目标品」是到达点，写入时用本函数换算。
+ *
+ * 非连接类技法时保留原品；连接类技法缺目标品时也回退原品，但表单路径已由
+ * `buildNotesFromForm` 的守卫拦下，这里的回退只是通用兜底。
+ */
+export function resolveSoundingFret(
+    fret: number,
+    technique: AppTechnique | undefined,
+    targetFret: number | undefined,
+): number {
+    return isConnectingTechnique(technique) && targetFret !== undefined ? targetFret : fret;
+}
+
+/**
+ * 「品」变化时，连接类技法的「目标品」默认跟随。
+ *
+ * 表单语义：品是起点、目标品是到达点。切换技法时目标品已同步为当时的品；
+ * 之后用户改品，只要目标品**仍是旧品**（即没被显式改过）就跟着走，
+ * 否则保留用户输入。非连接类技法不读目标品，原样返回。
+ */
+export function followTargetFret(
+    nextFret: number,
+    prevFret: number,
+    targetFret: number,
+    technique: AppTechnique | undefined,
+): number {
+    if (!isConnectingTechnique(technique)) return targetFret;
+    return targetFret === prevFret ? nextFret : targetFret;
 }
 
 /**
