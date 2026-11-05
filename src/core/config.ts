@@ -211,6 +211,7 @@ export const KARPLUS_ARTICULATION = {
      *   - karplusTiming.clampPlaybackRateScale / karplusBufferTiming（缓冲拉长）
      *   - guitarEngine.bendNote（推弦速率，只夹上界）
      *   - guitarEngine.glideTo（击/勾/滑速率，只夹上界以保留下滑的 <1）
+     *   - guitarEngine.rearticulate（目标点重新激励速率，与 glideTo 同源换算）
      */
     maxPlaybackRateScale: 4,
     /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
@@ -240,14 +241,32 @@ export const KARPLUS_ARTICULATION = {
     /** 推弦相对源音音量的系数 */
     bendVolumeFactor: 1.3,
     // ---- 短音缩放与技法时序 ----
-    /** 击弦滑动时长（秒） */
-    hammerOnSec: 0.025,
-    /** 勾弦滑动时长（秒） */
-    pullOffSec: 0.02,
-    /** 滑弦时长（秒）；短音按自身时值封顶 */
+    /**
+     * 击弦音高跳变时长（秒）。真实击弦在约一个弦周期内完成音高切换
+     * （2–5ms）；20ms 以上会被听成连续的「滑过去」而不是敲击。
+     */
+    hammerOnSec: 0.004,
+    /** 勾弦音高跳变时长（秒），同上 */
+    pullOffSec: 0.003,
+    /** 滑弦时长（秒）；短音按自身时值封顶。真滑音保留连续音高变化 */
     slideSec: 0.15,
     /** 滑弦的最短时长（秒） */
     slideMinSec: 0.02,
+    // ---- 击/勾弦目标点的重新激励 ----
+    /**
+     * 目标点短促激励电平（相对缓冲区原始幅度，还会乘上面的持续段系数）。
+     *
+     * 旧缓冲在目标时刻已经衰减掉约 14dB，且高频只剩约 1/7；只改增益听起来
+     * 仍是「同一根弦滑过去」。复用源缓冲开头的拨弦瞬态按目标倍率重放一次，
+     * 再叠一个短包络，才能给出「敲击/勾动」的起音。
+     */
+    hammerOnAttackGain: 0.4,
+    /** 勾弦目标点的重新激励电平；勾弦本身带手指拨动，通常比击弦更亮更响 */
+    pullOffAttackGain: 0.7,
+    /** 重新激励的衰减时长（秒）：只做起音瞬态，持续段仍由旧缓冲承担 */
+    techniqueAttackSec: 0.04,
+    /** 重新激励的起音时长（秒），避免增益硬起产生咔哒；必须小于 techniqueAttackSec */
+    techniqueAttackRiseSec: 0.002,
     /** 缺少可复用音符时，技法目标音兜底发声时长（秒） */
     techniqueFallbackDurationSec: 0.6,
     /** 缺少可复用音符时，技法目标音兜底音量 */

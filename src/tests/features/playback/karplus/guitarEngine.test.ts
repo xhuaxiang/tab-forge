@@ -659,6 +659,116 @@ describe('GuitarEngine.playNote', () => {
         ge.dispose();
     });
 
+    it('击弦在目标点重新激励：复用源缓冲、按目标倍率播放、短包络', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+        const sources = ctx.getSources();
+        expect(sources).toHaveLength(1);
+
+        mockNow = 0.5;
+        ge.hammerOn(247, noteId);
+
+        // 持续段仍是同一个 source，目标点额外叠一次短激励
+        expect(sources).toHaveLength(2);
+        const attack = sources[1];
+        expect(attack.buffer).toBe(sources[0].buffer);
+        expect(attack.playbackRate.value).toBeCloseTo(247 / 220, 5);
+        // 只播起音瞬态，包络收完后留少量余量即停
+        const stopAt = attack.stoppedAt.at(-1)!;
+        expect(stopAt).toBeGreaterThanOrEqual(
+            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec);
+        expect(stopAt).toBeLessThan(
+            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec + 0.02);
+
+        const attackGain = ctx.getLastGain();
+        // 短线性起音 → 指数收到近零
+        expect(attackGain.gain.rampEvents[0].value)
+            .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
+        expect(attackGain.gain.rampEvents[0].time).toBeCloseTo(
+            mockNow + KARPLUS_ARTICULATION.techniqueAttackRiseSec, 5);
+        expect(attackGain.gain.rampEvents[1].value).toBeCloseTo(0.0001, 5);
+        expect(attackGain.gain.rampEvents[1].time).toBeCloseTo(
+            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec, 5);
+        // 接在琴体链入口：与持续段共享 mixGain、闷音滤波、声像与混响
+        expect(attackGain.connectedTo).toContain(ctx.getFilters()[0]);
+        ge.dispose();
+    });
+
+    it('勾弦重新激励按下滑倍率播放，电平高于击弦', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.pullOff(110, noteId);
+
+        const attack = ctx.getSources()[1];
+        expect(attack.playbackRate.value).toBeCloseTo(0.5, 5);
+        expect(ctx.getLastGain().gain.rampEvents[0].value)
+            .toBeCloseTo(KARPLUS_ARTICULATION.pullOffAttackGain, 5);
+        // 有效起音电平 = 激励 × 持续段系数；勾弦应高于击弦
+        expect(
+            KARPLUS_ARTICULATION.pullOffAttackGain * KARPLUS_ARTICULATION.pullOffVolumeFactor,
+        ).toBeGreaterThan(
+            KARPLUS_ARTICULATION.hammerOnAttackGain * KARPLUS_ARTICULATION.hammerOnVolumeFactor,
+        );
+        ge.dispose();
+    });
+
+    it('目标频率非法时重新激励回落到最小倍率，不写入 NaN', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.hammerOn(Number.NaN, noteId);
+
+        expect(ctx.getSources()[1].playbackRate.value).toBe(0.001);
+        ge.dispose();
+    });
+
+    it('音符清理定时器会断开击弦重新激励的临时节点', () => {
+        vi.useFakeTimers();
+        try {
+            const ge = new GuitarEngine();
+            ge.init();
+            const ctx = ge.getContext() as unknown as MockAudioContext;
+            const noteId = ge.playNote({ frequency: 220, duration: 0.1, volume: 0.5, string: 4 });
+
+            ge.hammerOn(247, noteId);
+            const attackSource = ctx.getSources()[1];
+            const attackGain = ctx.getLastGain();
+            expect(attackGain.connectedTo.length).toBeGreaterThan(0);
+
+            // 发声 0.3s + 断开余量 50ms
+            vi.advanceTimersByTime(400);
+            expect(attackGain.connectedTo).toEqual([]);
+            expect(attackSource.connectedTo).toEqual([]);
+            ge.dispose();
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
+    it('滑弦保持连续滑动，不添加重新激励', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.slideTo(330, 0.15, noteId);
+
+        // 滑音是连续音高变化，叠瞬态会被听成两次拨弦
+        expect(ctx.getSources()).toHaveLength(1);
+        expect(ctx.getSources()[0].playbackRate.ramps.at(-1)).toBeCloseTo(1.5, 5);
+        ge.dispose();
+    });
+
     it('16 分推弦在音符结束前到达目标音高', () => {
         const ge = new GuitarEngine();
         ge.init();
@@ -712,12 +822,14 @@ describe('GuitarEngine.playNote', () => {
 
         mockNow = 0.5;
         ge.hammerOn(b, noteId);
-        // 击弦滑动（0.025s）还没走完就接勾弦
-        mockNow = 0.505;
+        // 击弦滑动走到一半就接勾弦
+        mockNow = 0.5 + KARPLUS_ARTICULATION.hammerOnSec / 2;
         ge.pullOff(c, noteId);
 
-        // 终点必须按缓冲区原始音高绝对换算，不能相对中途的当前速率累乘
         const rate = ctx.getSources()[0].playbackRate;
+        // 起点不是原始速率 1，而是半程电平（指数滑动中点 ≈ sqrt(目标/起点)）
+        expect(rate.lastRampStart).toBeCloseTo(Math.sqrt(b / a), 4);
+        // 终点必须按缓冲区原始音高绝对换算，不能相对中途的当前速率累乘
         expect(rate.ramps.at(-1)).toBeCloseTo(c / a, 3);
         ge.dispose();
     });
@@ -734,6 +846,9 @@ describe('GuitarEngine.playNote', () => {
 
         const rate = ctx.getSources()[0].playbackRate;
         expect(rate.ramps.at(-1)).toBe(KARPLUS_ARTICULATION.maxPlaybackRateScale);
+        // 目标点重新激励复用同一份换算，也必须夹到同一上限
+        expect(ctx.getSources()[1].playbackRate.value)
+            .toBe(KARPLUS_ARTICULATION.maxPlaybackRateScale);
         ge.dispose();
     });
 

@@ -58,6 +58,10 @@ interface ActiveNote {
     gain: GainNode;
     /** 琴体低通：技法连接时手掌闷音要把它压暗 */
     bodyFilter: BiquadFilterNode | null;
+    /** 源音缓冲区：击/勾弦目标点复用其开头的拨弦瞬态做重新激励 */
+    buffer: AudioBuffer;
+    /** 琴体链入口（高通）：重新激励与持续段共用音量、闷音与声像 */
+    input: AudioNode;
     nodes: AudioNode[];
     /** 揉弦 LFO：音符结束后必须显式 stop，否则会一直跑下去 */
     oscillators: OscillatorNode[];
@@ -309,6 +313,9 @@ export class GuitarEngine {
             source,
             gain: mixGain,
             bodyFilter,
+            buffer,
+            input: highpass,
+            // 与 allNodes 同一个数组：技法目标点追加的临时节点也会被清理定时器断开
             nodes: allNodes,
             oscillators: [],
             startTime: now,
@@ -370,18 +377,27 @@ export class GuitarEngine {
         const rate = note.source.playbackRate;
         const now = this.ctx!.currentTime;
         const current = Math.max(0.001, rate.value);
-        const rawTarget = toFreq / note.baseFrequency;
-        const target = Number.isFinite(rawTarget)
-            ? Math.min(
-                Math.max(0.001, rawTarget),
-                KARPLUS_ARTICULATION.maxPlaybackRateScale,
-            )
-            : 0.001;
+        const target = this.techniquePlaybackRate(toFreq, note.baseFrequency);
         // 复用前先停掉源音上的揉弦 LFO，否则目标音会一直带着抖动
         this.stopOscillators(note);
         rate.cancelScheduledValues(now);
         rate.setValueAtTime(current, now);
         rate.exponentialRampToValueAtTime(target, now + Math.max(0.001, seconds));
+    }
+
+    /**
+     * 技法目标频率 → 缓冲区播放倍率（glideTo 与目标点重新激励共用）。
+     *
+     * 按缓冲区原始频率绝对换算，链式技法不会累积误差；保留 <1 用于勾弦/
+     * 下滑，只夹共享上限，与缓冲预拉长保持同步。非有限输入回落到最小倍率。
+     */
+    private techniquePlaybackRate(toFreq: number, baseFrequency: number): number {
+        const raw = toFreq / baseFrequency;
+        if (!Number.isFinite(raw)) return 0.001;
+        return Math.min(
+            Math.max(0.001, raw),
+            KARPLUS_ARTICULATION.maxPlaybackRateScale,
+        );
     }
 
     /** 停掉音符上的调制振荡器（揉弦 LFO） */
@@ -395,6 +411,44 @@ export class GuitarEngine {
         note.oscillators = [];
     }
 
+    /**
+     * 在技法目标点补一次短促激励（击/勾弦的「敲击/勾动」起音）。
+     *
+     * 持续段由旧缓冲区变速承担，但它在目标时刻已衰减约 14dB、高频只剩约 1/7；
+     * 只靠增益台阶听起来仍是同一根弦滑过去。这里复用源缓冲开头的拨弦瞬态，
+     * 按目标倍率重放一次，再叠一个短包络：只补起音，不替代持续段。
+     *
+     * 经过琴体链入口，因此与持续段共享 mixGain（音量/技法系数）、闷音滤波、
+     * 声像与混响发送。临时节点并入 note.nodes，随音符一起清理。
+     */
+    private rearticulate(note: ActiveNote, toFreq: number, level: number): void {
+        if (!this.ctx) return;
+        const ctx = this.ctx;
+        const now = ctx.currentTime;
+        const source = ctx.createBufferSource();
+        source.buffer = note.buffer;
+        source.playbackRate.value = this.techniquePlaybackRate(toFreq, note.baseFrequency);
+
+        const attackGain = ctx.createGain();
+        // 指数收尾需要非零端点；起音用短线性段，避免增益硬起产生咔哒
+        const targetLevel = Number.isFinite(level) ? Math.max(0.0001, level) : 0.0001;
+        attackGain.gain.setValueAtTime(0.0001, now);
+        attackGain.gain.linearRampToValueAtTime(
+            targetLevel,
+            now + KARPLUS_ARTICULATION.techniqueAttackRiseSec,
+        );
+        attackGain.gain.exponentialRampToValueAtTime(
+            0.0001,
+            now + KARPLUS_ARTICULATION.techniqueAttackSec,
+        );
+
+        source.connect(attackGain);
+        attackGain.connect(note.input);
+        source.start(now);
+        source.stop(now + KARPLUS_ARTICULATION.techniqueAttackSec + STOP_MARGIN_SEC);
+        note.nodes.push(source, attackGain);
+    }
+
     hammerOn(toFreq: number, noteId: symbol | null = null): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
             return this.playNote({
@@ -406,6 +460,7 @@ export class GuitarEngine {
         const note = this.activeNotes.get(noteId)!;
         const now = this.ctx!.currentTime;
         this.glideTo(note, toFreq, KARPLUS_ARTICULATION.hammerOnSec);
+        this.rearticulate(note, toFreq, KARPLUS_ARTICULATION.hammerOnAttackGain);
         note.gain.gain.setValueAtTime(
             note.baseVolume * KARPLUS_ARTICULATION.hammerOnVolumeFactor,
             now,
@@ -425,6 +480,7 @@ export class GuitarEngine {
         const note = this.activeNotes.get(noteId)!;
         const now = this.ctx!.currentTime;
         this.glideTo(note, toFreq, KARPLUS_ARTICULATION.pullOffSec);
+        this.rearticulate(note, toFreq, KARPLUS_ARTICULATION.pullOffAttackGain);
         note.gain.gain.setValueAtTime(
             note.baseVolume * KARPLUS_ARTICULATION.pullOffVolumeFactor,
             now,
