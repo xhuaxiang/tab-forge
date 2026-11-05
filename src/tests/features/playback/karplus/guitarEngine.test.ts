@@ -659,7 +659,7 @@ describe('GuitarEngine.playNote', () => {
         ge.dispose();
     });
 
-    it('击弦在目标点重新激励：复用源缓冲、按目标倍率播放、短包络', () => {
+    it('击弦在目标点重新激励：复用源缓冲、按目标倍率播放、响到音符终点', () => {
         const ge = new GuitarEngine();
         ge.init();
         const ctx = ge.getContext() as unknown as MockAudioContext;
@@ -670,37 +670,99 @@ describe('GuitarEngine.playNote', () => {
         mockNow = 0.5;
         ge.hammerOn(247, noteId);
 
-        // 持续段仍是同一个 source，目标点额外叠一次短激励
+        // 持续段仍是同一个 source，目标点额外叠一层完整激励
         expect(sources).toHaveLength(2);
         const attack = sources[1];
         expect(attack.buffer).toBe(sources[0].buffer);
         expect(attack.playbackRate.value).toBeCloseTo(247 / 220, 5);
-        // 只播起音瞬态，包络收完后留少量余量即停
+        // 激励层一直响到本音可听终点（时值 1s + 尾音 0.2s + 停止余量），
+        // 不能提前收掉，否则之后只剩高频已衰减的旧缓冲，尾音发闷
         const stopAt = attack.stoppedAt.at(-1)!;
-        expect(stopAt).toBeGreaterThanOrEqual(
-            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec);
-        expect(stopAt).toBeLessThan(
-            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec + 0.02);
+        expect(stopAt).toBeCloseTo(1.2, 1);
+        expect(stopAt).toBeGreaterThan(1.2);
 
         const attackGain = ctx.getLastGain();
-        // 短线性起音 → 保持电平 → 末段线性淡出；不能是快速指数塌缩
+        // 只有短线性起音，之后保持电平（靠源缓冲自身衰减），没有提前淡出
+        expect(attackGain.gain.rampEvents).toHaveLength(1);
         expect(attackGain.gain.rampEvents[0].value)
-            .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
-        // 衰减前必须有一个保持电平的锚点，否则激励只剩几毫秒能量
-        expect(attackGain.gain.scheduled.at(-1))
             .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
         expect(attackGain.gain.rampEvents[0].time).toBeCloseTo(
             mockNow + KARPLUS_ARTICULATION.techniqueAttackRiseSec, 5);
-        expect(attackGain.gain.rampEvents[1].value).toBeCloseTo(0.0001, 5);
-        expect(attackGain.gain.rampEvents[1].time).toBeCloseTo(
-            mockNow + KARPLUS_ARTICULATION.techniqueAttackSec, 5);
-        // 接在琴体链入口：与持续段共享 mixGain、闷音滤波、声像与混响
-        expect(attackGain.connectedTo).toContain(ctx.getFilters()[0]);
-
-        // 保持段中点仍接近目标电平：只断言「有保持锚点」抓不到锚点被挪早
-        mockNow = 0.5 + KARPLUS_ARTICULATION.techniqueAttackSec / 2;
+        // 起音之后到音符结束前都保持目标电平
+        mockNow = 1.0;
         expect(attackGain.gain.value)
             .toBeCloseTo(KARPLUS_ARTICULATION.hammerOnAttackGain, 5);
+        // 接在琴体链入口：与持续段共享 mixGain、闷音滤波、声像与混响
+        expect(attackGain.connectedTo).toContain(ctx.getFilters()[0]);
+        ge.dispose();
+    });
+
+    it('链式技法换目标时旧激励层交叉淡出，不同音高不叠加', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.hammerOn(247, noteId);
+        const firstSource = ctx.getSources()[1];
+        const firstGain = ctx.getLastGain();
+
+        mockNow = 0.6;
+        ge.pullOff(110, noteId);
+
+        // 旧层短淡出后停止；新层响到音符终点
+        expect(firstGain.gain.rampEvents.at(-1)!.value).toBeCloseTo(0.0001, 5);
+        expect(firstGain.gain.rampEvents.at(-1)!.time).toBeCloseTo(
+            0.6 + KARPLUS_ARTICULATION.techniqueAttackFadeSec, 5);
+        expect(firstSource.stoppedAt.at(-1)).toBeCloseTo(
+            0.6 + KARPLUS_ARTICULATION.techniqueAttackFadeSec + 0.005, 5);
+        expect(ctx.getSources()[2].stoppedAt.at(-1)).toBeCloseTo(1.2, 1);
+        // 三层节点都存在：原始持续段 + 两个技法目标层的旧/新
+        expect(ctx.getSources()).toHaveLength(3);
+        ge.dispose();
+    });
+
+    it('滑弦接管时释放击弦激励层，避免旧音高留在原地', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.hammerOn(247, noteId);
+        const attackSource = ctx.getSources()[1];
+        const attackGain = ctx.getLastGain();
+
+        mockNow = 0.6;
+        ge.slideTo(330, 0.15, noteId);
+
+        // 滑音不新增激励层；旧层在淡出后停止，主声源滑向新音高
+        expect(ctx.getSources()).toHaveLength(2);
+        expect(attackGain.gain.rampEvents.at(-1)!.value).toBeCloseTo(0.0001, 5);
+        expect(attackGain.gain.rampEvents.at(-1)!.time).toBeCloseTo(
+            0.6 + KARPLUS_ARTICULATION.techniqueAttackFadeSec, 5);
+        expect(attackSource.stoppedAt.at(-1)).toBeCloseTo(
+            0.6 + KARPLUS_ARTICULATION.techniqueAttackFadeSec + 0.005, 5);
+        expect(ctx.getSources()[0].playbackRate.ramps.at(-1)).toBeCloseTo(1.5, 5);
+        ge.dispose();
+    });
+
+    it('停止音符时释放激励层，不等它跑到原音符终点', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        const noteId = ge.playNote({ frequency: 220, duration: 1, volume: 0.5, string: 4 });
+
+        mockNow = 0.5;
+        ge.hammerOn(247, noteId);
+        const attackSource = ctx.getSources()[1];
+
+        mockNow = 0.6;
+        ge.stopNote(noteId);
+
+        expect(attackSource.stoppedAt.at(-1)).toBeCloseTo(
+            0.6 + KARPLUS_ARTICULATION.techniqueAttackFadeSec + 0.005, 5);
         ge.dispose();
     });
 

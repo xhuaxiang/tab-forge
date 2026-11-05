@@ -62,6 +62,8 @@ interface ActiveNote {
     buffer: AudioBuffer;
     /** 琴体链入口（高通）：重新激励与持续段共用音量、闷音与声像 */
     input: AudioNode;
+    /** 正在发声的重新激励层；换技法目标时先交叉淡出旧的，避免不同音高叠加 */
+    attacks: Array<{ source: AudioBufferSourceNode; gain: GainNode }>;
     nodes: AudioNode[];
     /** 揉弦 LFO：音符结束后必须显式 stop，否则会一直跑下去 */
     oscillators: OscillatorNode[];
@@ -315,6 +317,7 @@ export class GuitarEngine {
             bodyFilter,
             buffer,
             input: highpass,
+            attacks: [],
             // 与 allNodes 同一个数组：技法目标点追加的临时节点也会被清理定时器断开
             nodes: allNodes,
             oscillators: [],
@@ -412,50 +415,75 @@ export class GuitarEngine {
     }
 
     /**
-     * 在技法目标点补一次短促激励（击/勾弦的「敲击/勾动」起音）。
+     * 淡出并停止当前所有激励层，清空 note.attacks。
      *
-     * 持续段由旧缓冲区变速承担，但它在目标时刻已衰减约 14dB、高频只剩约 1/7；
-     * 只靠增益台阶听起来仍是同一根弦滑过去。这里复用源缓冲开头的拨弦瞬态，
-     * 按目标倍率重放一段目标音头（短起音 → 保持电平 → 短淡出），再交回旧缓冲。
-     * 包络必须保持电平，指数衰减到近零会把激励压成听不见的一声轻咔哒。
+     * 激励层是固定音高的独立 source，不会跟随主声源滑音/推弦；任何换目标
+     * （击/勾/滑、推弦、停止）之前都必须先释放它，否则旧音高会一直响到
+     * 音符终点，与新音高叠成双音。
+     */
+    private fadeOutAttacks(note: ActiveNote): void {
+        if (!this.ctx || note.attacks.length === 0) return;
+        const now = this.ctx.currentTime;
+        const remaining = Math.max(0, note.audibleUntil - now);
+        const fadeSec = Math.min(
+            KARPLUS_ARTICULATION.techniqueAttackFadeSec,
+            remaining,
+        );
+        for (const prev of note.attacks) {
+            const gain = prev.gain.gain;
+            const current = Math.max(0.0001, gain.value);
+            gain.cancelScheduledValues(now);
+            gain.setValueAtTime(current, now);
+            gain.linearRampToValueAtTime(0.0001, now + fadeSec);
+            // source 创建时已排了到 audibleUntil 的 stop；后一次 stop 更早，
+            // 规范允许重复调用，已结束的节点会抛错，忽略即可。
+            try { prev.source.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+        }
+        note.attacks = [];
+    }
+
+    /**
+     * 在技法目标点重新激励（击/勾弦的「敲击/勾动」起音与新的持续段）。
      *
-     * 经过琴体链入口，因此与持续段共享 mixGain（音量/技法系数）、闷音滤波、
-     * 声像与混响发送。临时节点并入 note.nodes，随音符一起清理。
+     * 旧缓冲区在目标时刻已衰减约 14dB、高频只剩约 1/7；只靠增益台阶听起来
+     * 仍是同一根弦滑过去，而且之后的尾音发闷。这里复用源缓冲开头的拨弦瞬态，
+     * 按目标倍率重放，并让它一直响到本音的可听终点：目标音获得自己完整的
+     * 自然衰减（高频随新音头一起留下），旧缓冲只作为底下的残余。
+     *
+     * 链式技法换目标时，先把上一激励层短交叉淡出，否则不同音高的两层会叠在
+     * 一起。经过琴体链入口，因此与持续段共享 mixGain（音量/技法系数）、
+     * 闷音滤波、声像与混响发送。节点并入 note.nodes，随音符一起清理。
      */
     private rearticulate(note: ActiveNote, toFreq: number, level: number): void {
         if (!this.ctx) return;
         const ctx = this.ctx;
         const now = ctx.currentTime;
+        const remaining = note.audibleUntil - now;
+        if (!(remaining > 0)) return;
+
+        // 旧激励层（上一个技法目标）交叉淡出；它的 source 也会在淡出后停止
+        this.fadeOutAttacks(note);
+
         const source = ctx.createBufferSource();
         source.buffer = note.buffer;
         source.playbackRate.value = this.techniquePlaybackRate(toFreq, note.baseFrequency);
 
         const attackGain = ctx.createGain();
         const targetLevel = Number.isFinite(level) ? Math.max(0.0001, level) : 0.0001;
-        // 配置倒挂（rise/release ≥ total）时把起音与淡出收紧到总时长内，
-        // 保证事件时间严格递增：起音 → 保持锚点 → 淡出。
-        const attackSec = Math.max(0, KARPLUS_ARTICULATION.techniqueAttackSec);
-        const releaseSec = Math.min(
-            KARPLUS_ARTICULATION.techniqueAttackReleaseSec,
-            attackSec,
-        );
         const riseSec = Math.min(
             KARPLUS_ARTICULATION.techniqueAttackRiseSec,
-            attackSec - releaseSec,
+            remaining,
         );
-        const attackEnd = now + attackSec;
-        const releaseStart = attackEnd - releaseSec;
-        // 短起音 → 保持电平 → 末段线性淡出。不能用「指数衰减到近零」：
-        // 那样能量在半衰期约 3ms 内就没了，重放只剩一声轻咔哒。
+        // 只有短起音：之后保持电平，让源缓冲自身的衰减发挥作用，直到音符终点。
+        // 不能用「指数衰减到近零」的短包络——半衰期约 3ms，会压成一声轻咔哒。
         attackGain.gain.setValueAtTime(0.0001, now);
         attackGain.gain.linearRampToValueAtTime(targetLevel, now + riseSec);
-        attackGain.gain.setValueAtTime(targetLevel, releaseStart);
-        attackGain.gain.linearRampToValueAtTime(0.0001, attackEnd);
 
         source.connect(attackGain);
         attackGain.connect(note.input);
         source.start(now);
-        source.stop(attackEnd + STOP_MARGIN_SEC);
+        source.stop(note.audibleUntil + STOP_MARGIN_SEC);
+        note.attacks.push({ source, gain: attackGain });
         note.nodes.push(source, attackGain);
     }
 
@@ -513,6 +541,9 @@ export class GuitarEngine {
         }
         const note = this.activeNotes.get(noteId)!;
         const now = this.ctx!.currentTime;
+        // 滑音是连续音高变化，旧激励层（静止在上一目标音高）必须先释放，
+        // 否则会与新音高叠成双音
+        this.fadeOutAttacks(note);
         this.glideTo(note, toFreq, slideDuration);
         note.gain.gain.setValueAtTime(
             note.baseVolume * KARPLUS_ARTICULATION.slideVolumeFactor,
@@ -537,6 +568,8 @@ export class GuitarEngine {
         const note = this.activeNotes.get(noteId);
         if (!note || !note.source || !this.ctx || semitones === 0) return;
         const now = this.ctx.currentTime;
+        // 激励层是固定音高的独立 source，不会跟随推弦；先释放避免双音
+        this.fadeOutAttacks(note);
         const rate = note.source.playbackRate;
         // 与缓冲区预拉长共用同一上限，两侧不同步会提前耗尽缓冲（见 karplusBufferTiming）
         const target = Math.min(
@@ -608,6 +641,8 @@ export class GuitarEngine {
         if (!note || !note.source || !this.ctx) return;
         const ctx = this.ctx;
         const now = ctx.currentTime;
+        // 激励层不会跟随揉弦的 LFO；先释放，避免静止音高与揉弦叠在一起
+        this.fadeOutAttacks(note);
 
         // 短音按比例压缩启动延迟与渐入，并提高速率凑够可辨识的周期数
         const scaled = holdSec > 0;
@@ -689,6 +724,9 @@ export class GuitarEngine {
         if (!note || !this.ctx) return;
         const now = this.ctx.currentTime;
         const fadeSec = KARPLUS_ARTICULATION.releaseSec;
+        // 激励层 source 的自停排期在音符终点；停止时提前释放，避免长音
+        // 被 stop/pause 后节点仍在后台跑到原终点
+        this.fadeOutAttacks(note);
         try {
             // 顺序必须反过来：先让 gain 淡到接近 0，再停 source。
             // 必须先读 gain.value 再 cancel：cancelScheduledValues 会删掉进行中的
@@ -720,6 +758,8 @@ export class GuitarEngine {
         const now = this.ctx.currentTime;
         const fadeSec = KARPLUS_ARTICULATION.releaseSec;
         for (const [, note] of this.activeNotes) {
+            // 同 stopNote：提前释放激励层，不等它们跑到原音符终点
+            this.fadeOutAttacks(note);
             try {
                 const gain = note.gain.gain;
                 // 同 stopNote：先读当前电平，再清掉进行中的 release
