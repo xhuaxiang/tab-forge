@@ -40,6 +40,8 @@ export class AudioEngine {
     private eventTimers: Array<ReturnType<typeof setTimeout>> = [];
     /** 播放代次：每次 play/stop/pause 递增，让上一代已排期的回调失效 */
     private runId = 0;
+    /** 暂停时已播放的毫秒数；继续时据此跳过已播事件并从原位置计时 */
+    private pausedElapsedMs = 0;
     private measures: Measure[] = [];
     /** 记录每个弦上最后一个活跃的 noteId，用于击弦/勾弦/滑弦 */
     private stringNoteMap: Map<number, symbol | null> = new Map();
@@ -249,13 +251,14 @@ export class AudioEngine {
 
         if (this.state === 'playing') return;
 
+        // 暂停后继续：保留已播放位置，只补排剩余事件；否则从头开始
+        const resumeFrom = this.state === 'paused' ? this.pausedElapsedMs : 0;
+
         // 停掉上一代残留的排期：stop 后立刻重播时，旧 setTimeout 不能再发声
         this.clearEventTimers();
         const runId = ++this.runId;
 
         this.guitar.init();
-        this.state = 'playing';
-        this.callbacks.onStateChange?.('playing');
 
         // 清空弦记录
         this.stringNoteMap.clear();
@@ -275,8 +278,21 @@ export class AudioEngine {
         // 短静默内源音缓冲区可能还没过期，必须显式要求目标重拨
         const forceReplucks = computeForceRepluck(events, silenceSpansMs);
 
-        // 调度播放所有音符；代次校验同时挡住 stop/pause 后残留的旧回调
+        const remainingMs = Math.max(0, totalDurationMs - resumeFrom);
+        if (remainingMs === 0) {
+            // 暂停点已经在曲尾：直接收尾，不要先报 playing 再立刻 stopped
+            this.stop();
+            this.callbacks.onComplete?.();
+            return;
+        }
+
+        this.state = 'playing';
+        this.callbacks.onStateChange?.('playing');
+
+        // 调度播放所有音符；代次校验同时挡住 stop/pause 后残留的旧回调。
+        // 从暂停继续时，已经播过的偏移直接跳过。
         events.forEach((item, index) => {
+            if (item.delayMs < resumeFrom) return;
             this.eventTimers.push(setTimeout(() => {
                 if (this.runId !== runId || this.state !== 'playing') return;
                 this.playNote(
@@ -288,11 +304,11 @@ export class AudioEngine {
                     forceReplucks[index],
                     rateScales[index],
                 );
-            }, item.delayMs));
+            }, item.delayMs - resumeFrom));
         });
 
-        // 计算总时长后停止
-        this.startTime = performance.now();
+        // 续播时把起点往回拨，位置回调仍按整曲绝对时间计算
+        this.startTime = performance.now() - resumeFrom;
 
         // 轮询位置回调
         const updatePosition = () => {
@@ -318,7 +334,7 @@ export class AudioEngine {
             if (this.runId !== runId || this.state !== 'playing') return;
             this.stop();
             this.callbacks.onComplete?.();
-        }, totalDurationMs + 200));
+        }, remainingMs + 200));
     }
 
     /** 清掉所有已排期的播放事件/自动停止计时器 */
@@ -331,6 +347,7 @@ export class AudioEngine {
     stop(): void {
         this.runId++;
         this.clearEventTimers();
+        this.pausedElapsedMs = 0;
         this.state = 'stopped';
         this.guitar.stopAll();
         if (this.timerId !== null) {
@@ -341,9 +358,10 @@ export class AudioEngine {
         this.callbacks.onPositionChange?.(0, 0);
     }
 
-    /** 暂停（当前实现暂停后再次 play 会从头开始，先清干净旧排期） */
+    /** 暂停：停掉已排期事件并记录当前位置；再次 play 从该位置继续 */
     pause(): void {
         if (this.state !== 'playing') return;
+        this.pausedElapsedMs = Math.max(0, performance.now() - this.startTime);
         this.runId++;
         this.clearEventTimers();
         this.state = 'paused';

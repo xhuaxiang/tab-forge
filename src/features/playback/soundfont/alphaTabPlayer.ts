@@ -55,6 +55,13 @@ class AlphaTabPlayer {
 
     async play(score: TabScore): Promise<void> {
         if (this.broken) throw new Error('alphaTab player 不可用（上次初始化失败）');
+        // 暂停中再次播放 = 继续；绝不能重新 loadMidiFile，否则会从曲首重播
+        if (this.state === 'paused') {
+            this.resume();
+            return;
+        }
+        if (this.state === 'playing') return;
+
         await this.ensureInitialized();
         if (!this.synth || !this.mod) throw new Error('alphaTab player 未初始化');
 
@@ -86,6 +93,12 @@ class AlphaTabPlayer {
 
     pause(): void {
         this.synth?.pause();
+    }
+
+    /** 从暂停位置继续（不重新加载 MIDI） */
+    private resume(): void {
+        if (this.state !== 'paused' || !this.synth) return;
+        this.synth.play();
     }
 
     dispose(): void {

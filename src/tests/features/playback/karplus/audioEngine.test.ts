@@ -82,7 +82,10 @@ const THREE_QUARTERS: Note[] = [
 
 describe('AudioEngine 播放排期清理', () => {
     beforeEach(() => {
-        vi.useFakeTimers();
+        // 播放位置/暂停点用 performance.now()，必须一起 fake 才能推进时间
+        vi.useFakeTimers({
+            toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
+        });
         playedNotes.mockClear();
     });
 
@@ -118,6 +121,43 @@ describe('AudioEngine 播放排期清理', () => {
         engine.dispose();
     });
 
+    it('暂停后继续从暂停位置续播，不从头重播', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf(THREE_QUARTERS));
+        vi.advanceTimersByTime(200); // 第 1 音在 100ms
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+
+        engine.pause();
+        vi.advanceTimersByTime(1000); // 暂停期间不发声
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+
+        await engine.play(); // 继续
+        // 第 2 音原定 600ms，暂停点在 200ms → 继续后还需约 400ms
+        vi.advanceTimersByTime(350);
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        vi.advanceTimersByTime(100);
+        expect(playedNotes).toHaveBeenCalledTimes(2);
+        // 续播的必须是第 2 个音（fret 1），不是把第 1 音再播一遍
+        expect(playedNotes.mock.calls[1][0]).toMatchObject({ fret: 1 });
+        engine.dispose();
+    });
+
+    it('暂停后 stop 再播放从头开始', async () => {
+        const engine = new AudioEngine();
+        const score = scoreOf(THREE_QUARTERS);
+        await engine.play(score);
+        vi.advanceTimersByTime(200); // 第 1 音（fret 0）
+        engine.pause();
+        engine.stop();
+        playedNotes.mockClear();
+
+        await engine.play(score);
+        vi.advanceTimersByTime(150);
+        expect(playedNotes).toHaveBeenCalledTimes(1);
+        expect(playedNotes.mock.calls[0][0]).toMatchObject({ fret: 0 });
+        engine.dispose();
+    });
+
     it('连续 stop/play 不会累加播放事件', async () => {
         const engine = new AudioEngine();
         const score = scoreOf(THREE_QUARTERS);
@@ -135,7 +175,10 @@ describe('AudioEngine 播放排期清理', () => {
 
 describe('推弦 / 揉弦作用于音符自身', () => {
     beforeEach(() => {
-        vi.useFakeTimers();
+        // 播放位置/暂停点用 performance.now()，必须一起 fake 才能推进时间
+        vi.useFakeTimers({
+            toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
+        });
         playedNotes.mockClear();
         bentNotes.mockClear();
         vibratoNotes.mockClear();
