@@ -9,7 +9,6 @@ import { $, setStatus } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import type {
     ChordEvent,
-    FretRange,
     ImprovOptions,
     LocalDensity,
     LocalStyle,
@@ -34,18 +33,11 @@ import {
     detectUnsupportedDescription,
     formatChordSpec,
     generateLocalImprovisation,
-    parseChordChartText,
     parseDescriptionChordChart,
     parseImprovDescription,
-    parseProgressionText,
     progressionEquals,
 } from '../../core/utils/improv/index.ts';
 import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
-
-interface LocalInput {
-    options: Partial<ImprovOptions>;
-    warnings: string[];
-}
 
 function readOption<T extends string>(
     id: string,
@@ -107,38 +99,10 @@ function initLocalImprovOptions(): void {
         })),
         String(config.chordsPerMeasure.default),
     );
-
-    for (const id of ['localFretMin', 'localFretMax']) {
-        const input = document.getElementById(id) as HTMLInputElement | null;
-        if (!input) continue;
-        input.min = String(config.playability.fretMin);
-        input.max = String(config.playability.fretMax);
-    }
 }
 
 function readLocalDescription(): string {
     return (document.getElementById('localImprovDescription') as HTMLTextAreaElement | null)?.value ?? '';
-}
-
-function readCustomProgression(): string {
-    return (document.getElementById('localProgressionText') as HTMLInputElement | null)?.value.trim() ?? '';
-}
-
-function readNumberInput(id: string): number | null {
-    const raw = (document.getElementById(id) as HTMLInputElement | null)?.value.trim() ?? '';
-    if (raw === '') return null;
-    const value = Number(raw);
-    return Number.isFinite(value) ? value : null;
-}
-
-function readFretRange(): FretRange | null {
-    const min = readNumberInput('localFretMin');
-    const max = readNumberInput('localFretMax');
-    if (min === null && max === null) return null;
-    return {
-        min: min ?? LOCAL_IMPROV_CONFIG.playability.fretMin,
-        max: max ?? LOCAL_IMPROV_CONFIG.playability.fretMax,
-    };
 }
 
 function readChordsPerMeasure(): number {
@@ -155,11 +119,6 @@ function setSelectValue(id: string, value: string): void {
     if (select && Array.from(select.options).some(option => option.value === value)) {
         select.value = value;
     }
-}
-
-function setInputValue(id: string, value: string): void {
-    const input = document.getElementById(id) as HTMLInputElement | null;
-    if (input) input.value = value;
 }
 
 function matchProgression(
@@ -179,26 +138,20 @@ function syncLocalControls(options: ResolvedImprovOptions): void {
 
     const progressionValue = matchProgression(options.progression)?.value;
     if (progressionValue) setSelectValue('localProgression', progressionValue);
-
-    if (options.fretRange) {
-        setInputValue('localFretMin', String(options.fretRange.min));
-        setInputValue('localFretMax', String(options.fretRange.max));
-    }
 }
 
 /**
  * 读取控件 + 描述，合成生成选项。
  *
- * 和弦优先级：描述里的小节写法 > 描述里的标签/进行 > 自定义和弦输入 >
- * 下拉预设。每小节多个和弦时，统一展开成 `chordChart`；1 个和弦时保留
- * 旧的 `progression` 铺法（含最后一小节强制收尾）。
+ * 和弦优先级：描述里的小节写法 > 描述里的标签/进行 > 下拉预设。
+ * 每小节多个和弦时，统一展开成 `chordChart`；1 个和弦时保留旧的
+ * `progression` 铺法（含最后一小节强制收尾）。
  */
 function readLocalOptions(
     seed: number,
     described: Partial<ImprovOptions>,
     description: string,
-): LocalInput {
-    const warnings: string[] = [];
+): Partial<ImprovOptions> {
     const config = LOCAL_IMPROV_CONFIG;
     const numValue = (document.getElementById('localNumMeasures') as HTMLSelectElement | null)?.value;
     const parsed = numValue === undefined || numValue === '' ? NaN : Number(numValue);
@@ -210,28 +163,13 @@ function readLocalOptions(
             ? scoreTimeSignature
             : config.defaults.timeSignature);
 
-    const customText = readCustomProgression();
-    const customSteps = customText === '' ? undefined : parseProgressionText(customText);
-    const customBars = customText === '' ? null : parseChordChartText(customText);
-
     const descriptionBars = parseDescriptionChordChart(description);
     const selected = LOCAL_PROGRESSIONS.find(option =>
         option.value === (document.getElementById('localProgression') as HTMLSelectElement | null)?.value);
 
-    if (customText !== '' && customSteps === null && customBars === null
-        && !described.progression && !descriptionBars) {
-        warnings.push('自定义和弦无法解析，已改用下拉进行');
-    }
-
-    const progression: Progression | undefined = described.progression
-        ?? customBars?.flat()
-        ?? customSteps
-        ?? selected?.steps;
-
-    // 描述里的进行优先级高于自定义输入；若描述已有进行，就不再让自定义
-    // 小节表把实际和声覆盖掉。
-    const chartBars = descriptionBars
-        ?? (described.progression ? null : customBars);
+    // 和弦只来自描述或下拉预设；描述里的小节写法优先。
+    const progression: Progression | undefined = described.progression ?? selected?.steps;
+    const chartBars = descriptionBars;
     const chordsPerMeasure = readChordsPerMeasure();
     let chordChart: ChordEvent[] | undefined;
     if (chartBars) {
@@ -241,7 +179,6 @@ function readLocalOptions(
             progression ?? [1], numMeasures, chordsPerMeasure, timeSignature,
         );
     }
-    const fretRange = described.fretRange ?? readFretRange() ?? undefined;
 
     const options: Partial<ImprovOptions> = {
         numMeasures,
@@ -259,14 +196,13 @@ function readLocalOptions(
         tuning: { ...scoreStore.score.tuning },
         // 描述里写到的字段优先；没写到的沿用上面的控件/乐谱值。
         ...described,
-        // 和弦与把位已经在本函数里合并过，避免 described 的旧值覆盖展开结果。
+        // 和弦已经在本函数里合并过，避免 described 的旧值覆盖展开结果。
         progression,
         chordChart,
-        fretRange,
         seed,
     };
 
-    return { options, warnings };
+    return options;
 }
 
 /** 从实际和声计划反推展示用和弦，避免摘要显示未被采用的 progression */
@@ -327,12 +263,9 @@ function handleLocalGenerate(): void {
     try {
         const description = readLocalDescription().trim();
         const described = parseImprovDescription(description);
-        const input = readLocalOptions(seed, described, description);
-        const warnings = [
-            ...input.warnings,
-            ...detectUnsupportedDescription(description),
-        ];
-        const result = generateLocalImprovisation(input.options);
+        const options = readLocalOptions(seed, described, description);
+        const warnings = detectUnsupportedDescription(description);
+        const result = generateLocalImprovisation(options);
 
         // 描述可能覆盖拍号/调性；先落到 store，loadNotes 才会按新拍号切小节。
         scoreStore.beginBatch();
