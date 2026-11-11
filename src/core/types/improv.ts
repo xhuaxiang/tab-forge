@@ -363,6 +363,10 @@ export interface StyleProfile {
     vibratoProbability: number;
     /** 手掌闷音概率（仅低音弦） */
     palmMuteProbability: number;
+    /** 同弦相邻音做击/勾弦的概率（1-2 品） */
+    hammerPullProbability: number;
+    /** 同弦移动做滑弦的概率（含 1-2 品短滑；两端都不能是空弦） */
+    slideProbability: number;
     /** 乐句结构参数 */
     phrase: PhraseProfile;
 }
@@ -395,6 +399,12 @@ export interface PlayabilityRules {
     minPalmMuteDuration: NoteDuration;
     /** 允许手掌闷音的最粗弦范围 [最低弦号, 最高弦号]（4-6） */
     palmMuteStrings: readonly [number, number];
+    /** 允许击/勾/滑的最短时值 */
+    minConnectDuration: NoteDuration;
+    /** 击/勾弦允许的最大品位跨度 */
+    maxHammerPullFrets: number;
+    /** 滑弦允许的最大品位跨度 */
+    maxSlideFrets: number;
 }
 
 /** 本地即兴的完整配置 */

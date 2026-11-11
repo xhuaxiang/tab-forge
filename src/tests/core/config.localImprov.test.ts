@@ -35,7 +35,7 @@ describe('LOCAL_IMPROV_CONFIG', () => {
             numMeasures: 4,
             key: 'C',
             scaleType: 'Major (Ionian)',
-            style: 'Folk',
+            style: 'Rock',
             density: '中',
             timeSignature: '4/4',
             tuning: STANDARD_TUNING,

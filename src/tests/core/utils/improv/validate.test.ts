@@ -57,13 +57,105 @@ describe('validateNotes', () => {
         expectError(badFret, /品位非法/);
     });
 
-    it('捕获 v1 不支持的技法与字段', () => {
+    it('合法的击/勾/滑通过，方向、跨度与前音不合格被拒', () => {
+        const hammer = validNotes();
+        hammer[1].technique = 'hammerOn'; // 0 → 1
+        expect(validateNotes(
+            hammer, validOptions(), LOCAL_IMPROV_CONFIG.playability,
+        )).toEqual([]);
+
+        const pull = validNotes();
+        pull[1] = note({ string: 1, fret: 5, duration: 0.25 });
+        pull[2] = note({ string: 1, fret: 3, duration: 0.25, technique: 'pullOff' }); // 5 → 3
+        expect(validateNotes(
+            pull, validOptions(), LOCAL_IMPROV_CONFIG.playability,
+        )).toEqual([]);
+
+        const slide = validNotes();
+        slide[3].technique = 'slide'; // 5 → 3
+        expect(validateNotes(
+            slide, validOptions(), LOCAL_IMPROV_CONFIG.playability,
+        )).toEqual([]);
+
+        const wrongDirection = validNotes();
+        wrongDirection[1].technique = 'pullOff'; // 0 → 1 是上行
+        expectError(wrongDirection, /勾弦目标品位应低于前音/);
+
+        const tooFar = [
+            note({ fret: 0, duration: 0.25 }),
+            note({ fret: 4, duration: 0.25, technique: 'hammerOn' }),
+        ];
+        expectError(tooFar, /击\/勾弦品位跨度过大/);
+
+        const orphan = [note({ fret: 5, duration: 0.25, technique: 'slide' })];
+        expectError(orphan, /连接技法缺少紧邻的同弦前音/);
+
+        const afterRest = [
+            { isRest: true, duration: 0.25 } as Note,
+            note({ fret: 5, duration: 0.25, technique: 'hammerOn' }),
+        ];
+        expectError(afterRest, /连接技法缺少紧邻的同弦前音/);
+
+        const otherString = [
+            note({ string: 2, fret: 5, duration: 0.25 }),
+            note({ string: 1, fret: 7, duration: 0.25, technique: 'hammerOn' }),
+        ];
+        expectError(otherString, /连接技法必须与前音同弦/);
+
+        const mutedSource = [
+            note({ string: 6, fret: 5, duration: 0.25, palmMute: true }),
+            note({ string: 6, fret: 3, duration: 0.25, technique: 'pullOff' }),
+        ];
+        expectError(mutedSource, /前音是闷音\/制音\/断音/);
+
+        const bentSource = [
+            note({ fret: 5, duration: 0.25, technique: 'bend', bendAmount: 1 }),
+            note({ fret: 7, duration: 0.25, technique: 'hammerOn' }),
+        ];
+        expectError(bentSource, /前音带推\/揉弦/);
+
+        const tooShort = [
+            note({ fret: 5, duration: 0.25 }),
+            note({ fret: 7, duration: 0.03125, technique: 'hammerOn' }),
+        ];
+        expectError(tooShort, /连接技法时值过短/);
+
+        const openStart = [
+            note({ fret: 0, duration: 0.25 }),
+            note({ fret: 3, duration: 0.25, technique: 'slide' }),
+        ];
+        expectError(openStart, /滑弦两端都不能是空弦/);
+
+        const openEnd = [
+            note({ fret: 5, duration: 0.25 }),
+            note({ fret: 0, duration: 0.25, technique: 'slide' }),
+        ];
+        expectError(openEnd, /滑弦两端都不能是空弦/);
+
+        const noMovement = validNotes();
+        noMovement[1] = note({ fret: 0, duration: 0.25, technique: 'hammerOn' }); // 0 → 0
+        expectError(noMovement, /击\/勾弦需要品位变化/);
+    });
+
+    it('滑弦跨度按技法上限校验，不受跳进上限限制', () => {
+        const notes = validNotes();
+        notes[3] = note({ fret: 1, duration: 0.25 });
+        notes[4] = note({ fret: 7, duration: 0.25, technique: 'slide' });
+
+        const errors = validateNotes(
+            notes, validOptions(), LOCAL_IMPROV_CONFIG.playability, 4,
+        );
+        // 6 个半音超过 middleLimit，但滑弦是连续发声，不算跳进。
+        expect(errors.some(error => /跳进/.test(error))).toBe(false);
+        expect(errors.some(error => /滑弦/.test(error))).toBe(false);
+    });
+
+    it('仍拒绝 targetFret 与本地生成限制外的字段', () => {
         const hammer = validNotes();
         hammer[0] = note({
             string: 1, fret: 5, duration: 0.25,
             technique: 'hammerOn', targetFret: 7,
         });
-        expectError(hammer, /不支持的技法/);
         expectError(hammer, /targetFret/);
 
         const chord = validNotes();

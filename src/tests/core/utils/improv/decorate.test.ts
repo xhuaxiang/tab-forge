@@ -118,6 +118,174 @@ describe('decorateSlots', () => {
         expect(bent.bendRelease).toBe(true);
     });
 
+    it('同弦相邻音按跨度标击弦/勾弦', () => {
+        const connectStyle = style({
+            accentProbability: 0,
+            softProbability: 0,
+            bendProbability: 0,
+            vibratoProbability: 0,
+            palmMuteProbability: 0,
+            hammerPullProbability: 1,
+            slideProbability: 0,
+        });
+        const [up, hammer] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ fret: 7, duration: 0.25 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(up.technique).toBeUndefined();
+        expect(hammer.technique).toBe('hammerOn');
+
+        const [, pull] = decorateSlots(
+            [
+                positioned({ fret: 7, duration: 0.25 }),
+                positioned({ fret: 5, duration: 0.25 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(pull.technique).toBe('pullOff');
+    });
+
+    it('换把跨度大于击勾弦上限时标滑弦', () => {
+        const slideStyle = style({
+            accentProbability: 0,
+            softProbability: 0,
+            bendProbability: 0,
+            vibratoProbability: 0,
+            palmMuteProbability: 0,
+            hammerPullProbability: 1,
+            slideProbability: 1,
+        });
+        const [, slide] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ fret: 9, duration: 0.25 }),
+            ],
+            slideStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(slide.technique).toBe('slide');
+    });
+
+    it('短跨度可标滑弦，但两端不能是空弦或超过跨度上限', () => {
+        const onlySlide = style({
+            accentProbability: 0,
+            softProbability: 0,
+            bendProbability: 0,
+            vibratoProbability: 0,
+            palmMuteProbability: 0,
+            hammerPullProbability: 0,
+            slideProbability: 1,
+        });
+        const [, shortSpan] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ fret: 7, duration: 0.25 }),
+            ],
+            onlySlide, PLAYABILITY, constantRng(0),
+        );
+        expect(shortSpan.technique).toBe('slide');
+
+        const [, fromOpen] = decorateSlots(
+            [
+                positioned({ fret: 0, duration: 0.25 }),
+                positioned({ fret: 5, duration: 0.25 }),
+            ],
+            onlySlide, PLAYABILITY, constantRng(0),
+        );
+        expect(fromOpen.technique).toBeUndefined();
+
+        const [, toOpen] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ fret: 0, duration: 0.25 }),
+            ],
+            onlySlide, PLAYABILITY, constantRng(0),
+        );
+        expect(toOpen.technique).toBeUndefined();
+
+        const [, tooFar] = decorateSlots(
+            [
+                positioned({ fret: 2, duration: 0.25 }),
+                positioned({ fret: 12, duration: 0.25 }),
+            ],
+            onlySlide, PLAYABILITY, constantRng(0),
+        );
+        expect(tooFar.technique).toBeUndefined();
+    });
+
+    it('连接目标不写 dynamics（复用的是源音缓冲）', () => {
+        const accentConnect = style({
+            accentProbability: 1,
+            softProbability: 0,
+            bendProbability: 0,
+            vibratoProbability: 0,
+            palmMuteProbability: 0,
+            hammerPullProbability: 1,
+            slideProbability: 0,
+        });
+        const [source, target] = decorateSlots(
+            [
+                positioned({ role: 'strong', fret: 5, duration: 0.25 }),
+                positioned({ role: 'strong', fret: 7, duration: 0.25 }),
+            ],
+            accentConnect, PLAYABILITY, constantRng(0),
+        );
+        expect(source.dynamics).toBe('accent');
+        expect(target.technique).toBe('hammerOn');
+        expect(target.dynamics).toBeUndefined();
+    });
+
+    it('换弦、休止、前音闷音或时值过短时不连奏', () => {
+        const connectStyle = style({
+            accentProbability: 0,
+            softProbability: 0,
+            bendProbability: 0,
+            vibratoProbability: 0,
+            palmMuteProbability: 0,
+            hammerPullProbability: 1,
+            slideProbability: 1,
+        });
+        const [, otherString] = decorateSlots(
+            [
+                positioned({ fret: 5, string: 1, duration: 0.25 }),
+                positioned({ fret: 7, string: 2, duration: 0.25 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(otherString.technique).toBeUndefined();
+
+        const [, afterRest] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ isRest: true, duration: 0.25 }),
+                positioned({ fret: 7, duration: 0.25 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(afterRest.technique).toBeUndefined();
+
+        const [, tooShort] = decorateSlots(
+            [
+                positioned({ fret: 5, duration: 0.25 }),
+                positioned({ fret: 7, duration: 0.03125 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(tooShort.technique).toBeUndefined();
+
+        const palmStyle = style({ ...connectStyle, palmMuteProbability: 1 });
+        const [, mutedSource] = decorateSlots(
+            [
+                positioned({ fret: 5, string: 6, duration: 0.25 }),
+                positioned({ fret: 7, string: 6, duration: 0.25 }),
+            ],
+            palmStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(mutedSource.technique).toBeUndefined();
+    });
+
     it('空弦与过短时值不推弦/揉弦', () => {
         const openString = decorateSlots(
             [positioned({ fret: 0 })],

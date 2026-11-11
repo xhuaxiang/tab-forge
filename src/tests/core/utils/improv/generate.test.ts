@@ -53,7 +53,7 @@ describe('resolveLocalImprovOptions', () => {
             key: 'C',
             tonicPitchClass: 0,
             scaleType: 'Major (Ionian)',
-            style: 'Folk',
+            style: 'Rock',
             density: '中',
             timeSignature: '4/4',
             seed: 1,
@@ -78,7 +78,7 @@ describe('resolveLocalImprovOptions', () => {
             density: '极高' as never,
             timeSignature: '11/16',
         })).toMatchObject({
-            style: 'Folk',
+            style: 'Rock',
             density: '中',
             timeSignature: '4/4',
         });
@@ -113,12 +113,65 @@ describe('generateLocalImprovisation', () => {
             expect(note.fret).toBeLessThanOrEqual(24);
             expect(note.technique === undefined
                 || note.technique === 'bend'
-                || note.technique === 'vibrato').toBe(true);
+                || note.technique === 'vibrato'
+                || note.technique === 'hammerOn'
+                || note.technique === 'pullOff'
+                || note.technique === 'slide').toBe(true);
+            // 生成结果只写到达品，targetFret 仅属于表单/编辑器
+            expect(note.targetFret).toBeUndefined();
             expect(note.chordGroup).toBeUndefined();
             expect(note.deadNote).toBeUndefined();
             expect(note.letRing).toBeUndefined();
             expect(note.staccato).toBeUndefined();
         }
+    });
+
+    it('连接类技法只标在紧邻的同弦前音上', () => {
+        let found = 0;
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 12; seed++) {
+                const { notes } = generateLocalImprovisation({
+                    numMeasures: 4,
+                    key: caseItem.key,
+                    scaleType: caseItem.scaleType,
+                    style: caseItem.style,
+                    seed,
+                });
+                notes.forEach((note, index) => {
+                    if (note.technique !== 'hammerOn'
+                        && note.technique !== 'pullOff'
+                        && note.technique !== 'slide') return;
+                    found++;
+                    const previous = notes[index - 1];
+                    expect(previous).toBeDefined();
+                    expect(previous.isRest).not.toBe(true);
+                    expect(previous.string).toBe(note.string);
+                    expect(note.targetFret).toBeUndefined();
+
+                    const span = Math.abs(note.fret! - previous.fret!);
+                    if (note.technique === 'slide') {
+                        expect(span).toBeGreaterThanOrEqual(1);
+                        expect(span).toBeLessThanOrEqual(
+                            LOCAL_IMPROV_CONFIG.playability.maxSlideFrets,
+                        );
+                        // 空弦没有按弦手指可移动，两端都不能是空弦
+                        expect(previous.fret!).toBeGreaterThanOrEqual(1);
+                        expect(note.fret!).toBeGreaterThanOrEqual(1);
+                    } else {
+                        expect(span).toBeGreaterThanOrEqual(1);
+                        expect(span).toBeLessThanOrEqual(
+                            LOCAL_IMPROV_CONFIG.playability.maxHammerPullFrets,
+                        );
+                        if (note.technique === 'hammerOn') {
+                            expect(note.fret!).toBeGreaterThan(previous.fret!);
+                        } else {
+                            expect(note.fret!).toBeLessThan(previous.fret!);
+                        }
+                    }
+                });
+            }
+        }
+        expect(found).toBeGreaterThan(0);
     });
 
     it('所有风格 × 多 seed 都能生成', () => {

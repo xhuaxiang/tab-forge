@@ -587,7 +587,7 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         numMeasures: 4,
         key: SCORE_DEFAULTS.key,
         scaleType: 'Major (Ionian)',
-        style: 'Folk',
+        style: 'Rock',
         density: '中',
         timeSignature: SCORE_DEFAULTS.timeSignature,
         tuning: { ...SCORE_DEFAULTS.tuning },
@@ -643,6 +643,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             bendProbability: 0.12,
             vibratoProbability: 0.18,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.18,
+            slideProbability: 0.06,
             phrase: {
                 measures: 2,
                 contours: ['arch', 'wave', 'descending', 'ascending'],
@@ -670,6 +672,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             bendProbability: 0.25,
             vibratoProbability: 0.25,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.2,
+            slideProbability: 0.1,
             phrase: {
                 measures: 2,
                 contours: ['descending', 'arch', 'wave', 'ascending'],
@@ -697,6 +701,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             bendProbability: 0.12,
             vibratoProbability: 0.1,
             palmMuteProbability: 0.25,
+            hammerPullProbability: 0.18,
+            slideProbability: 0.08,
             phrase: {
                 measures: 2,
                 contours: ['ascending', 'arch', 'descending', 'wave'],
@@ -724,6 +730,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             bendProbability: 0,
             vibratoProbability: 0.06,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.12,
+            slideProbability: 0.06,
             phrase: {
                 measures: 2,
                 contours: ['arch', 'wave', 'ascending', 'descending'],
@@ -751,6 +759,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             bendProbability: 0,
             vibratoProbability: 0.08,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.15,
+            slideProbability: 0.05,
             phrase: {
                 measures: 2,
                 contours: ['arch', 'descending', 'wave', 'ascending'],
@@ -773,5 +783,8 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         minVibratoDuration: 0.25,
         minPalmMuteDuration: 0.125,
         palmMuteStrings: [4, 6],
+        minConnectDuration: 0.0625,
+        maxHammerPullFrets: 2,
+        maxSlideFrets: 7,
     },
 };

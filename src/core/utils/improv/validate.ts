@@ -15,7 +15,9 @@ import type {
     RhythmMeasure,
 } from '../../types/improv.ts';
 import { BEND_AMOUNT_LABELS } from '../../config.ts';
+import { isConnectingTechnique } from '../technique.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
+import { connectIssue } from './connect.ts';
 import { segmentAt, segmentIndexAt } from './harmony.ts';
 import {
     fretToMidi,
@@ -155,8 +157,9 @@ function validateNoteFields(
     }
 
     if (note.technique !== undefined
-        && note.technique !== 'bend' && note.technique !== 'vibrato') {
-        errors.push(`${prefix}含 v1 不支持的技法: ${note.technique}`);
+        && note.technique !== 'bend' && note.technique !== 'vibrato'
+        && !isConnectingTechnique(note.technique)) {
+        errors.push(`${prefix}含本地不支持的技法: ${note.technique}`);
     }
     if (note.technique === 'bend') {
         if (note.bendAmount === undefined || !VALID_BEND_AMOUNTS.has(note.bendAmount)) {
@@ -202,18 +205,19 @@ function validateNoteFields(
         errors.push(`${prefix}力度非法: ${note.dynamics}`);
     }
 
-    // v1 明确不生成这些字段；出现即说明上游契约漂移
+    // 连接技法的目标品直接写在 fret 上；targetFret 只属于表单/编辑器，
+    // 生成结果带它说明上游仍按旧契约写入。
     if (note.targetFret !== undefined) errors.push(`${prefix}不应带 targetFret`);
-    if (note.deadNote) errors.push(`${prefix}含 v1 不支持的 deadNote`);
-    if (note.letRing) errors.push(`${prefix}含 v1 不支持的 letRing`);
-    if (note.staccato) errors.push(`${prefix}含 v1 不支持的 staccato`);
-    if (note.harmonic !== undefined) errors.push(`${prefix}含 v1 不支持的泛音`);
-    if (note.harmonicFret !== undefined) errors.push(`${prefix}含 v1 不支持的泛音品位`);
-    if (note.tieToNext) errors.push(`${prefix}含 v1 不支持的延音`);
-    if (hasField(note, 'chordGroup')) errors.push(`${prefix}含 v1 不支持的和弦组`);
-    if (note.chordName !== undefined) errors.push(`${prefix}含 v1 不支持的和弦名`);
-    if (note.arpeggio !== undefined) errors.push(`${prefix}含 v1 不支持的琶音`);
-    if (note.strum !== undefined) errors.push(`${prefix}含 v1 不支持的扫弦`);
+    if (note.deadNote) errors.push(`${prefix}含本地生成不支持的 deadNote`);
+    if (note.letRing) errors.push(`${prefix}含本地生成不支持的 letRing`);
+    if (note.staccato) errors.push(`${prefix}含本地生成不支持的 staccato`);
+    if (note.harmonic !== undefined) errors.push(`${prefix}含本地生成不支持的泛音`);
+    if (note.harmonicFret !== undefined) errors.push(`${prefix}含本地生成不支持的泛音品位`);
+    if (note.tieToNext) errors.push(`${prefix}含本地生成不支持的延音`);
+    if (hasField(note, 'chordGroup')) errors.push(`${prefix}含本地生成不支持的和弦组`);
+    if (note.chordName !== undefined) errors.push(`${prefix}含本地生成不支持的和弦名`);
+    if (note.arpeggio !== undefined) errors.push(`${prefix}含本地生成不支持的琶音`);
+    if (note.strum !== undefined) errors.push(`${prefix}含本地生成不支持的扫弦`);
 
     return errors;
 }
@@ -222,7 +226,7 @@ function validateNoteFields(
  * 校验最终 Note[]：
  * - 每个音合法、调内或属于当前小节和声音池、可演奏；
  * - 强拍落在当前和弦音，长音避开 avoid note；
- * - 技法/奏法在 v1 白名单内；
+ * - 技法/奏法在本地生成白名单内；
  * - 拍平顺序不会让 loadNotes 提前/延后切小节；
  * - 相邻音的跳进不超过可演奏上限。
  *
@@ -402,7 +406,9 @@ export function validateNotes(
                         || isFirstSoundingOfSegment
                         ? phraseLeapLimit
                         : middleLimit;
-                if (previousMidi !== null
+                // 连接技法是连续发声，不算跳进；其跨度由 connect.ts 单独守。
+                if (!isConnectingTechnique(note.technique)
+                    && previousMidi !== null
                     && Math.abs(midi - previousMidi) > leapLimit) {
                     errors.push(`第 ${index + 1} 个音符跳进 ${Math.abs(midi - previousMidi)} 超过上限`);
                 }
@@ -410,6 +416,17 @@ export function validateNotes(
             } catch {
                 // 音高换算错误已在 validateNoteFields 里报告
             }
+        }
+    });
+
+    // 连接类技法必须紧邻同弦前音：播放层复用前音的缓冲区，若中间有休止、
+    // 换弦或前音本身不可作为源，目标音会被退化成重拨，谱面上的技法弧线
+    // 与实际发声不一致。可演奏判定与生成侧共用 connect.ts。
+    notes.forEach((note, index) => {
+        if (!isConnectingTechnique(note.technique)) return;
+        const issue = connectIssue(note.technique, notes[index - 1], note, playability);
+        if (issue !== undefined) {
+            errors.push(`第 ${index + 1} 个音符${issue}`);
         }
     });
 
