@@ -9,6 +9,15 @@
  */
 
 import type { Measure, Note } from '../types/index.ts';
+import { groupNotes } from './measureUtils.ts';
+
+/**
+ * 把拍平音符按 `chordGroup` 分组成拍位。
+ *
+ * 分组规则只在 `measureUtils.slotEndIndex` 实现；这里只保留即兴模块
+ * 惯用的名字，避免存储、校验、渲染各守一份。
+ */
+export { groupNotes as groupFlatNotes };
 
 /** 组内成员：弦号 + 品位 */
 export interface NoteGroupMember {

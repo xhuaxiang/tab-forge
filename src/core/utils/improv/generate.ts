@@ -38,6 +38,7 @@ import { choosePositions } from './positioning.ts';
 import { createRng } from './random.ts';
 import { buildRhythmPlan } from './rhythm.ts';
 import { validateNotes, validatePlan } from './validate.ts';
+import { addVoicings } from './voicing.ts';
 
 function isTuning(value: unknown): value is Tuning {
     if (typeof value !== 'object' || value === null) return false;
@@ -213,8 +214,14 @@ export function generateLocalImprovisation(
         plan, options, style, config.playability,
         createRng(options.seed + 1), harmony, phrases,
     );
+    // 声部层单独用一条随机流，不占用 rhythm/melody/phrase/decorate 的序列；
+    // 多声部拍位会让演奏层多掷 strum/arpeggio，因此演奏层结果可能随声部层变化。
+    const voicedSkeleton = addVoicings(
+        skeleton, harmony, options, style, config.playability,
+        createRng(options.seed + 5),
+    );
     const positioned = choosePositions(
-        skeleton, options, config.playability, style,
+        voicedSkeleton, options, config.playability, style,
     );
     const notes = decorateSlots(
         positioned, style, config.playability,

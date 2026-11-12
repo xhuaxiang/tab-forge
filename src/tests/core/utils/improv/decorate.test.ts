@@ -19,7 +19,19 @@ const PLAYABILITY = LOCAL_IMPROV_CONFIG.playability;
 const BASE_STYLE = LOCAL_IMPROV_CONFIG.styleProfiles.Blues;
 
 function style(overrides: Partial<StyleProfile> = {}): StyleProfile {
-    return { ...BASE_STYLE, ...overrides };
+    // 旧用例只关心技法/力度/闷音，默认关掉新增奏法，避免 Blues 默认概率
+    // 抢先命中某个分支导致断言失焦。
+    return {
+        ...BASE_STYLE,
+        deadNoteProbability: 0,
+        staccatoProbability: 0,
+        letRingProbability: 0,
+        harmonicProbability: 0,
+        chordProbability: 0,
+        arpeggioProbability: 0,
+        strumProbability: 0,
+        ...overrides,
+    };
 }
 
 function positioned(options: {
@@ -53,6 +65,56 @@ function positioned(options: {
 /** 固定值的 rng：用于让概率分支必然走某一边 */
 function constantRng(value: number): () => number {
     return () => value;
+}
+
+interface ChordMember {
+    string: number;
+    fret: number;
+    midi: number;
+}
+
+/** 构造一个多声部拍位；midis 与 positions 一一对应且升序 */
+function chordPositioned(options: {
+    members: ChordMember[];
+    duration?: NoteDuration;
+    role?: SlotRole;
+}): PositionedSlot {
+    return {
+        skeleton: {
+            measureIndex: 0,
+            slotIndex: 0,
+            duration: options.duration ?? 0.5,
+            isRest: false,
+            midis: options.members.map(member => member.midi),
+            role: options.role ?? 'strong',
+        },
+        positions: options.members.map(member => ({ ...member })),
+    };
+}
+
+/** 两音/三音和弦组的固定成员，音高升序 */
+const CHORD_TWO: ChordMember[] = [
+    { string: 2, fret: 1, midi: 60 },
+    { string: 1, fret: 0, midi: 64 },
+];
+const CHORD_THREE: ChordMember[] = [
+    { string: 3, fret: 0, midi: 55 },
+    { string: 2, fret: 1, midi: 60 },
+    { string: 1, fret: 0, midi: 64 },
+];
+
+/** 关掉技法与旧概率分支，只剩被测奏法 */
+function articulationStyle(overrides: Partial<StyleProfile> = {}): StyleProfile {
+    return style({
+        accentProbability: 0,
+        softProbability: 0,
+        bendProbability: 0,
+        vibratoProbability: 0,
+        palmMuteProbability: 0,
+        hammerPullProbability: 0,
+        slideProbability: 0,
+        ...overrides,
+    });
 }
 
 describe('decorateSlots', () => {
@@ -372,6 +434,263 @@ describe('decorateSlots', () => {
         );
         expect(vibrato.technique).toBe('vibrato');
         expect(vibrato.palmMute).toBeUndefined();
+    });
+
+    it('和弦组：同组同时值同力度，组首独占扫弦，组内不叠加单音奏法', () => {
+        const allOn = articulationStyle({
+            accentProbability: 1,
+            softProbability: 0,
+            deadNoteProbability: 1,
+            staccatoProbability: 1,
+            letRingProbability: 1,
+            harmonicProbability: 1,
+            palmMuteProbability: 1,
+            strumProbability: 1,
+            arpeggioProbability: 1,
+        });
+
+        const two = decorateSlots(
+            [chordPositioned({ members: CHORD_TWO })],
+            allOn, PLAYABILITY, constantRng(0),
+        );
+        expect(two).toHaveLength(2);
+        expect(two[0].chordGroup).toBe(1);
+        expect(two[1].chordGroup).toBe(1);
+        for (const note of two) {
+            expect(note.duration).toBe(0.5);
+            expect(note.dynamics).toBe('accent');
+            expect(note.technique).toBeUndefined();
+            expect(note.deadNote).toBeUndefined();
+            expect(note.palmMute).toBeUndefined();
+            expect(note.letRing).toBeUndefined();
+            expect(note.staccato).toBeUndefined();
+            expect(note.harmonic).toBeUndefined();
+            expect(note.harmonicFret).toBeUndefined();
+        }
+        // 扫弦优先于琶音，且只写在组首
+        expect(two[0].strum).toBe('down');
+        expect(two[0].arpeggio).toBeUndefined();
+        expect(two[1].strum).toBeUndefined();
+        expect(two[1].arpeggio).toBeUndefined();
+
+        const three = decorateSlots(
+            [chordPositioned({ members: CHORD_THREE })],
+            allOn, PLAYABILITY, constantRng(0),
+        );
+        expect(three).toHaveLength(3);
+        expect(new Set(three.map(note => note.chordGroup))).toEqual(new Set([1]));
+        expect(three.every(note => note.duration === 0.5)).toBe(true);
+        expect(three.every(note => note.dynamics === 'accent')).toBe(true);
+        expect(three[0].strum).toBe('down');
+        expect(three.slice(1).every(note => note.strum === undefined)).toBe(true);
+    });
+
+    it('和弦组：概率为 0 不写 strum/arpeggio，单开琶音时只写组首', () => {
+        const quiet = decorateSlots(
+            [chordPositioned({ members: CHORD_TWO })],
+            style(), PLAYABILITY, constantRng(0),
+        );
+        expect(quiet.every(note => note.strum === undefined
+            && note.arpeggio === undefined)).toBe(true);
+
+        const arpeggioOnly = decorateSlots(
+            [chordPositioned({ members: CHORD_TWO })],
+            style({ arpeggioProbability: 1, strumProbability: 0 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(arpeggioOnly[0].arpeggio).toBe('down');
+        expect(arpeggioOnly[0].strum).toBeUndefined();
+        expect(arpeggioOnly[1].arpeggio).toBeUndefined();
+    });
+
+    it('和弦组后 previous 重置，下一单音不会从组内音连接', () => {
+        const connectStyle = articulationStyle({
+            hammerPullProbability: 1,
+            slideProbability: 0,
+        });
+        const [, next] = decorateSlots(
+            [
+                chordPositioned({
+                    members: [
+                        { string: 1, fret: 5, midi: 60 },
+                        { string: 2, fret: 7, midi: 64 },
+                    ],
+                    duration: 0.25,
+                }),
+                positioned({ string: 1, fret: 7, duration: 0.25 }),
+            ],
+            connectStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(next.technique).toBeUndefined();
+    });
+
+    it('制音只标低音弦，且最后一个发音不标', () => {
+        const deadStyle = articulationStyle({ deadNoteProbability: 1 });
+
+        const [first, last] = decorateSlots(
+            [
+                positioned({ string: 6, fret: 5, duration: 0.25 }),
+                positioned({ string: 6, fret: 7, duration: 0.25 }),
+            ],
+            deadStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(first.string).toBe(6);
+        expect(first.duration).toBe(0.25);
+        expect(first.deadNote).toBe(true);
+        expect(last.deadNote).toBeUndefined();
+
+        const [high] = decorateSlots(
+            [
+                positioned({ string: 1, fret: 5, duration: 0.25 }),
+                positioned({ string: 6, fret: 7, duration: 0.25 }),
+            ],
+            deadStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(high.deadNote).toBeUndefined();
+
+        const [tooShort] = decorateSlots(
+            [
+                positioned({ string: 6, fret: 5, duration: 0.0625 }),
+                positioned({ string: 6, fret: 7, duration: 0.25 }),
+            ],
+            deadStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(tooShort.deadNote).toBeUndefined();
+    });
+
+    it('自然泛音写在节点品上且不写 harmonicFret', () => {
+        const [note] = decorateSlots(
+            [positioned({ string: 1, fret: 12, duration: 0.25 })],
+            articulationStyle({ harmonicProbability: 1 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(note.harmonic).toBe('natural');
+        expect(note.harmonicFret).toBeUndefined();
+    });
+
+    it('人工/捏弦泛音写 harmonicFret，且按可用性选择类型', () => {
+        const [artificial] = decorateSlots(
+            [positioned({ string: 1, fret: 5, duration: 0.25 })],
+            articulationStyle({ harmonicProbability: 1 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(artificial.harmonic).toBe('artificial');
+        expect(artificial.harmonicFret).toBe(12);
+
+        const [pinch] = decorateSlots(
+            [positioned({ string: 5, fret: 5, duration: 0.25 })],
+            articulationStyle({ harmonicProbability: 1 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(pinch.harmonic).toBe('pinch');
+        expect(pinch.harmonicFret).toBe(12);
+    });
+
+    it('泛音遵守最短时值与弦号/品位可用性', () => {
+        const harmonicStyle = articulationStyle({ harmonicProbability: 1 });
+
+        const [tooShort] = decorateSlots(
+            [positioned({ string: 1, fret: 12, duration: 0.125 })],
+            harmonicStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(tooShort.harmonic).toBeUndefined();
+
+        // 空弦没有按弦品位，人工泛音不可用
+        const [openString] = decorateSlots(
+            [positioned({ string: 1, fret: 0, duration: 0.25 })],
+            harmonicStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(openString.harmonic).toBeUndefined();
+    });
+
+    it('断音与延音按概率写入，概率 0 不写字段', () => {
+        const [staccato] = decorateSlots(
+            [positioned({ string: 1, fret: 5, duration: 0.125 })],
+            articulationStyle({ staccatoProbability: 1 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(staccato.staccato).toBe(true);
+
+        const [letRing] = decorateSlots(
+            [positioned({ string: 1, fret: 5, duration: 0.25 })],
+            articulationStyle({ letRingProbability: 1 }),
+            PLAYABILITY, constantRng(0),
+        );
+        expect(letRing.letRing).toBe(true);
+
+        const [quiet] = decorateSlots(
+            [
+                positioned({ string: 5, fret: 5, duration: 0.5 }),
+                positioned({ string: 1, fret: 7, duration: 0.5 }),
+            ],
+            articulationStyle(), PLAYABILITY, constantRng(0),
+        );
+        expect(quiet.technique).toBeUndefined();
+        expect(quiet.deadNote).toBeUndefined();
+        expect(quiet.harmonic).toBeUndefined();
+        expect(quiet.harmonicFret).toBeUndefined();
+        expect(quiet.staccato).toBeUndefined();
+        expect(quiet.letRing).toBeUndefined();
+        expect(quiet.palmMute).toBeUndefined();
+    });
+
+    it('把位数量或 MIDI 与骨架不一致时抛错', () => {
+        const countMismatch: PositionedSlot = {
+            skeleton: {
+                measureIndex: 0,
+                slotIndex: 0,
+                duration: 0.5,
+                isRest: false,
+                midis: [60, 64],
+                role: 'strong',
+            },
+            positions: [{ string: 1, fret: 5, midi: 60 }],
+        };
+        expect(() => decorateSlots(
+            [countMismatch], style(), PLAYABILITY, constantRng(0),
+        )).toThrow('把位数量与音高数量不一致');
+
+        const midiMismatch: PositionedSlot = {
+            skeleton: {
+                measureIndex: 0,
+                slotIndex: 0,
+                duration: 0.5,
+                isRest: false,
+                midis: [60, 64],
+                role: 'strong',
+            },
+            positions: [
+                { string: 1, fret: 5, midi: 60 },
+                { string: 2, fret: 5, midi: 67 },
+            ],
+        };
+        expect(() => decorateSlots(
+            [midiMismatch], style(), PLAYABILITY, constantRng(0),
+        )).toThrow('把位音高与骨架音高不一致');
+    });
+
+    it('新增奏法概率为 0 时不消耗额外随机数', () => {
+        let calls = 0;
+        const rng = () => {
+            calls++;
+            return 0.99;
+        };
+        decorateSlots(
+            [positioned({ duration: 0.5, string: 6, fret: 5 })],
+            style({
+                accentProbability: 0,
+                softProbability: 0,
+                bendProbability: 0,
+                vibratoProbability: 0,
+                palmMuteProbability: 0,
+                hammerPullProbability: 0,
+                slideProbability: 0,
+            }),
+            PLAYABILITY, rng,
+        );
+        // 旧分支 bend / vibrato / palmMute 各掷一次、dynamics 一次；
+        // deadNote/harmonic/staccato/letRing 在概率 0 时必须在 rng 前短路。
+        expect(calls).toBe(4);
     });
 
     it('同 seed 完全一致', () => {

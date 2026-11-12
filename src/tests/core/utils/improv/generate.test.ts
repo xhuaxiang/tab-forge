@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { LOCAL_IMPROV_CONFIG, SCORE_DEFAULTS } from '../../../../core/config.ts';
 import { scoreStore } from '../../../../core/stores/scoreStore.ts';
+import type { Note } from '../../../../core/types/index.ts';
 import type {
     LocalStyle,
     ScaleType,
@@ -19,6 +20,14 @@ import {
     pitchClassOf,
 } from '../../../../core/utils/improv/pitch.ts';
 import { capacityFromTimeSignature } from '../../../../core/utils/measureUtils.ts';
+import { groupFlatNotes } from '../../../../core/utils/noteGroup.ts';
+
+/** 拍位总时值：和弦组只计一次，避免把同拍位的多声部重复累加。 */
+function groupedDuration(notes: readonly Note[]): number {
+    return groupFlatNotes(notes).reduce(
+        (sum, group) => sum + group[0].duration, 0,
+    );
+}
 
 interface Case {
     style: LocalStyle;
@@ -96,7 +105,7 @@ describe('generateLocalImprovisation', () => {
         expect(options.numMeasures).toBe(4);
         expect(notes.length).toBeGreaterThan(0);
 
-        const total = notes.reduce((sum, note) => sum + note.duration, 0);
+        const total = groupedDuration(notes);
         expect(total).toBeCloseTo(
             capacityFromTimeSignature(options.timeSignature) * options.numMeasures,
             9,
@@ -119,10 +128,23 @@ describe('generateLocalImprovisation', () => {
                 || note.technique === 'slide').toBe(true);
             // 生成结果只写到达品，targetFret 仅属于表单/编辑器
             expect(note.targetFret).toBeUndefined();
-            expect(note.chordGroup).toBeUndefined();
-            expect(note.deadNote).toBeUndefined();
-            expect(note.letRing).toBeUndefined();
-            expect(note.staccato).toBeUndefined();
+            // 本次不生成延音/和弦名；和弦组 id 必须是正整数
+            expect(note.tieToNext).toBeUndefined();
+            expect(note.chordName).toBeUndefined();
+            if (note.chordGroup !== undefined) {
+                expect(Number.isInteger(note.chordGroup)).toBe(true);
+                expect(note.chordGroup).toBeGreaterThan(0);
+            }
+            expect(note.harmonic === undefined
+                || note.harmonic === 'natural'
+                || note.harmonic === 'artificial'
+                || note.harmonic === 'pinch').toBe(true);
+            expect(note.arpeggio === undefined
+                || note.arpeggio === 'up'
+                || note.arpeggio === 'down').toBe(true);
+            expect(note.strum === undefined
+                || note.strum === 'up'
+                || note.strum === 'down').toBe(true);
         }
     });
 
@@ -137,13 +159,18 @@ describe('generateLocalImprovisation', () => {
                     style: caseItem.style,
                     seed,
                 });
-                notes.forEach((note, index) => {
+                const groups = groupFlatNotes(notes);
+                groups.forEach((group, groupIndex) => {
+                    if (group.length !== 1) return;
+                    const note = group[0];
                     if (note.technique !== 'hammerOn'
                         && note.technique !== 'pullOff'
                         && note.technique !== 'slide') return;
                     found++;
-                    const previous = notes[index - 1];
-                    expect(previous).toBeDefined();
+                    const previousGroup = groups[groupIndex - 1];
+                    expect(previousGroup).toBeDefined();
+                    expect(previousGroup).toHaveLength(1);
+                    const previous = previousGroup[0];
                     expect(previous.isRest).not.toBe(true);
                     expect(previous.string).toBe(note.string);
                     expect(note.targetFret).toBeUndefined();
@@ -199,12 +226,17 @@ describe('generateLocalImprovisation', () => {
             timeSignature: '4/4',
             seed: 2,
         });
-        const sounding = notes.filter(note =>
-            !note.isRest && note.string !== undefined && note.fret !== undefined);
+        const sounding = groupFlatNotes(notes)
+            .filter(group => !group[0].isRest);
+        const topMidi = (group: typeof sounding[number]): number => Math.max(
+            ...group
+                .filter(note => note.string !== undefined && note.fret !== undefined)
+                .map(note => fretToMidi(options.tuning, note.string!, note.fret!)),
+        );
         const last = sounding[sounding.length - 1];
         const previous = sounding[sounding.length - 2];
-        const lastMidi = fretToMidi(options.tuning, last.string!, last.fret!);
-        const previousMidi = fretToMidi(options.tuning, previous.string!, previous.fret!);
+        const lastMidi = topMidi(last);
+        const previousMidi = topMidi(previous);
         expect(pitchClassOf(lastMidi)).toBe(options.tonicPitchClass);
         expect(Math.abs(lastMidi - previousMidi))
             .toBeLessThanOrEqual(LOCAL_IMPROV_CONFIG.playability.maxLeapSemitones);
@@ -223,9 +255,53 @@ describe('generateLocalImprovisation', () => {
         expect(scoreStore.score.measures).toHaveLength(16);
         const capacity = capacityFromTimeSignature(options.timeSignature);
         for (const measure of scoreStore.score.measures) {
-            const total = measure.notes.reduce((sum, note) => sum + note.duration, 0);
-            expect(total).toBeCloseTo(capacity, 9);
+            expect(groupedDuration(measure.notes)).toBeCloseTo(capacity, 9);
         }
+    });
+
+    it('强制高和弦概率时生成和弦组，loadNotes 后小节时值仍闭合', () => {
+        // 深拷贝配置，避免污染全局 LOCAL_IMPROV_CONFIG
+        const config = JSON.parse(
+            JSON.stringify(LOCAL_IMPROV_CONFIG),
+        ) as typeof LOCAL_IMPROV_CONFIG;
+        config.styleProfiles.Rock.chordProbability = 1;
+        config.styleProfiles.Rock.arpeggioProbability = 1;
+        config.styleProfiles.Rock.strumProbability = 1;
+
+        const { notes, options } = generateLocalImprovisation({
+            numMeasures: 8,
+            key: 'C',
+            style: 'Rock',
+            seed: 1,
+        }, config);
+
+        const chordGroups = groupFlatNotes(notes)
+            .filter(group => group.length > 1);
+        expect(chordGroups.length).toBeGreaterThan(0);
+        expect(chordGroups.every(group => group[0].chordGroup !== undefined))
+            .toBe(true);
+        // 扫弦优先于琶音，且只写在组首
+        expect(chordGroups.every(group => group[0].strum !== undefined)).toBe(true);
+        expect(chordGroups.every(group => group.slice(1)
+            .every(note => note.strum === undefined
+                && note.arpeggio === undefined))).toBe(true);
+
+        scoreStore.setTimeSignature(options.timeSignature);
+        const written = scoreStore.loadNotes(notes, options.numMeasures);
+        expect(written).toBe(notes.length);
+        expect(scoreStore.score.measures).toHaveLength(options.numMeasures);
+
+        const capacity = capacityFromTimeSignature(options.timeSignature);
+        for (const measure of scoreStore.score.measures) {
+            expect(groupedDuration(measure.notes)).toBeCloseTo(capacity, 9);
+        }
+
+        // 含和弦组的小节也按拍位闭合，而非逐音重复累加
+        const chordMeasure = scoreStore.score.measures.find(
+            measure => measure.notes.some(note => note.chordGroup !== undefined),
+        );
+        expect(chordMeasure).toBeDefined();
+        expect(groupedDuration(chordMeasure!.notes)).toBeCloseTo(capacity, 9);
     });
 
     it('同选项同 seed 完全一致，换 seed 不保证一致', () => {
@@ -251,10 +327,8 @@ describe('generateLocalImprovisation', () => {
                 const capacity = capacityFromTimeSignature(signature);
                 for (const measure of scoreStore.score.measures) {
                     expect(measure.notes.length).toBeGreaterThan(0);
-                    const total = measure.notes.reduce(
-                        (sum, note) => sum + note.duration, 0,
-                    );
-                    expect(total).toBeCloseTo(capacity, 9);
+                    expect(groupedDuration(measure.notes))
+                        .toBeCloseTo(capacity, 9);
                 }
             }
         }

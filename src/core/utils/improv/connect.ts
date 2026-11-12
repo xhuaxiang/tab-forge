@@ -34,12 +34,22 @@ function baseIssue(
     if (!canSourceTechnique(previous)) {
         return '连接技法的前音是闷音/制音/断音，不能作为发声源';
     }
+    // 泛音要重新拨弦且是另一套音色，不能复用它的缓冲区做连接源。
+    if (previous.harmonic !== undefined) {
+        return '连接技法的前音是泛音，不能作为发声源';
+    }
     if (previous.technique === 'bend' || previous.technique === 'vibrato') {
         return '连接技法的前音带推/揉弦，不能复用';
     }
     if (note.duration < playability.minConnectDuration) {
         return '连接技法时值过短';
     }
+    // 目标音不重新拨弦；带独立奏法的目标与连接语义冲突。
+    if (note.deadNote) return '连接技法不能用于制音';
+    if (note.harmonic !== undefined) return '连接技法不能用于泛音';
+    if (note.staccato) return '连接技法不能用于断音';
+    if (note.letRing) return '连接技法不能用于延音';
+    if (note.palmMute) return '连接技法不能用于闷音';
     return undefined;
 }
 

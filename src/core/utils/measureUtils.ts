@@ -23,6 +23,23 @@ function slotEndIndex(notes: readonly Note[], start: number): number {
 }
 
 /**
+ * 把拍平音符按 chordGroup 分组成拍位。
+ *
+ * 与 `forEachSlotGroup` 共用 `slotEndIndex`，是拍位分组规则的唯一实现。
+ * 只合并相邻项，返回的组内元素与原数组是同一批引用（只复制了组数组）。
+ */
+export function groupNotes(notes: readonly Note[]): Note[][] {
+    const groups: Note[][] = [];
+    let start = 0;
+    while (start < notes.length) {
+        const end = slotEndIndex(notes, start);
+        groups.push(notes.slice(start, end));
+        start = end;
+    }
+    return groups;
+}
+
+/**
  * 按拍位分组遍历 measure.notes（单一来源）
  *
  * 单音/休止符各自独立为一组（`notes.length === 1`），

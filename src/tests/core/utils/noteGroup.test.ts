@@ -8,7 +8,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { nextChordGroupId, buildNoteGroup, validateNoteGroup } from '../../../core/utils/noteGroup.ts';
+import {
+    nextChordGroupId,
+    buildNoteGroup,
+    groupFlatNotes,
+    validateNoteGroup,
+} from '../../../core/utils/noteGroup.ts';
 import type { Measure, Note } from '../../../core/types/index.ts';
 
 function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
@@ -127,6 +132,83 @@ describe('buildNoteGroup', () => {
 
     it('空成员列表 → 空数组', () => {
         expect(buildNoteGroup([], base(), {}, 1)).toEqual([]);
+    });
+});
+
+describe('groupFlatNotes', () => {
+    it('连续同 chordGroup 合并成一组，且返回原引用', () => {
+        const notes = [
+            note({ duration: 0.25, chordGroup: 1, string: 1 }),
+            note({ duration: 0.25, chordGroup: 1, string: 2 }),
+            note({ duration: 0.25, chordGroup: 1, string: 3 }),
+        ];
+
+        const groups = groupFlatNotes(notes);
+
+        expect(groups).toHaveLength(1);
+        expect(groups[0]).toEqual(notes);
+        groups[0].forEach((item, index) => expect(item).toBe(notes[index]));
+    });
+
+    it('不同 chordGroup 各成一组', () => {
+        const notes = [
+            note({ duration: 0.25, chordGroup: 1 }),
+            note({ duration: 0.25, chordGroup: 1, string: 2 }),
+            note({ duration: 0.25, chordGroup: 2 }),
+            note({ duration: 0.25, chordGroup: 2, string: 2 }),
+        ];
+
+        const groups = groupFlatNotes(notes);
+
+        expect(groups).toHaveLength(2);
+        expect(groups[0]).toHaveLength(2);
+        expect(groups[1]).toHaveLength(2);
+        expect(groups[0].map(item => item.chordGroup)).toEqual([1, 1]);
+        expect(groups[1].map(item => item.chordGroup)).toEqual([2, 2]);
+    });
+
+    it('undefined 单独成组，并切断前后同 id 的连续性', () => {
+        const first = note({ duration: 0.25, chordGroup: 1, string: 1 });
+        const middle = note({ duration: 0.25, string: 2 });
+        const last = note({ duration: 0.25, chordGroup: 1, string: 3 });
+
+        const groups = groupFlatNotes([first, middle, last]);
+
+        expect(groups).toHaveLength(3);
+        expect(groups[1]).toEqual([middle]);
+        expect(groups[1][0]).toBe(middle);
+        expect(groups[1][0].chordGroup).toBeUndefined();
+    });
+
+    it('同 id 但不连续 → 拆成两组', () => {
+        const notes = [
+            note({ duration: 0.25, chordGroup: 1 }),
+            note({ duration: 0.25, chordGroup: 2 }),
+            note({ duration: 0.25, chordGroup: 1 }),
+        ];
+
+        const groups = groupFlatNotes(notes);
+
+        expect(groups).toHaveLength(3);
+        expect(groups.map(group => group[0].chordGroup)).toEqual([1, 2, 1]);
+    });
+
+    it('空数组 → 空分组列表', () => {
+        expect(groupFlatNotes([])).toEqual([]);
+    });
+
+    it('休止符单独成组，且不并入相邻和弦组', () => {
+        const before = note({ duration: 0.25, chordGroup: 1, string: 1 });
+        const rest = { isRest: true, duration: 0.25 } as Note;
+        const after = note({ duration: 0.25, chordGroup: 1, string: 2 });
+
+        const groups = groupFlatNotes([before, rest, after]);
+
+        expect(groups).toHaveLength(3);
+        expect(groups[1]).toEqual([rest]);
+        expect(groups[1][0]).toBe(rest);
+        expect(groups[0][0]).toBe(before);
+        expect(groups[2][0]).toBe(after);
     });
 });
 

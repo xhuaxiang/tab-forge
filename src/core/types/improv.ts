@@ -269,8 +269,8 @@ export interface RhythmMeasure {
 /**
  * 音高骨架拍位。
  *
- * v1 单声部：midis 长度为 0（休止）或 1；保留数组是为了以后双音
- * 能直接把 DP 状态扩成 voicing，而不用重写整条管线。
+ * 旋律层仍只写单声部：midis 长度为 0（休止）或 1；经过声部层
+ * （`addVoicings`）后，发音拍位为 1..`maxChordVoices` 个升序 MIDI。
  */
 export interface SkeletonSlot {
     measureIndex: number;
@@ -367,6 +367,26 @@ export interface StyleProfile {
     hammerPullProbability: number;
     /** 同弦移动做滑弦的概率（含 1-2 品短滑；两端都不能是空弦） */
     slideProbability: number;
+    /** 单音制音概率（仅低音弦、非收尾音） */
+    deadNoteProbability: number;
+    /** 单音断音概率 */
+    staccatoProbability: number;
+    /** 单音自由延音概率 */
+    letRingProbability: number;
+    /** 单音泛音概率（自然/人工/捏弦按可用性选择） */
+    harmonicProbability: number;
+    /** 泛音命中后优先做自然泛音的条件概率（可用时） */
+    naturalHarmonicShare: number;
+    /** 未成自然泛音时做捏弦泛音的条件概率（可用时），其余为人工泛音 */
+    pinchHarmonicShare: number;
+    /** 给旋律拍位加和弦音的概率（仅强拍/句尾/长时值） */
+    chordProbability: number;
+    /** 和弦拍位追加第二个下方声部的概率 */
+    secondVoicingProbability: number;
+    /** 和弦组做琶音的概率（仅组首） */
+    arpeggioProbability: number;
+    /** 和弦组做扫弦的概率（仅组首，优先于琶音） */
+    strumProbability: number;
     /** 乐句结构参数 */
     phrase: PhraseProfile;
 }
@@ -405,6 +425,34 @@ export interface PlayabilityRules {
     maxHammerPullFrets: number;
     /** 滑弦允许的最大品位跨度 */
     maxSlideFrets: number;
+    /** 允许制音的最短时值 */
+    minDeadNoteDuration: NoteDuration;
+    /** 允许断音的最短时值 */
+    minStaccatoDuration: NoteDuration;
+    /** 允许自由延音的最短时值 */
+    minLetRingDuration: NoteDuration;
+    /** 允许泛音的最短时值 */
+    minHarmonicDuration: NoteDuration;
+    /** 允许制音的弦号范围 [最低弦号, 最高弦号] */
+    deadNoteStrings: readonly [number, number];
+    /** 允许捏弦泛音的弦号范围 [最低弦号, 最高弦号] */
+    pinchHarmonicStrings: readonly [number, number];
+    /** 自然泛音可用的绝对品位（节点就是 fret） */
+    naturalHarmonicFrets: readonly number[];
+    /** 人工/捏弦泛音可用的触弦点位差（相对按弦位置，不是绝对品位） */
+    harmonicFrets: readonly number[];
+    /** 触发和弦加厚的最短时值（强拍/句尾不受此限） */
+    minChordDuration: NoteDuration;
+    /** 和弦组最大声部数（含旋律） */
+    maxChordVoices: number;
+    /** 和弦组最高与最低声部的最大半音跨度 */
+    maxVoicingSpanSemitones: number;
+    /** 和弦组相邻声部的最小半音间隔 */
+    minVoicingGapSemitones: number;
+    /** 和弦组内最大品位跨度 */
+    maxChordSpanFrets: number;
+    /** 和弦组内最大弦号跨度 */
+    maxChordStringSpan: number;
 }
 
 /** 本地即兴的完整配置 */

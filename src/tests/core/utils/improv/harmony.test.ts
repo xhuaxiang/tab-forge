@@ -35,6 +35,7 @@ import {
     classifySlotRole,
 } from '../../../../core/utils/improv/rhythm.ts';
 import { validateNotes } from '../../../../core/utils/improv/validate.ts';
+import { groupFlatNotes } from '../../../../core/utils/noteGroup.ts';
 import { makeOptions } from './testOptions.ts';
 
 function note(
@@ -498,32 +499,39 @@ describe('generateLocalImprovisation 与和声', () => {
             measure.segments[0].chord.rootPitchClass,
         )).toEqual([2, 7, 0, 0]);
 
-        const lastSounding = result.notes.reduce(
-            (last, noteItem, index) => noteItem.isRest ? last : index,
+        const groups = groupFlatNotes(result.notes);
+        const lastSoundingGroup = groups.reduce(
+            (last, group, index) => group[0].isRest ? last : index,
             -1,
         );
         let total = 0;
-        result.notes.forEach((noteItem, index) => {
-            if (!noteItem.isRest && index !== lastSounding
-                && noteItem.string !== undefined && noteItem.fret !== undefined) {
+        groups.forEach((group, groupIndex) => {
+            const first = group[0];
+            if (!first.isRest && groupIndex !== lastSoundingGroup) {
                 const measureIndex = Math.floor(total / capacity + 1e-9);
                 const offset = total - measureIndex * capacity;
                 const role = classifySlotRole(
-                    offset, noteItem.duration, result.options.timeSignature,
-                );
-                const midi = fretToMidi(
-                    result.options.tuning, noteItem.string, noteItem.fret,
+                    offset, first.duration, result.options.timeSignature,
                 );
                 const pool = result.harmony[measureIndex].segments[0].pool;
-                expect(
-                    role === 'strong'
-                    || !pool.avoidPitchClasses.includes(pitchClassOf(midi)),
-                ).toBe(true);
-                if (role === 'strong') {
-                    expect(pool.chordPitchClasses).toContain(pitchClassOf(midi));
+                // 和弦组内每个声部都要守 avoid note；强拍成员属于和弦音。
+                for (const noteItem of group) {
+                    if (noteItem.string === undefined
+                        || noteItem.fret === undefined) continue;
+                    const midi = fretToMidi(
+                        result.options.tuning, noteItem.string, noteItem.fret,
+                    );
+                    const pitchClass = pitchClassOf(midi);
+                    expect(
+                        role === 'strong'
+                        || !pool.avoidPitchClasses.includes(pitchClass),
+                    ).toBe(true);
+                    if (role === 'strong') {
+                        expect(pool.chordPitchClasses).toContain(pitchClass);
+                    }
                 }
             }
-            total += noteItem.duration;
+            total += first.duration;
         });
     });
 

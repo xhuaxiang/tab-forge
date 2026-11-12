@@ -102,6 +102,44 @@ describe('connectIssue', () => {
         )).toMatch(/滑弦品位跨度过大/);
     });
 
+    it('泛音前音不能作为连接源', () => {
+        expect(connectIssue(
+            'pullOff',
+            note({ fret: 12, duration: 0.25, harmonic: 'natural' }),
+            note({ fret: 10, duration: 0.25 }),
+            PLAYABILITY,
+        )).toMatch(/前音是泛音/);
+    });
+
+    it('目标带制音/泛音/断音/延音/闷音时被拒', () => {
+        const source = note({ fret: 5, duration: 0.25 });
+        expect(connectIssue(
+            'hammerOn', source,
+            note({ fret: 7, duration: 0.25, deadNote: true }),
+            PLAYABILITY,
+        )).toMatch(/连接技法不能用于制音/);
+        expect(connectIssue(
+            'hammerOn', source,
+            note({ fret: 7, duration: 0.25, harmonic: 'artificial' }),
+            PLAYABILITY,
+        )).toMatch(/连接技法不能用于泛音/);
+        expect(connectIssue(
+            'hammerOn', source,
+            note({ fret: 7, duration: 0.25, staccato: true }),
+            PLAYABILITY,
+        )).toMatch(/连接技法不能用于断音/);
+        expect(connectIssue(
+            'hammerOn', source,
+            note({ fret: 7, duration: 0.25, letRing: true }),
+            PLAYABILITY,
+        )).toMatch(/连接技法不能用于延音/);
+        expect(connectIssue(
+            'hammerOn', source,
+            note({ fret: 7, duration: 0.25, palmMute: true }),
+            PLAYABILITY,
+        )).toMatch(/连接技法不能用于闷音/);
+    });
+
     it('击/勾弦跨度为 1-2 品且方向正确', () => {
         const source = note({ fret: 5, duration: 0.25 });
         expect(connectIssue('hammerOn', source, note({ fret: 5, duration: 0.25 }), PLAYABILITY))

@@ -7,6 +7,8 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+    HARMONIC_FRET_MAX,
+    HARMONIC_FRET_MIN,
     IMPROV_CONFIG,
     LOCAL_IMPROV_CONFIG,
     LOCAL_PROGRESSIONS,
@@ -101,6 +103,87 @@ describe('LOCAL_IMPROV_CONFIG', () => {
             fretMax: 24,
             palmMuteStrings: [4, 6],
         });
+    });
+});
+
+describe('LOCAL_IMPROV_CONFIG 和弦加厚与技法参数', () => {
+    const styleProfiles = Object.values(LOCAL_IMPROV_CONFIG.styleProfiles);
+    const playability = LOCAL_IMPROV_CONFIG.playability;
+
+    it('五个风格的技法/和弦概率都在 [0,1]', () => {
+        const keys = [
+            'deadNoteProbability',
+            'staccatoProbability',
+            'letRingProbability',
+            'harmonicProbability',
+            'naturalHarmonicShare',
+            'pinchHarmonicShare',
+            'chordProbability',
+            'secondVoicingProbability',
+            'arpeggioProbability',
+            'strumProbability',
+        ] as const;
+
+        for (const profile of styleProfiles) {
+            for (const key of keys) {
+                expect(profile[key]).toBeGreaterThanOrEqual(0);
+                expect(profile[key]).toBeLessThanOrEqual(1);
+            }
+        }
+    });
+
+    it('新增技法/和弦最短时值都来自 NOTE_DURATIONS 且大于 0', () => {
+        const validDurations = new Set<number>(NOTE_DURATIONS);
+        const keys = [
+            'minDeadNoteDuration',
+            'minStaccatoDuration',
+            'minLetRingDuration',
+            'minHarmonicDuration',
+            'minChordDuration',
+        ] as const;
+
+        for (const key of keys) {
+            const value = playability[key];
+            expect(validDurations.has(value)).toBe(true);
+            expect(value).toBeGreaterThan(0);
+        }
+    });
+
+    it('制音与捏弦泛音的弦号范围在 1-6 内且 min <= max', () => {
+        for (const range of [
+            playability.deadNoteStrings,
+            playability.pinchHarmonicStrings,
+        ]) {
+            expect(range[0]).toBeGreaterThanOrEqual(1);
+            expect(range[1]).toBeLessThanOrEqual(6);
+            expect(range[0]).toBeLessThanOrEqual(range[1]);
+        }
+    });
+
+    it('自然/人工泛音品位非空，且为合法范围内的整数', () => {
+        for (const frets of [
+            playability.naturalHarmonicFrets,
+            playability.harmonicFrets,
+        ]) {
+            expect(frets.length).toBeGreaterThan(0);
+            for (const fret of frets) {
+                expect(Number.isInteger(fret)).toBe(true);
+                expect(fret).toBeGreaterThanOrEqual(HARMONIC_FRET_MIN);
+                expect(fret).toBeLessThanOrEqual(HARMONIC_FRET_MAX);
+            }
+        }
+    });
+
+    it('和弦声部数与跨度参数合法', () => {
+        expect(playability.maxChordVoices).toBeGreaterThanOrEqual(2);
+        for (const value of [
+            playability.maxVoicingSpanSemitones,
+            playability.minVoicingGapSemitones,
+            playability.maxChordSpanFrets,
+            playability.maxChordStringSpan,
+        ]) {
+            expect(value).toBeGreaterThan(0);
+        }
     });
 });
 
