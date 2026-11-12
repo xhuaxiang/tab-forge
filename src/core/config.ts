@@ -103,10 +103,12 @@ export const DYNAMICS_VOLUME_FACTOR: Record<'soft' | 'accent', number> = {
 /**
  * 拍位自动重音总开关。
  *
- * 开启后，未显式标注 `dynamics` 的音符在强拍上按 {@link METRIC_ACCENT_DYNAMICS}
- * 派生重音；显式标注永远优先。置 false 即回滚到旧行为。
+ * 默认关闭：播放只认谱面显式 `dynamics`（alphaTab 渲染的轻重标识），
+ * 未标注的音符不再按拍位额外派生重音，保证听感与谱面一致。
+ * 置 true 时，未显式标注的音符在强拍上按 {@link METRIC_ACCENT_DYNAMICS}
+ * 派生重音；显式标注永远优先。
  */
-export const AUTO_METRIC_ACCENT = true;
+export const AUTO_METRIC_ACCENT = false;
 
 /**
  * 拍位角色 → 派生力度（唯一策略表）。

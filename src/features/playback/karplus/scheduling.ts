@@ -27,7 +27,7 @@ export interface ScheduledEvent {
     /** 记谱时值对应的秒数（技法释放时间、音符时长用） */
     duration: number;
     volume: number;
-    /** 生效力度（显式优先，否则拍位派生）；volume 已含对应系数，消费方不要再乘一次 */
+    /** 生效力度（谱面显式标识；默认不再按拍位派生）；volume 已含对应系数，消费方不要再乘一次 */
     dynamics: Note['dynamics'];
 }
 
@@ -235,7 +235,8 @@ export function buildSchedule(
     for (const measure of measures) {
         const signature = `${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}`;
         const measureStartMs = cursorMs;
-        // 拍位偏移（全音符 = 1），用于按拍位派生重音；休止符也照常推进
+        // 拍位偏移（全音符 = 1），供 AUTO_METRIC_ACCENT 开启时派生重音
+        // （默认关闭，见 core/config.ts）；休止符也照常推进
         let slotOffset = 0;
 
         forEachSlot(measure, (notes) => {
@@ -254,7 +255,8 @@ export function buildSchedule(
             // 和弦音量补偿：多个音符同时播放时适当降低避免削波
             // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
             const chordVolume = 0.5 / (1 + (notes.length - 1) * 0.25);
-            // 该拍位组的派生力度：显式标注优先，否则按拍位（强拍 → accent）
+            // 该拍位组的力度：只认谱面显式标识；拍位派生默认关闭，保证与
+            // alphaTab 渲染的轻重记号一致（开关见 core/config.ts）。
             const slotDynamics = resolveNoteDynamics(first.dynamics, slotStart, first.duration, signature);
             // 力度：每个音各按自己的 dynamics 缩放（重音抬、轻音压）——律动感就靠这个对比
             const dynamicsOf = (n: Note): Note['dynamics'] => n.dynamics ?? slotDynamics;

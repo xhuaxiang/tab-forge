@@ -1,9 +1,11 @@
 /**
- * metricAccent — 按拍位派生播放力度（纯函数）
+ * metricAccent — 按拍位派生播放力度（纯函数，默认关闭）
  *
- * 播放层用：音符未显式标 `dynamics` 时，强拍自动派生 accent。
+ * 播放层只在 `AUTO_METRIC_ACCENT` 开启时使用：音符未显式标 `dynamics` 时，
+ * 强拍派生 accent。默认关闭，播放以谱面显式标识为准，避免听感与 alphaTab
+ * 渲染的轻重记号不一致。
+ *
  * 只派生播放用的力度，不写回 Note/TabScore；显式标注永远优先。
- *
  * 拍位判定完全复用 improv/rhythm.ts 的 classifySlotRole（4/4、3/4、6/8、7/8…），
  * 这里只做「角色 → Note.dynamics」的映射与优先级，不复制任何拍号规则。
  */
@@ -35,7 +37,8 @@ export function metricDynamics(
 }
 
 /**
- * 解析音符的生效力度：显式值优先，未标时按拍位派生（可由开关关闭）。
+ * 解析音符的生效力度：显式值优先；未标时仅在开关开启时按拍位派生。
+ * 默认开关关闭，因此未标注的音符返回 undefined（播放按谱面基准音量）。
  */
 export function resolveNoteDynamics(
     explicit: Note['dynamics'],

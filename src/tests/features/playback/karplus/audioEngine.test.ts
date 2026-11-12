@@ -199,7 +199,7 @@ describe('推弦 / 揉弦作用于音符自身', () => {
                 technique: 'bend',
                 bendAmount: 0.5,
                 bendRelease: true,
-                // 显式力度，避免这条用例依赖 AUTO_METRIC_ACCENT 的派生结果
+                // 显式力度，钉住谱面标识会传到合成器
                 dynamics: 'soft',
             },
         ]));
@@ -377,7 +377,7 @@ describe('推弦 / 揉弦作用于音符自身', () => {
         engine.dispose();
     });
 
-    it('未显式标注力度时，强拍音符按 accent 传入合成器', async () => {
+    it('未显式标注力度时不派生 accent，合成器收到 undefined', async () => {
         const engine = new AudioEngine();
         await engine.play(scoreOf([
             { string: 2, fret: 3, duration: 0.25 },
@@ -385,10 +385,8 @@ describe('推弦 / 揉弦作用于音符自身', () => {
         vi.advanceTimersByTime(120);
 
         expect(playedNotes).toHaveBeenCalledTimes(1);
-        expect(playedNotes.mock.calls[0][0]).toMatchObject({
-            fret: 3,
-            dynamics: 'accent',
-        });
+        expect(playedNotes.mock.calls[0][0].fret).toBe(3);
+        expect(playedNotes.mock.calls[0][0].dynamics).toBeUndefined();
         engine.dispose();
     });
 

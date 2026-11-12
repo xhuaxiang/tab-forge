@@ -69,7 +69,7 @@ describe('buildSchedule', () => {
     });
 
     it('和弦音量补偿:单音0.5、双音0.4、三音0.33', () => {
-        // 放在第 2 拍（前面加四分休止），避开第 1 拍的拍位重音，单独验证补偿系数
+        // 未标力度的音符直接按基准音量验证补偿系数，不再需要躲避拍位重音
         const rest = note({ duration: 0.25, isRest: true });
         const single = buildSchedule([measure([rest, note({ duration: 0.25 })])], BPM);
         expect(single.events[0].volume).toBeCloseTo(0.5, 5);
@@ -494,7 +494,7 @@ describe('computeForceRepluck', () => {
 
 describe('力度 dynamics → 音量', () => {
     it('accent 抬音量、soft 压音量，普通音保持基准', () => {
-        // 3/4：只有第 1 拍是强拍，第 3 拍不会触发拍位重音，plain 才是真·基准
+        // plain 未标力度，以基准音量为参照验证 accent / soft 的相对关系
         const s = buildSchedule([measure([
             note({ duration: 0.25, dynamics: 'accent' }),
             note({ duration: 0.25, dynamics: 'soft' }),
@@ -524,25 +524,44 @@ describe('力度 dynamics → 音量', () => {
     });
 });
 
-describe('拍位自动重音', () => {
-    it('4/4 未标力度的第 1、3 拍抬音量，第 2、4 拍保持基准', () => {
+describe('力度只按谱面标识', () => {
+    it('未标力度不派生重音：4/4 四拍全部保持基准音量', () => {
         const s = buildSchedule([measure([
             note({ duration: 0.25 }),
             note({ duration: 0.25 }),
             note({ duration: 0.25 }),
             note({ duration: 0.25 }),
         ])], BPM);
-        expect(s.events.map(e => e.dynamics)).toEqual(['accent', undefined, 'accent', undefined]);
-        expect(s.events[0].volume).toBeCloseTo(0.5 * 1.35, 5);
-        expect(s.events[1].volume).toBeCloseTo(0.5, 5);
-        expect(s.events[2].volume).toBeCloseTo(0.5 * 1.35, 5);
-        expect(s.events[3].volume).toBeCloseTo(0.5, 5);
+        expect(s.events.map(e => e.dynamics))
+            .toEqual([undefined, undefined, undefined, undefined]);
+        for (const event of s.events) {
+            expect(event.volume).toBeCloseTo(0.5, 5);
+        }
     });
 
-    it('显式 dynamics 覆盖拍位派生', () => {
+    it('3/4、6/8 同样不按拍位派生', () => {
+        const threeFour = buildSchedule([measure([
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+        ], 3, 4)], BPM);
+        expect(threeFour.events.every(e => e.dynamics === undefined)).toBe(true);
+
+        const sixEight = buildSchedule([measure([
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+        ], 6, 8)], BPM);
+        expect(sixEight.events.every(e => e.dynamics === undefined)).toBe(true);
+    });
+
+    it('显式 dynamics 逐音生效：soft 压音量、accent 抬音量', () => {
         const s = buildSchedule([measure([
-            note({ duration: 0.25, dynamics: 'soft' }),   // 第 1 拍：显式轻音，不该被派生重音
-            note({ duration: 0.25, dynamics: 'accent' }), // 第 2 拍：显式重音
+            note({ duration: 0.25, dynamics: 'soft' }),
+            note({ duration: 0.25, dynamics: 'accent' }),
         ])], BPM);
         expect(s.events[0].dynamics).toBe('soft');
         expect(s.events[0].volume).toBeCloseTo(0.5 * 0.65, 5);
@@ -550,7 +569,7 @@ describe('拍位自动重音', () => {
         expect(s.events[1].volume).toBeCloseTo(0.5 * 1.35, 5);
     });
 
-    it('休止符推进拍位：休止后的四分音符落在第 2 拍，不派生重音', () => {
+    it('休止符不改变后续音符的力度', () => {
         const s = buildSchedule([measure([
             note({ duration: 0.25, isRest: true }),
             note({ duration: 0.25 }),
@@ -560,36 +579,14 @@ describe('拍位自动重音', () => {
         expect(s.events[0].volume).toBeCloseTo(0.5, 5);
     });
 
-    it('和弦：未标力度的成员共享拍位派生，显式仍逐音生效', () => {
+    it('和弦：未标力度的成员保持基准，显式仍逐音生效', () => {
         const s = buildSchedule([measure([
             note({ duration: 0.25, chordGroup: 1 }),
             note({ duration: 0.25, chordGroup: 1, string: 2, dynamics: 'soft' }),
         ])], BPM);
-        expect(s.events[0].dynamics).toBe('accent');
-        expect(s.events[0].volume).toBeCloseTo(0.4 * 1.35, 5);
+        expect(s.events[0].dynamics).toBeUndefined();
+        expect(s.events[0].volume).toBeCloseTo(0.4, 5);
         expect(s.events[1].dynamics).toBe('soft');
         expect(s.events[1].volume).toBeCloseTo(0.4 * 0.65, 5);
-    });
-
-    it('3/4 只有第 1 拍派生重音', () => {
-        const s = buildSchedule([measure([
-            note({ duration: 0.25 }),
-            note({ duration: 0.25 }),
-            note({ duration: 0.25 }),
-        ], 3, 4)], BPM);
-        expect(s.events.map(e => e.dynamics)).toEqual(['accent', undefined, undefined]);
-    });
-
-    it('6/8 按附点四分派生（每 3 个八分一次）', () => {
-        const s = buildSchedule([measure([
-            note({ duration: 0.125 }),
-            note({ duration: 0.125 }),
-            note({ duration: 0.125 }),
-            note({ duration: 0.125 }),
-            note({ duration: 0.125 }),
-            note({ duration: 0.125 }),
-        ], 6, 8)], BPM);
-        expect(s.events.map(e => e.dynamics))
-            .toEqual(['accent', undefined, undefined, 'accent', undefined, undefined]);
     });
 });

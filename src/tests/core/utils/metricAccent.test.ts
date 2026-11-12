@@ -2,7 +2,7 @@
  * metricAccent 单元测试
  *
  * 播放侧的拍位重音是纯映射：拍号 + 拍位偏移 → 派生力度。
- * 这里钉住三件事：
+ * 派生默认关闭（播放按谱面标识），开启时钉住三件事：
  *   1. 各拍号的强拍位置（规则本身来自 classifySlotRole，不在这里重写）；
  *   2. 显式 dynamics 永远优先；
  *   3. 派生结果与 classifySlotRole 不漂移。
@@ -70,13 +70,17 @@ describe('metricDynamics 拍号规则', () => {
 });
 
 describe('resolveNoteDynamics 优先级', () => {
-    it('显式 dynamics 优先于拍位派生', () => {
+    it('显式 dynamics 优先于拍位派生（开关开启时也优先）', () => {
+        expect(resolveNoteDynamics('soft', 0, QUARTER, '4/4', true)).toBe('soft');
+        expect(resolveNoteDynamics('accent', 0.25, QUARTER, '4/4', true)).toBe('accent');
+        // 默认关闭时显式值同样直通
         expect(resolveNoteDynamics('soft', 0, QUARTER, '4/4')).toBe('soft');
         expect(resolveNoteDynamics('accent', 0.25, QUARTER, '4/4')).toBe('accent');
     });
 
-    it('未标时按拍位派生；开关关闭时不派生', () => {
-        expect(resolveNoteDynamics(undefined, 0, QUARTER, '4/4')).toBe('accent');
+    it('默认不派生（按谱面标识播放）；显式开启才按拍位派生', () => {
+        expect(resolveNoteDynamics(undefined, 0, QUARTER, '4/4')).toBeUndefined();
+        expect(resolveNoteDynamics(undefined, 0, QUARTER, '4/4', true)).toBe('accent');
         expect(resolveNoteDynamics(undefined, 0, QUARTER, '4/4', false)).toBeUndefined();
     });
 });
