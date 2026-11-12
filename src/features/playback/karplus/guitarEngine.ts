@@ -753,10 +753,23 @@ export class GuitarEngine {
         }, (fadeSec + DISCONNECT_MARGIN_SEC) * 1000);
     }
 
-    stopAll(): void {
+    /**
+     * 停止所有活跃音符。
+     *
+     * @param fadeSec 淡出时长（秒）。手动 stop/pause 用默认的
+     *                {@link KARPLUS_ARTICULATION.releaseSec} 快速收掉；
+     *                自然收尾传入 {@link KARPLUS_ARTICULATION.naturalEndFadeSec}，
+     *                让末音残余与共享混响平滑衰减。
+     */
+    stopAll(fadeSec: number = KARPLUS_ARTICULATION.releaseSec): void {
         if (!this.ctx) return;
         const now = this.ctx.currentTime;
-        const fadeSec = KARPLUS_ARTICULATION.releaseSec;
+        // 防异常输入：0/NaN 的指数 ramp 没有有效时长
+        const safeFadeSec = Number.isFinite(fadeSec) && fadeSec > 0
+            ? fadeSec
+            : KARPLUS_ARTICULATION.releaseSec;
+        // 混响至少按房间总线自己的最短淡出走；自然收尾时两者取更长者
+        const roomFadeSec = Math.max(safeFadeSec, KARPLUS_MIX.roomStopFadeSec);
         for (const [, note] of this.activeNotes) {
             // 同 stopNote：提前释放激励层，不等它们跑到原音符终点
             this.fadeOutAttacks(note);
@@ -766,13 +779,13 @@ export class GuitarEngine {
                 const current = Math.max(0.001, gain.value);
                 gain.cancelScheduledValues(now);
                 gain.setValueAtTime(current, now);
-                gain.exponentialRampToValueAtTime(0.001, now + fadeSec);
+                gain.exponentialRampToValueAtTime(0.001, now + safeFadeSec);
                 if (note.source) {
-                    note.source.stop(now + fadeSec + STOP_MARGIN_SEC);
+                    note.source.stop(now + safeFadeSec + STOP_MARGIN_SEC);
                 }
             } catch {}
             for (const osc of note.oscillators) {
-                try { osc.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+                try { osc.stop(now + safeFadeSec + STOP_MARGIN_SEC); } catch {}
             }
         }
         // 共享混响的湿声不受上游干声 gain 影响：停止时把返回电平压掉，
@@ -784,7 +797,7 @@ export class GuitarEngine {
                 const current = Math.max(0.0001, gain.value);
                 gain.cancelScheduledValues(now);
                 gain.setValueAtTime(current, now);
-                gain.exponentialRampToValueAtTime(0.0001, now + KARPLUS_MIX.roomStopFadeSec);
+                gain.exponentialRampToValueAtTime(0.0001, now + roomFadeSec);
                 this.reverbDucked = true;
             } catch {}
         }

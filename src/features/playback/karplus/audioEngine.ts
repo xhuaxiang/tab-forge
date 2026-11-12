@@ -14,7 +14,12 @@ import { semitonesToRate } from '../../../core/utils/frequency.ts';
 import { clampPlaybackRateScale } from '../../../core/utils/karplusTiming.ts';
 import { resolveNoteFrequency } from '../../../core/utils/noteFrequency.ts';
 import { GuitarEngine } from './guitarEngine.ts';
-import { buildSchedule, computeForceRepluck, computeTechniqueChainInfo } from './scheduling.ts';
+import {
+    buildSchedule,
+    computeForceRepluck,
+    computeTechniqueChainInfo,
+    naturalSoundEndMs,
+} from './scheduling.ts';
 
 /** 播放回调 */
 export interface PlaybackCallbacks {
@@ -278,7 +283,22 @@ export class AudioEngine {
         // 短静默内源音缓冲区可能还没过期，必须显式要求目标重拨
         const forceReplucks = computeForceRepluck(events, silenceSpansMs);
 
-        const remainingMs = Math.max(0, totalDurationMs - resumeFrom);
+        // 自然收尾点：末音可能晚于谱面结束（琶音偏移/letRing/技法链延音），
+        // 不能按 totalDurationMs 硬切。之后再用长淡出释放残余与共享混响。
+        // 频率解析与播放层共用，保证「不会发声的事件」不拖长收尾。
+        const soundEndMs = naturalSoundEndMs(
+            events,
+            ringSecs,
+            totalDurationMs,
+            note => resolveNoteFrequency(this.tuning, note),
+        );
+        const endFadeMs = KARPLUS_ARTICULATION.naturalEndFadeSec * 1000;
+        // 续播点若已落在自然尾音/淡出区间，从续播时刻重新起一段完整淡出；
+        // 否则 completion 仍固定在原 finish 点，淡出可能只剩几十毫秒。
+        const fadeStartMs = Math.max(soundEndMs, resumeFrom);
+        const finishMs = fadeStartMs + endFadeMs;
+
+        const remainingMs = Math.max(0, finishMs - resumeFrom);
         if (remainingMs === 0) {
             // 暂停点已经在曲尾：直接收尾，不要先报 playing 再立刻 stopped
             this.stop();
@@ -307,6 +327,14 @@ export class AudioEngine {
             }, item.delayMs - resumeFrom));
         });
 
+        // 自然收尾：在最后一批音的实际发声终点开始长淡出。末音本身已按自己的
+        // 包络衰减，这里主要收掉共享混响的尾音；不能等到 finishMs 才停，否则
+        // 混响又被 stop() 的短淡出硬切。
+        this.eventTimers.push(setTimeout(() => {
+            if (this.runId !== runId || this.state !== 'playing') return;
+            this.guitar.stopAll(KARPLUS_ARTICULATION.naturalEndFadeSec);
+        }, Math.max(0, fadeStartMs - resumeFrom)));
+
         // 续播时把起点往回拨，位置回调仍按整曲绝对时间计算
         this.startTime = performance.now() - resumeFrom;
 
@@ -320,7 +348,8 @@ export class AudioEngine {
             );
             this.callbacks.onPositionChange?.(currentMeasure, 0);
 
-            if (elapsed >= totalDurationMs) {
+            // 完成点包含自然收尾淡出，等尾音走完再报结束
+            if (elapsed >= finishMs) {
                 this.stop();
                 this.callbacks.onComplete?.();
                 return;

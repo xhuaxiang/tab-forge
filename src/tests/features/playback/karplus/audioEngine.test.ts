@@ -10,11 +10,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { STANDARD_TUNING, type Note, type TabScore } from '../../../../core/types/index.ts';
 import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 
-const { playedNotes, bentNotes, vibratoNotes, hammerOns } = vi.hoisted(() => ({
+const { playedNotes, bentNotes, vibratoNotes, hammerOns, stopAlls } = vi.hoisted(() => ({
     playedNotes: vi.fn(),
     bentNotes: vi.fn(),
     vibratoNotes: vi.fn(),
     hammerOns: vi.fn(),
+    stopAlls: vi.fn(),
 }));
 
 vi.mock('../../../../features/playback/karplus/guitarEngine.ts', () => ({
@@ -50,7 +51,7 @@ vi.mock('../../../../features/playback/karplus/guitarEngine.ts', () => ({
         slideTo(...args: unknown[]) { return args[2] as symbol; }
         bendNote(...args: unknown[]) { bentNotes(...args); }
         vibrato(...args: unknown[]) { vibratoNotes(...args); }
-        stopAll() { this.activeNotes.clear(); }
+        stopAll(...args: unknown[]) { stopAlls(...args); this.activeNotes.clear(); }
         dispose() {}
     },
 }));
@@ -464,6 +465,113 @@ describe('推弦 / 揉弦作用于音符自身', () => {
 
         expect(playedNotes).toHaveBeenCalledTimes(2);
         expect(hammerOns).not.toHaveBeenCalled();
+        engine.dispose();
+    });
+});
+
+describe('自然收尾', () => {
+    beforeEach(() => {
+        vi.useFakeTimers({
+            toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date', 'performance'],
+        });
+        playedNotes.mockClear();
+        stopAlls.mockClear();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('末音尾音走完后用长淡出收尾，完成回调等淡出结束', async () => {
+        const engine = new AudioEngine();
+        const onComplete = vi.fn();
+        engine.setCallbacks({ onComplete });
+
+        // 4 个四分音符填满 4/4：谱面 2100ms 结束，末音 1600ms 起、发声到 2300ms
+        await engine.play(scoreOf([
+            { string: 1, fret: 0, duration: 0.25 },
+            { string: 1, fret: 1, duration: 0.25 },
+            { string: 1, fret: 2, duration: 0.25 },
+            { string: 1, fret: 3, duration: 0.25 },
+        ]));
+
+        vi.advanceTimersByTime(2299);
+        expect(stopAlls).not.toHaveBeenCalled();
+        expect(onComplete).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(1);
+        // 自然收尾起点：长淡出，而不是 stop() 的 0.03s 快淡出
+        expect(stopAlls).toHaveBeenCalledWith(KARPLUS_ARTICULATION.naturalEndFadeSec);
+        expect(onComplete).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(KARPLUS_ARTICULATION.naturalEndFadeSec * 1000);
+        expect(onComplete).toHaveBeenCalledTimes(1);
+        expect(engine.getState()).toBe('stopped');
+        engine.dispose();
+    });
+
+    it('末音在谱面结束前就衰减完时，仍等谱面结束再收尾', async () => {
+        const engine = new AudioEngine();
+        const onComplete = vi.fn();
+        engine.setCallbacks({ onComplete });
+
+        // 单个四分音符在 100ms 发声，但 4/4 小节补齐到 2100ms
+        await engine.play(scoreOf([{ string: 1, fret: 0, duration: 0.25 }]));
+
+        vi.advanceTimersByTime(2099);
+        expect(stopAlls).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(stopAlls).toHaveBeenCalledWith(KARPLUS_ARTICULATION.naturalEndFadeSec);
+        expect(onComplete).not.toHaveBeenCalled();
+
+        vi.advanceTimersByTime(KARPLUS_ARTICULATION.naturalEndFadeSec * 1000);
+        expect(onComplete).toHaveBeenCalledTimes(1);
+        engine.dispose();
+    });
+
+    it('手动 pause/stop 仍用默认短淡出', async () => {
+        const engine = new AudioEngine();
+        await engine.play(scoreOf(THREE_QUARTERS));
+        vi.advanceTimersByTime(120);
+
+        engine.pause();
+        expect(stopAlls.mock.calls.at(-1)).toEqual([]);
+        engine.stop();
+        expect(stopAlls.mock.calls.at(-1)).toEqual([]);
+        // 不能把自然收尾时长误用到用户主动停止上
+        expect(stopAlls).not.toHaveBeenCalledWith(KARPLUS_ARTICULATION.naturalEndFadeSec);
+        engine.dispose();
+    });
+
+    it('暂停点落在自然淡出区间内，续播重新起一段完整淡出', async () => {
+        const engine = new AudioEngine();
+        const onComplete = vi.fn();
+        engine.setCallbacks({ onComplete });
+        // 4 个四分音符：自然尾音 2300ms 结束、原完成点 2800ms
+        await engine.play(scoreOf([
+            { string: 1, fret: 0, duration: 0.25 },
+            { string: 1, fret: 1, duration: 0.25 },
+            { string: 1, fret: 2, duration: 0.25 },
+            { string: 1, fret: 3, duration: 0.25 },
+        ]));
+
+        // 在淡出中间暂停（2400ms）：pause 仍走默认短淡出
+        vi.advanceTimersByTime(2400);
+        engine.pause();
+        expect(stopAlls.mock.calls.at(-1)).toEqual([]);
+        stopAlls.mockClear();
+
+        await engine.play(); // 续播：淡出从 2400ms 重新起 0.5s
+        vi.advanceTimersByTime(1);
+        expect(stopAlls.mock.calls.at(-1))
+            .toEqual([KARPLUS_ARTICULATION.naturalEndFadeSec]);
+        expect(onComplete).not.toHaveBeenCalled();
+
+        // 原 finish 只剩 0.4s；必须从续播点重新等满 0.5s
+        vi.advanceTimersByTime(498);
+        expect(onComplete).not.toHaveBeenCalled();
+        vi.advanceTimersByTime(1);
+        expect(onComplete).toHaveBeenCalledTimes(1);
         engine.dispose();
     });
 });

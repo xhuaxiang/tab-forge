@@ -16,6 +16,7 @@ import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
 import { resolveNoteDynamics } from '../../../core/utils/metricAccent.ts';
 import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
+import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
 import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
@@ -337,4 +338,48 @@ export function buildSchedule(
     }
 
     return { events, totalDurationMs: cursorMs, silenceSpansMs };
+}
+
+/**
+ * 计算自然收尾点（毫秒，相对播放开始）。
+ *
+ * 最后一个事件的实际发声终点 = 事件偏移 + KS 实时发声时长
+ * （`max(奏法修正时值, 技法链 ring, 最短发声) + 自然尾音`，直接复用
+ * {@link karplusBufferTiming}，不内联第二份公式）。扫弦/琶音的弦间偏移、
+ * letRing 额外延长、同弦击/勾/滑目标的 ring 都因此自动计入；不能改用固定
+ * 尾音估算，否则末音会被提前切断。
+ *
+ * 结果不小于 {@link PlaybackSchedule.totalDurationMs}：末音在谱面结束前
+ * 就自然衰减完时，仍播放到整曲结束再收尾。非有限输入按 0 处理，避免
+ * NaN/Infinity 毒化播放完成判定。
+ *
+ * 传了 `frequencyOf` 时与 {@link computeTechniqueChainInfo} 同口径：解析
+ * 不出频率的事件不会发声，也不计入收尾点；不传时按事件时长给出上界。
+ *
+ * @param events           播放事件队列
+ * @param ringSecs         每个事件作为源音需要保持发声的最短时长（秒），
+ *                         与 {@link computeTechniqueChainInfo} 的 ring 对齐
+ * @param totalDurationMs  整曲预计时长（毫秒）
+ * @param frequencyOf      可选：音符基频解析（与播放层共用）
+ */
+export function naturalSoundEndMs(
+    events: readonly ScheduledEvent[],
+    ringSecs: readonly number[],
+    totalDurationMs: number,
+    frequencyOf?: (note: Note) => number,
+): number {
+    let end = Number.isFinite(totalDurationMs) ? totalDurationMs : 0;
+    events.forEach((event, index) => {
+        // 播放层不发声的事件（缺弦号/非法音高）不产生尾音，不能拖长收尾
+        if (frequencyOf && !(frequencyOf(event.note) > 0)) return;
+        const ringSec = ringSecs[index] ?? 0;
+        const duration = Math.max(
+            resolvePlayDuration(event.note, event.duration),
+            Number.isFinite(ringSec) ? ringSec : 0,
+        );
+        const { soundDur } = karplusBufferTiming(duration);
+        const delayMs = Number.isFinite(event.delayMs) ? Math.max(0, event.delayMs) : 0;
+        end = Math.max(end, delayMs + soundDur * 1000);
+    });
+    return end;
 }

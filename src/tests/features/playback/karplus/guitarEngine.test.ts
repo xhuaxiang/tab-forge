@@ -395,6 +395,26 @@ describe('GuitarEngine.playNote', () => {
         ge.dispose();
     });
 
+    it('stopAll 可指定更长淡出：自然收尾不硬切末音与混响', () => {
+        const ge = new GuitarEngine();
+        ge.init();
+        const ctx = ge.getContext() as unknown as MockAudioContext;
+        ge.playNote({ frequency: 220, duration: 0.5, volume: 0.5, string: 4 });
+
+        mockNow = 0.2;
+        const fadeSec = KARPLUS_ARTICULATION.naturalEndFadeSec;
+        ge.stopAll(fadeSec);
+
+        // 干声（末音残余）与共享混响都按同一长淡出走完
+        const noteFade = ctx.getMixGain(0).gain.rampEvents.at(-1)!;
+        expect(noteFade.time).toBeCloseTo(0.2 + fadeSec, 5);
+        const roomFade = ctx.getReverbReturn().gain.rampEvents.at(-1)!;
+        expect(roomFade.value).toBeCloseTo(0.0001, 5);
+        expect(roomFade.time).toBeCloseTo(0.2 + fadeSec, 5);
+        expect(fadeSec).toBeGreaterThan(KARPLUS_MIX.roomStopFadeSec);
+        ge.dispose();
+    });
+
     it('stopAll 后直接调用 playNote 也会恢复湿声（不依赖 init）', () => {
         const ge = new GuitarEngine();
         ge.init();

@@ -8,6 +8,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { STANDARD_TUNING, type Measure, type Note } from '../../../../core/types/index.ts';
+import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 import { semitonesToRate } from '../../../../core/utils/frequency.ts';
 import { resolveNoteFrequency } from '../../../../core/utils/noteFrequency.ts';
 import {
@@ -15,6 +16,7 @@ import {
     computeForceRepluck,
     computeTechniqueChainInfo,
     computeTechniqueRing,
+    naturalSoundEndMs,
 } from '../../../../features/playback/karplus/scheduling.ts';
 
 const BPM = 120; // 一拍 = 0.5s
@@ -588,5 +590,124 @@ describe('力度只按谱面标识', () => {
         expect(s.events[0].volume).toBeCloseTo(0.4, 5);
         expect(s.events[1].dynamics).toBe('soft');
         expect(s.events[1].volume).toBeCloseTo(0.4 * 0.65, 5);
+    });
+});
+
+describe('naturalSoundEndMs 自然收尾点', () => {
+    /** 4 个四分音符填满 4/4；末音 1600ms 起，0.5s 时值 + KS 尾音 */
+    function fourQuarters(): ReturnType<typeof buildSchedule> {
+        return buildSchedule([measure([
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+        ])], BPM);
+    }
+
+    it('末音实际发声终点晚于谱面总时长时，取末音终点', () => {
+        const s = fourQuarters();
+        expect(naturalSoundEndMs(s.events, s.events.map(() => 0), s.totalDurationMs))
+            .toBeCloseTo(
+                1600 + (0.5 + KARPLUS_ARTICULATION.noteTailSec) * 1000,
+                5,
+            );
+    });
+
+    it('尾音没有超出谱面总时长时，至少播放到 totalDurationMs', () => {
+        const s = buildSchedule([measure([note({ duration: 0.25 })])], BPM);
+        expect(naturalSoundEndMs(s.events, s.events.map(() => 0), s.totalDurationMs))
+            .toBeCloseTo(s.totalDurationMs, 5);
+    });
+
+    it('计入同弦技法链的 ring 延音', () => {
+        const s = fourQuarters();
+        // 末音作为源音要撑到 1.2s 后的技法目标
+        const ring = s.events.map((_, i) => (i === s.events.length - 1 ? 1.2 : 0));
+        expect(naturalSoundEndMs(s.events, ring, s.totalDurationMs))
+            .toBeCloseTo(1600 + 1200 + KARPLUS_ARTICULATION.noteTailSec * 1000, 5);
+    });
+
+    it('计入扫弦/琶音偏移：最后一个事件可能晚于拍位起点', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.25, isRest: true }),
+            note({ duration: 0.25, isRest: true }),
+            note({ duration: 0.25, isRest: true }),
+            note({ duration: 0.25, chordGroup: 1, string: 6, arpeggio: 'up' }),
+            note({ duration: 0.25, chordGroup: 1, string: 1, arpeggio: 'up' }),
+        ])], BPM);
+        // 琶音最后一个事件在拍位起点后 40ms
+        expect(naturalSoundEndMs(s.events, s.events.map(() => 0), s.totalDurationMs))
+            .toBeCloseTo(
+                1600 + 40 + (0.5 + KARPLUS_ARTICULATION.noteTailSec) * 1000,
+                5,
+            );
+    });
+
+    it('计入 letRing 的额外延长', () => {
+        const s = buildSchedule([measure([
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25, letRing: true }),
+        ])], BPM);
+        expect(naturalSoundEndMs(s.events, s.events.map(() => 0), s.totalDurationMs))
+            .toBeCloseTo(
+                1600 + (0.5 + KARPLUS_ARTICULATION.letRingExtraSec
+                    + KARPLUS_ARTICULATION.noteTailSec) * 1000,
+                5,
+            );
+    });
+
+    it('空谱返回起始延迟，不产生多余尾音', () => {
+        const s = buildSchedule([], BPM);
+        expect(naturalSoundEndMs(s.events, [], s.totalDurationMs)).toBe(s.totalDurationMs);
+    });
+
+    it('极短末音也留出 minSoundSec，不会提前收尾', () => {
+        // BPM 200：一拍 0.3s，整小节 1.2s。前五个时值合计 0.96875，
+        // 最后的 32 分音符正好落在小节末端，0.0375s 不足 minSoundSec 0.05s。
+        const s = buildSchedule([measure([
+            note({ duration: 0.5 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.0625 }),
+            note({ duration: 0.03125 }),
+            note({ duration: 0.03125 }),
+        ])], 200);
+        // 末音 1262.5ms 起；实时发声 = minSoundSec + KS 尾音
+        expect(naturalSoundEndMs(s.events, s.events.map(() => 0), s.totalDurationMs))
+            .toBeCloseTo(
+                1262.5 + (KARPLUS_ARTICULATION.minSoundSec
+                    + KARPLUS_ARTICULATION.noteTailSec) * 1000,
+                5,
+            );
+    });
+
+    it('ringSecs 比事件短或含非法值时按 0 处理', () => {
+        const s = fourQuarters();
+        const baseline = naturalSoundEndMs(
+            s.events, s.events.map(() => 0), s.totalDurationMs,
+        );
+        expect(naturalSoundEndMs(s.events, [], s.totalDurationMs)).toBeCloseTo(baseline, 5);
+        expect(naturalSoundEndMs(
+            s.events, s.events.map(() => NaN), s.totalDurationMs,
+        )).toBeCloseTo(baseline, 5);
+    });
+
+    it('非法总时长不产生 NaN/Infinity', () => {
+        const s = fourQuarters();
+        const rings = s.events.map(() => 0);
+        expect(naturalSoundEndMs(s.events, rings, NaN)).toBeCloseTo(1600 + 700, 5);
+        expect(Number.isFinite(naturalSoundEndMs(s.events, rings, Infinity))).toBe(true);
+    });
+
+    it('解析不出频率的事件不发声，不计入收尾', () => {
+        const s = fourQuarters();
+        const rings = s.events.map(() => 0);
+        // 不传频率：末音按完整时值计入 → 2300ms
+        expect(naturalSoundEndMs(s.events, rings, s.totalDurationMs)).toBeCloseTo(2300, 5);
+        // 全部不可发声：只剩谱面总时长，不能被末音拖到 2300ms
+        expect(naturalSoundEndMs(s.events, rings, s.totalDurationMs, () => 0))
+            .toBeCloseTo(s.totalDurationMs, 5);
     });
 });
