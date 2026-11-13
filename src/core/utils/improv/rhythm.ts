@@ -11,6 +11,7 @@ import type { NoteDuration } from '../../types/index.ts';
 import type {
     DensityProfile,
     DurationWeight,
+    HarmonyMeasure,
     PhrasePlan,
     ResolvedImprovOptions,
     RhythmMeasure,
@@ -22,9 +23,10 @@ import { parseTimeSignature, capacityFromTimeSignature } from '../measureUtils.t
 import { pickWeighted } from './random.ts';
 
 /** 全音符 = 32 个 1/32 单位 */
-const UNITS_PER_WHOLE = 32;
+export const UNITS_PER_WHOLE = 32;
 
-function toUnits(duration: NoteDuration): number {
+/** 时值 → 1/32 单位（节奏层与终止式共用，避免浮点累加误差） */
+export function durationToUnits(duration: NoteDuration): number {
     return Math.round(duration * UNITS_PER_WHOLE);
 }
 
@@ -61,7 +63,7 @@ function buildDurationCandidates(
             const styleWeight = styleWeights.get(duration) ?? 0.5;
             return {
                 duration,
-                units: toUnits(duration),
+                units: durationToUnits(duration),
                 // 密度决定“能不能出现”，风格只做偏好加权
                 weight: densityWeight * (0.5 + styleWeight),
             };
@@ -86,7 +88,7 @@ export function canFill(remaining: number, durations: readonly NoteDuration[]): 
     if (remainingUnits < 0) return false;
     const candidates = durations.map(duration => ({
         duration,
-        units: toUnits(duration),
+        units: durationToUnits(duration),
         weight: 1,
     }));
     return canFillUnits(remainingUnits, candidates);
@@ -130,7 +132,7 @@ function classifyRole(
     }
 
     if (strong) return 'strong';
-    return durationUnits <= toUnits(0.125) ? 'passing' : 'weak';
+    return durationUnits <= durationToUnits(0.125) ? 'passing' : 'weak';
 }
 
 /** 对外便利版：offset/duration 以全音符为单位 */
@@ -141,7 +143,7 @@ export function classifySlotRole(
 ): SlotRole {
     return classifyRole(
         Math.round(offset * UNITS_PER_WHOLE),
-        toUnits(duration),
+        durationToUnits(duration),
         timeSignature,
     );
 }
@@ -182,7 +184,7 @@ function ensureMinimumSlots(slots: RhythmSlot[], minNotes: number): void {
 function reassignRoles(slots: RhythmSlot[], timeSignature: string): void {
     let offsetUnits = 0;
     for (const slot of slots) {
-        const durationUnits = toUnits(slot.duration);
+        const durationUnits = durationToUnits(slot.duration);
         slot.role = classifyRole(offsetUnits, durationUnits, timeSignature);
         offsetUnits += durationUnits;
     }
@@ -462,4 +464,167 @@ export function buildRhythmPlan(
     }
 
     return measures;
+}
+
+/**
+ * 终止式：把全曲最后一个发音拍位延长到至少 `minDuration`。
+ *
+ * 先吃末音**之后**的休止；不够时再把前缀里最长的拍位逐次减半借时间——
+ * 发音最多缩到 0.0625（节奏层不生成 1/32），休止可整个并掉，因此每小节
+ * 发音数与密度下限不变。借多了的零头放在终止音之前当休止，小节容量仍
+ * 精确闭合。
+ *
+ * 终止音整体落在最后一个和弦段内：和弦在小节中间切换时，不把旧和弦的
+ * 音拖到新和弦上；末音已经够长、但确实跨过和弦边界且后面还有休止时，等长
+ * 挪到小节末尾。时值集合只有二等分时值（无附点/三连音），优先取「不小于
+ * 下限的最小合法时值」；
+ * 容量/密度不允许（如 2/4 下 0.5 占满整小节）时退回能放下的最长合法时值。
+ * 终止式只加长或等长后移，不缩短已有末音：最后一个和弦段本身比末音还短时
+ * 保持原样（该跨段是生成器既有形态）；没有任何可借拍位时也原样返回。
+ * 不修改入参。
+ *
+ * @param plan    节奏计划（通常来自 buildRhythmPlan）
+ * @param options 已补齐的生成选项（拍号用于重标拍位角色）
+ * @param harmony 可选的和声计划；提供时尽量不跨和弦段，末段短于末音或
+ *                无可借时长时保留原形态
+ * @param minDuration 终止音的最短时值
+ */
+export function applyCadence(
+    plan: RhythmMeasure[],
+    options: ResolvedImprovOptions,
+    harmony: readonly HarmonyMeasure[] | undefined,
+    minDuration: NoteDuration,
+): RhythmMeasure[] {
+    let measurePos = plan.length - 1;
+    while (measurePos >= 0 && !plan[measurePos].slots.some(slot => !slot.isRest)) {
+        measurePos--;
+    }
+    if (measurePos < 0) return plan;
+
+    const measure = plan[measurePos];
+    const slots = measure.slots;
+    let finalIndex = slots.length - 1;
+    while (finalIndex >= 0 && slots[finalIndex].isRest) finalIndex--;
+    if (finalIndex < 0) return plan;
+
+    const measureUnits = slots.reduce(
+        (sum, slot) => sum + durationToUnits(slot.duration), 0,
+    );
+    if (measureUnits <= 0) return plan;
+    const finalUnits = durationToUnits(slots[finalIndex].duration);
+
+    let finalOffsetUnits = 0;
+    for (let index = 0; index < finalIndex; index++) {
+        finalOffsetUnits += durationToUnits(slots[index].duration);
+    }
+
+    let trailingUnits = 0;
+    for (let index = finalIndex + 1; index < slots.length; index++) {
+        trailingUnits += durationToUnits(slots[index].duration);
+    }
+    const availableUnits = finalUnits + trailingUnits;
+
+    // 终止音必须整体落在最后一个和弦段内。段起点不一定落在 1/32 网格上，
+    // 向上取整，保证终止音不早于段起点。
+    const harmonyMeasure = harmony?.[measure.index];
+    const lastSegment = harmonyMeasure?.segments[harmonyMeasure.segments.length - 1];
+    const segmentStartUnits = lastSegment
+        ? Math.ceil(lastSegment.start * UNITS_PER_WHOLE - 1e-6)
+        : 0;
+    const segmentRoomUnits = measureUnits - segmentStartUnits;
+    // 末音是否真的跨过最后一个和弦段的起点；只有跨段时等长后移才有意义。
+    const finalCrossesSegment = finalOffsetUnits < segmentStartUnits
+        && finalOffsetUnits + finalUnits > segmentStartUnits;
+
+    // 上限分两套：任何候选都不能超出最后一个和弦段；加长型候选还受
+    // 「不小于下限的最小合法时值」约束，避免一步拖成整小节。末音已经够长时
+    // 不加长，只在确实跨段且后面还有休止时等长挪到段起点之后（也就是小节
+    // 末尾），让终止音落在最后一个和弦上。
+    const minUnits = durationToUnits(minDuration);
+    let preferredUnits = Number.POSITIVE_INFINITY;
+    for (const duration of NOTE_DURATIONS) {
+        const units = durationToUnits(duration);
+        if (units >= minUnits && units < preferredUnits) preferredUnits = units;
+    }
+    const candidates = NOTE_DURATIONS
+        .map(duration => durationToUnits(duration))
+        .filter(units => {
+            if (units > segmentRoomUnits) return false;
+            if (units > finalUnits) return units <= preferredUnits;
+            return units === finalUnits
+                && finalCrossesSegment
+                && trailingUnits > 0;
+        })
+        .sort((a, b) => b - a);
+
+    // 前缀能借出的时间：发音最多缩到 0.0625（节奏层不生成 1/32，避免碎音），
+    // 休止可以整个并掉。
+    const prefix = slots.slice(0, finalIndex);
+    const maxBorrowUnits = prefix.reduce(
+        (sum, slot) => {
+            const units = durationToUnits(slot.duration);
+            return sum + (slot.isRest ? units : Math.max(0, units - 2));
+        },
+        0,
+    );
+
+    for (const targetUnits of candidates) {
+        const needUnits = Math.max(0, targetUnits - availableUnits);
+        if (needUnits > maxBorrowUnits) continue;
+
+        const newSlots: RhythmSlot[] = prefix.map(slot => ({ ...slot }));
+        let borrowedUnits = 0;
+        while (borrowedUnits < needUnits) {
+            // 每次挑最长的可缩短拍位减半：优先缩短长音，避免把临近的短音
+            // 压碎；休止也可以缩，缩到 0 直接并掉。等长时取靠右的。
+            let pickIndex = -1;
+            let pickUnits = 0;
+            for (let index = newSlots.length - 1; index >= 0; index--) {
+                const units = durationToUnits(newSlots[index].duration);
+                const shrinkable = newSlots[index].isRest ? units >= 1 : units > 2;
+                if (shrinkable && units > pickUnits) {
+                    pickIndex = index;
+                    pickUnits = units;
+                }
+            }
+            if (pickIndex < 0) break;
+            // 休止本身不承载发音，≤0.0625 的直接并掉，避免切出 1/32 休止。
+            const keepUnits = newSlots[pickIndex].isRest && pickUnits <= 2
+                ? 0
+                : pickUnits / 2;
+            const keepDuration = (keepUnits / UNITS_PER_WHOLE) as NoteDuration;
+            // NOTE_DURATIONS 全是 2 的幂，减半必然合法；显式校验防未来加入
+            // 附点时值后 cast 掩盖出非法时值。
+            if (keepUnits > 0 && !NOTE_DURATIONS.includes(keepDuration)) break;
+            borrowedUnits += pickUnits - keepUnits;
+            if (keepUnits === 0) newSlots.splice(pickIndex, 1);
+            else newSlots[pickIndex] = {
+                ...newSlots[pickIndex],
+                duration: keepDuration,
+            };
+        }
+        if (borrowedUnits < needUnits) continue;
+
+        // 借来的零头（含原来的尾随休止）放在终止音之前，容量精确闭合
+        let restUnits = availableUnits + borrowedUnits - targetUnits;
+        for (const duration of NOTE_DURATIONS) {
+            const units = durationToUnits(duration);
+            while (restUnits >= units) {
+                newSlots.push({ duration, isRest: true, role: 'weak' });
+                restUnits -= units;
+            }
+        }
+        newSlots.push({
+            duration: (targetUnits / UNITS_PER_WHOLE) as NoteDuration,
+            isRest: false,
+            role: 'weak',
+        });
+        reassignRoles(newSlots, options.timeSignature);
+
+        return plan.map((item, index) => index === measurePos
+            ? { ...item, slots: newSlots }
+            : item);
+    }
+
+    return plan;
 }

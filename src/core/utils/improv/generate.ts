@@ -36,7 +36,7 @@ import {
 } from './progression.ts';
 import { choosePositions } from './positioning.ts';
 import { createRng } from './random.ts';
-import { buildRhythmPlan } from './rhythm.ts';
+import { applyCadence, buildRhythmPlan } from './rhythm.ts';
 import { validateNotes, validatePlan } from './validate.ts';
 import { addVoicings } from './voicing.ts';
 
@@ -200,8 +200,15 @@ export function generateLocalImprovisation(
         throw new Error(`本地即兴乐句计划无效:\n${phraseErrors.join('\n')}`);
     }
 
-    const plan = buildRhythmPlan(
-        options, density, style, createRng(options.seed), phrases,
+    // 终止式在节奏层完成：末小节尾部重排成一个长收尾音，旋律与把位仍按
+    // 同一份计划推进，两种播放引擎也不用各自猜测「结尾该拖多长」。
+    const plan = applyCadence(
+        buildRhythmPlan(
+            options, density, style, createRng(options.seed), phrases,
+        ),
+        options,
+        harmony,
+        style.phrase.cadenceMinDuration,
     );
     const planErrors = validatePlan(
         plan, options, density.minNotesPerMeasure,

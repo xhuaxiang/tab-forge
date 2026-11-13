@@ -174,6 +174,15 @@ describe('LOCAL_IMPROV_CONFIG 和弦加厚与技法参数', () => {
         }
     });
 
+    it('终止音最短时值来自 NOTE_DURATIONS 且大于 0', () => {
+        const validDurations = new Set<number>(NOTE_DURATIONS);
+        for (const profile of styleProfiles) {
+            expect(validDurations.has(profile.phrase.cadenceMinDuration))
+                .toBe(true);
+            expect(profile.phrase.cadenceMinDuration).toBeGreaterThan(0);
+        }
+    });
+
     it('和弦声部数与跨度参数合法', () => {
         expect(playability.maxChordVoices).toBeGreaterThanOrEqual(2);
         for (const value of [

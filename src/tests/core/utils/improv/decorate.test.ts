@@ -393,20 +393,22 @@ describe('decorateSlots', () => {
             vibratoProbability: 0,
             palmMuteProbability: 1,
         });
+        // 每个用例都补一个尾音：被断言的音不能是收尾音，否则会被终止式豁免
+        const tail = positioned({ duration: 0.5, string: 1, fret: 7 });
         const [lowString] = decorateSlots(
-            [positioned({ duration: 0.125, string: 4 })],
+            [positioned({ duration: 0.125, string: 4 }), tail],
             palmMuteStyle, PLAYABILITY, constantRng(0),
         );
         expect(lowString.palmMute).toBe(true);
 
         const [highString] = decorateSlots(
-            [positioned({ duration: 0.5, string: 3 })],
+            [positioned({ duration: 0.5, string: 3 }), tail],
             palmMuteStyle, PLAYABILITY, constantRng(0),
         );
         expect(highString.palmMute).toBeUndefined();
 
         const [tooShort] = decorateSlots(
-            [positioned({ duration: 0.0625, string: 6 })],
+            [positioned({ duration: 0.0625, string: 6 }), tail],
             palmMuteStyle, PLAYABILITY, constantRng(0),
         );
         expect(tooShort.palmMute).toBeUndefined();
@@ -605,7 +607,10 @@ describe('decorateSlots', () => {
 
     it('断音与延音按概率写入，概率 0 不写字段', () => {
         const [staccato] = decorateSlots(
-            [positioned({ string: 1, fret: 5, duration: 0.125 })],
+            [
+                positioned({ string: 1, fret: 5, duration: 0.125 }),
+                positioned({ string: 1, fret: 7, duration: 0.5 }),
+            ],
             articulationStyle({ staccatoProbability: 1 }),
             PLAYABILITY, constantRng(0),
         );
@@ -632,6 +637,26 @@ describe('decorateSlots', () => {
         expect(quiet.staccato).toBeUndefined();
         expect(quiet.letRing).toBeUndefined();
         expect(quiet.palmMute).toBeUndefined();
+    });
+
+    it('收尾音不写断音/闷音/制音，即使概率为 1', () => {
+        // 终止音要保持完整衰减；前一个音仍照常命中，证明只是收尾豁免。
+        const chokeStyle = articulationStyle({
+            deadNoteProbability: 1,
+            staccatoProbability: 1,
+            palmMuteProbability: 1,
+        });
+        const [first, last] = decorateSlots(
+            [
+                positioned({ string: 6, fret: 5, duration: 0.25 }),
+                positioned({ string: 6, fret: 7, duration: 0.5 }),
+            ],
+            chokeStyle, PLAYABILITY, constantRng(0),
+        );
+        expect(first.deadNote).toBe(true);
+        expect(last.staccato).toBeUndefined();
+        expect(last.palmMute).toBeUndefined();
+        expect(last.deadNote).toBeUndefined();
     });
 
     it('把位数量或 MIDI 与骨架不一致时抛错', () => {

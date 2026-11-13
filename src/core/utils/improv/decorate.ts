@@ -132,6 +132,10 @@ function applyHarmonic(
  * 顺序固定为连接 → bend → vibrato → deadNote → harmonic → staccato →
  * letRing → palmMute，前面的不满足条件才轮到后面。每个新概率分支都在
  * 调用 rng 前判断 probability > 0，概率 0 不会扰动随机流。
+ *
+ * 收尾音（全曲最后一个发音）不标 deadNote / staccato / palmMute：终止音
+ * 要有完整的衰减与混响，闷掉或掐短会让整句听起来像被切断。延音、推揉弦
+ * 与泛音不受限，它们本身就能强化收束。
  */
 function applyArticulation(
     note: Note,
@@ -181,8 +185,11 @@ function applyArticulation(
     if (style.staccatoProbability > 0
         && note.duration >= playability.minStaccatoDuration
         && rng() < style.staccatoProbability) {
-        note.staccato = true;
-        return;
+        // 终止音不写断音：骰子照掷；继续走延音/闷音分支，延音可以落在收尾音上
+        if (!isFinalSounding) {
+            note.staccato = true;
+            return;
+        }
     }
 
     if (style.letRingProbability > 0
@@ -196,7 +203,8 @@ function applyArticulation(
         && string <= playability.palmMuteStrings[1]
         && note.duration >= playability.minPalmMuteDuration
         && rng() < style.palmMuteProbability) {
-        note.palmMute = true;
+        // 终止音不闷音：骰子照掷、随机流不变，只拒绝落笔
+        if (!isFinalSounding) note.palmMute = true;
     }
 }
 

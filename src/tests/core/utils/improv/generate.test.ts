@@ -304,6 +304,30 @@ describe('generateLocalImprovisation', () => {
         expect(groupedDuration(chordMeasure!.notes)).toBeCloseTo(capacity, 9);
     });
 
+    it('收尾音达到终止时值，且不带制音/断音/闷音', () => {
+        for (const caseItem of CASES) {
+            for (let seed = 1; seed <= 8; seed++) {
+                const { notes } = generateLocalImprovisation({
+                    numMeasures: 4,
+                    key: caseItem.key,
+                    scaleType: caseItem.scaleType,
+                    style: caseItem.style,
+                    seed,
+                });
+                const sounding = groupFlatNotes(notes)
+                    .filter(group => !group[0].isRest);
+                const last = sounding[sounding.length - 1];
+                expect(last[0].duration).toBeGreaterThanOrEqual(
+                    LOCAL_IMPROV_CONFIG.styleProfiles[caseItem.style]
+                        .phrase.cadenceMinDuration - 1e-9,
+                );
+                expect(last.every(note => !note.deadNote
+                    && !note.staccato
+                    && !note.palmMute)).toBe(true);
+            }
+        }
+    });
+
     it('同选项同 seed 完全一致，换 seed 不保证一致', () => {
         const input = { numMeasures: 2, key: 'G', style: 'Rock' as const };
         expect(generateLocalImprovisation({ ...input, seed: 8 }).notes)

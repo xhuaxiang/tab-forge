@@ -330,6 +330,16 @@ export interface PhraseProfile {
     contours: readonly MelodicContour[];
     /** 非末句句尾留休止的概率 */
     endRestProbability: number;
+    /**
+     * 全曲末音（终止音）的最短时值。
+     *
+     * 以音符时值而不是秒表示，换 BPM 不会改变乐句形态。延长只从末音之后
+     * 的休止和前缀拍位的时值里借，不删除发音拍位，因此每小节发音数与密度
+     * 下限不变。终止式只加长或等长后移，不缩短已有末音；小节容量或密度
+     * 下限不允许时按能借到的时值加长，否则保留原末音（例如 2/4 只有 0.5
+     * 容量、又至少两个发音时，占满整小节的终止音不可达）。
+     */
+    cadenceMinDuration: NoteDuration;
     /** 句间换把概率（answer/development 用高把位窗口） */
     shiftProbability: number;
     /** 换把幅度（品），当前用于句首模进/窗口选择 */
