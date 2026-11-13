@@ -1,505 +1,70 @@
 /**
- * 本地即兴生成的数据类型与乐理常量。
+ * 本地即兴类型与乐理常量的公共出口。
  *
- * 与 `types/index.ts` 分开：`Note` 是持久化/AI 契约的数据，这里是
- * 生成链内部的中间表示（节奏计划、旋律骨架、把位、风格参数），
- * 不扩 `Note` 的字段，也不反向被 `types/index.ts` 引用。
+ * 具体声明拆在 `improv/` 下：`options`（音阶/风格/密度/生成选项）、
+ * `harmony`（和弦与和声计划）、`plan`（乐句/节奏/骨架/把位）、
+ * `style`（密度与风格参数）、`playability`（可演奏性）、
+ * `localConfig`（完整配置与生成结果）。这里只做显式 re-export，
+ * 保证外部 `core/types/improv.ts` 的 import 路径不变。
+ *
+ * 与 `types/index.ts` 分开：这里的类型是生成链的中间表示，不扩 `Note`
+ * 的字段，也不反向被 `types/index.ts` 引用。
  */
 
-import type { Note, NoteDuration, Tuning } from './index.ts';
+export {
+    CHORD_QUALITIES,
+    CHORD_INTERVALS,
+} from './improv/harmony.ts';
+export type {
+    ChordQuality,
+    ChordSpec,
+    ChordDegree,
+    ProgressionStep,
+    Progression,
+    ChordEvent,
+    PitchPool,
+    HarmonySegment,
+    HarmonyMeasure,
+} from './improv/harmony.ts';
 
-// ============================================================
-// 选项与配置
-// ============================================================
+export {
+    SCALE_TYPES,
+    LOCAL_STYLES,
+    LOCAL_DENSITIES,
+    SCALE_INTERVALS,
+} from './improv/options.ts';
+export type {
+    ScaleType,
+    LocalStyle,
+    LocalDensity,
+    FretRange,
+    ImprovOptions,
+    ResolvedImprovOptions,
+} from './improv/options.ts';
 
-/** 本地生成支持的音阶（取值与 IMPROV_CONFIG.scaleTypes 保持一致） */
-export const SCALE_TYPES = [
-    'Major (Ionian)',
-    'Natural Minor (Aeolian)',
-    'Harmonic Minor',
-    'Pentatonic Major',
-    'Pentatonic Minor',
-    'Blues',
-    'Dorian',
-    'Mixolydian',
-] as const;
-export type ScaleType = (typeof SCALE_TYPES)[number];
+export type {
+    PhraseRole,
+    PhraseVariation,
+    MelodicContour,
+    PhrasePlan,
+    SlotRole,
+    RhythmSlot,
+    RhythmMeasure,
+    SkeletonSlot,
+    FretPosition,
+    PositionedSlot,
+} from './improv/plan.ts';
 
-/** 本地生成支持的风格（取值与 IMPROV_CONFIG.styles 保持一致） */
-export const LOCAL_STYLES = ['Jazz', 'Blues', 'Rock', 'Folk', 'Classical'] as const;
-export type LocalStyle = (typeof LOCAL_STYLES)[number];
+export type {
+    DurationWeight,
+    DensityProfile,
+    PhraseProfile,
+    StyleProfile,
+} from './improv/style.ts';
 
-/** 本地生成支持的密度（取值与 IMPROV_CONFIG.densities 保持一致） */
-export const LOCAL_DENSITIES = ['低', '中', '高'] as const;
-export type LocalDensity = (typeof LOCAL_DENSITIES)[number];
+export type { PlayabilityRules } from './improv/playability.ts';
 
-/**
- * 音阶音程（相对主音的半音数）。
- *
- * Blues 用六音蓝调音阶（小调五声 + b5），与 AI hint 的
- * 「小调五声 + b3/b5/b7」一致；不是七声音阶。
- */
-export const SCALE_INTERVALS: Record<ScaleType, readonly number[]> = {
-    'Major (Ionian)': [0, 2, 4, 5, 7, 9, 11],
-    'Natural Minor (Aeolian)': [0, 2, 3, 5, 7, 8, 10],
-    'Harmonic Minor': [0, 2, 3, 5, 7, 8, 11],
-    'Pentatonic Major': [0, 2, 4, 7, 9],
-    'Pentatonic Minor': [0, 3, 5, 7, 10],
-    'Blues': [0, 3, 5, 6, 7, 10],
-    'Dorian': [0, 2, 3, 5, 7, 9, 10],
-    'Mixolydian': [0, 2, 4, 5, 7, 9, 10],
-};
-
-// ============================================================
-// 和弦与和声计划
-// ============================================================
-
-/** 和弦质量：三和弦 + 常用七和弦 */
-export const CHORD_QUALITIES = [
-    'major',
-    'minor',
-    'diminished',
-    'augmented',
-    'major7',
-    'minor7',
-    'dominant7',
-    'halfDiminished7',
-    'diminished7',
-] as const;
-export type ChordQuality = (typeof CHORD_QUALITIES)[number];
-
-/** 和弦音程（相对根音的半音数） */
-export const CHORD_INTERVALS: Record<ChordQuality, readonly number[]> = {
-    major: [0, 4, 7],
-    minor: [0, 3, 7],
-    diminished: [0, 3, 6],
-    augmented: [0, 4, 8],
-    major7: [0, 4, 7, 11],
-    minor7: [0, 3, 7, 10],
-    dominant7: [0, 4, 7, 10],
-    halfDiminished7: [0, 3, 6, 10],
-    diminished7: [0, 3, 6, 9],
-};
-
-/** 一个和弦：根音 pitch class + 质量 */
-export interface ChordSpec {
-    rootPitchClass: number;
-    quality: ChordQuality;
-}
-
-/** 调内级数（1-7） */
-export type ChordDegree = 1 | 2 | 3 | 4 | 5 | 6 | 7;
-
-/**
- * 和弦进行的一步。
- *
- * - 数字：按当前音阶生成调内三和弦（例如大调 2 → Dm）；
- * - 显式和弦：直接指定根音与质量，允许使用调外和弦。
- */
-export type ProgressionStep = ChordDegree | ChordSpec;
-
-/** 和弦进行：按小节铺开，最后一小节落在进行的最后一步 */
-export type Progression = readonly ProgressionStep[];
-
-/** 用户锁定的把位范围（品位，含端点，0-24） */
-export interface FretRange {
-    min: number;
-    max: number;
-}
-
-/**
- * 显式和弦事件：在第 `measure` 小节的 `start` 位置换和弦。
- *
- * `start` 以全音符为单位（4/4 一小节 = 1）；`chord` 可以是级数或显式
- * 和弦，级别解析仍在和声层完成。一小节内按 start 升序形成多个和弦段。
- */
-export interface ChordEvent {
-    /** 小节下标，0-based */
-    measure: number;
-    /** 相对小节起点的位置（全音符为单位） */
-    start: number;
-    chord: ProgressionStep;
-}
-
-/**
- * 一个小节/和弦段的可用音池（pitch class）。
- *
- * `chordPitchClasses` 是强拍目标；`passingPitchClasses` 可在弱拍使用；
- * `avoidPitchClasses` 位于和弦音上方小二度，只允许在短经过音中出现。
- */
-export interface PitchPool {
-    chordPitchClasses: number[];
-    availablePitchClasses: number[];
-    passingPitchClasses: number[];
-    avoidPitchClasses: number[];
-}
-
-/** 小节内的和弦段；start/duration 与小节容量同单位（全音符=1） */
-export interface HarmonySegment {
-    /** 相对小节起点的位置（全音符为单位） */
-    start: number;
-    /** 持续时值（全音符为单位） */
-    duration: number;
-    chord: ChordSpec;
-    pool: PitchPool;
-}
-
-/** 一小节的和声上下文 */
-export interface HarmonyMeasure {
-    measureIndex: number;
-    segments: HarmonySegment[];
-}
-
-/** 生成选项：全部可选，缺省值由 resolveLocalImprovOptions 补齐 */
-export interface ImprovOptions {
-    numMeasures?: number;
-    key?: string;
-    scaleType?: ScaleType;
-    style?: LocalStyle;
-    density?: LocalDensity;
-    timeSignature?: string;
-    tuning?: Tuning;
-    /** 和弦进行；不传时按 I 级主和弦，保持原有行为 */
-    progression?: Progression;
-    /**
-     * 显式多和弦位置；非空时覆盖 `progression` 的逐小节铺法，
-     * 未覆盖的小节仍按 `progression` 兜底。
-     */
-    chordChart?: readonly ChordEvent[];
-    /** 用户锁定的把位范围；不传时按风格偏好 */
-    fretRange?: FretRange;
-    /** 固定种子；不传时由 UI 生成，core 默认 1 */
-    seed?: number;
-}
-
-/** 补齐缺省值后的生成选项 */
-export interface ResolvedImprovOptions {
-    numMeasures: number;
-    /** 原始调性写法（如 C / Am），用于状态栏与复现 */
-    key: string;
-    /** 主音 pitch class 0-11 */
-    tonicPitchClass: number;
-    scaleType: ScaleType;
-    style: LocalStyle;
-    density: LocalDensity;
-    timeSignature: string;
-    tuning: Tuning;
-    progression: Progression;
-    /** 规范化后的显式和弦事件；空数组表示只按 progression 铺 */
-    chordChart: readonly ChordEvent[];
-    /** 规范化后的用户把位；null 表示未锁定，按风格偏好 */
-    fretRange: FretRange | null;
-    seed: number;
-}
-
-// ============================================================
-// 乐句计划
-// ============================================================
-
-/** 乐句在段落中的功能 */
-export type PhraseRole = 'statement' | 'answer' | 'development' | 'cadence';
-
-/** 乐句相对动机来源的变形方式 */
-export type PhraseVariation =
-    | 'literal'
-    | 'tail'
-    | 'sequence'
-    | 'inversion'
-    | 'rhythmic'
-    | 'cadence';
-
-/** 旋律轮廓 */
-export type MelodicContour = 'arch' | 'ascending' | 'descending' | 'wave';
-
-/**
- * 一句的生成计划。
- *
- * `steps` 是级数步序列，跨小节延续（不在小节边界重置）；动机变形通过
- * 复用/反向/改尾实现，而不是每小节重新抽一次随机步。
- */
-export interface PhrasePlan {
-    index: number;
-    /** 起始小节（含） */
-    startMeasure: number;
-    /** 结束小节（不含） */
-    endMeasure: number;
-    role: PhraseRole;
-    contour: MelodicContour;
-    variation: PhraseVariation;
-    /** 动机来源句；statement 为 null */
-    sourcePhrase: number | null;
-    /** 句首相对来源句的模进级数 */
-    transposeSteps: number;
-    /** 相对基础音区的半音偏移（保留给后续按句移调） */
-    registerShift: number;
-    /** 本句把位窗口（品位，含端点） */
-    fretMin: number;
-    fretMax: number;
-    /** 级数步序列，跨小节延续 */
-    steps: number[];
-}
-
-// ============================================================
-// 节奏计划
-// ============================================================
-
-/** 拍位在律动中的角色：强拍 / 弱拍 / 经过音 */
-export type SlotRole = 'strong' | 'weak' | 'passing';
-
-/** 一个小节内的拍位（休止也占一个拍位） */
-export interface RhythmSlot {
-    duration: NoteDuration;
-    isRest: boolean;
-    role: SlotRole;
-}
-
-/** 一小节的节奏计划；slots 时值之和恰好等于 capacity */
-export interface RhythmMeasure {
-    index: number;
-    capacity: number;
-    slots: RhythmSlot[];
-    /** 所属乐句下标；字段可选，兼容只测单层的旧调用 */
-    phraseIndex?: number;
-}
-
-// ============================================================
-// 旋律骨架
-// ============================================================
-
-/**
- * 音高骨架拍位。
- *
- * 旋律层仍只写单声部：midis 长度为 0（休止）或 1；经过声部层
- * （`addVoicings`）后，发音拍位为 1..`maxChordVoices` 个升序 MIDI。
- */
-export interface SkeletonSlot {
-    measureIndex: number;
-    slotIndex: number;
-    duration: NoteDuration;
-    isRest: boolean;
-    /** MIDI 音号，v1 长度 0/1 */
-    midis: number[];
-    role: SlotRole;
-    /** 所属乐句下标；字段可选，兼容只测单层的旧调用 */
-    phraseIndex?: number;
-}
-
-// ============================================================
-// 把位
-// ============================================================
-
-/** 一个 (弦, 品) 候选位置 */
-export interface FretPosition {
-    /** 应用侧弦号 1-6（1=高音 E） */
-    string: number;
-    fret: number;
-    midi: number;
-}
-
-/** 骨架拍位 + DP 选出的位置 */
-export interface PositionedSlot {
-    skeleton: SkeletonSlot;
-    /** 与 skeleton.midis 一一对应；休止为 [] */
-    positions: FretPosition[];
-}
-
-// ============================================================
-// 风格与可演奏性
-// ============================================================
-
-/** 时值权重（用于加权随机选择） */
-export interface DurationWeight {
-    duration: NoteDuration;
-    weight: number;
-}
-
-/** 密度参数：只决定音符疏密与休止比例，不描述风格 */
-export interface DensityProfile {
-    durations: readonly DurationWeight[];
-    /** 每个拍位成为休止的概率（每小节第一个拍位强制为音符） */
-    restProbability: number;
-    /** 每小节至少保留的发音数 */
-    minNotesPerMeasure: number;
-}
-
-/** 乐句参数：句长、轮廓、换把与句尾呼吸 */
-export interface PhraseProfile {
-    /** 每句小节数（通常 2） */
-    measures: number;
-    /** 轮廓循环顺序；statement 必用第一个 */
-    contours: readonly MelodicContour[];
-    /** 非末句句尾留休止的概率 */
-    endRestProbability: number;
-    /**
-     * 全曲末音（终止音）的最短时值。
-     *
-     * 以音符时值而不是秒表示，换 BPM 不会改变乐句形态。延长只从末音之后
-     * 的休止和前缀拍位的时值里借，不删除发音拍位，因此每小节发音数与密度
-     * 下限不变。终止式只加长或等长后移，不缩短已有末音；小节容量或密度
-     * 下限不允许时按能借到的时值加长，否则保留原末音（例如 2/4 只有 0.5
-     * 容量、又至少两个发音时，占满整小节的终止音不可达）。
-     */
-    cadenceMinDuration: NoteDuration;
-    /** 句间换把概率（answer/development 用高把位窗口） */
-    shiftProbability: number;
-    /** 换把幅度（品），当前用于句首模进/窗口选择 */
-    shiftFrets: number;
-}
-
-/** 风格参数：全部是机器可读的数字，不是 AI prompt 文案 */
-export interface StyleProfile {
-    /** 风格偏好的时值权重，与密度权重共同决定节奏 */
-    durations: readonly DurationWeight[];
-    /** 偏好把位（品位，含端点） */
-    preferredFretMin: number;
-    preferredFretMax: number;
-    /** 旋律中心音高（MIDI） */
-    registerCenterMidi: number;
-    /** 旋律围绕中心音的音域宽度（半音） */
-    registerRangeSemitones: number;
-    /** 单步最大音程（半音） */
-    maxLeapSemitones: number;
-    /** 动机长度（音数） */
-    motifLength: number;
-    /** 重复已有动机的概率 */
-    repetitionProbability: number;
-    /** 强拍重音概率 */
-    accentProbability: number;
-    /** 弱拍轻音概率 */
-    softProbability: number;
-    /** 推弦概率（仅 Blues/Jazz/Rock 非零） */
-    bendProbability: number;
-    /** 揉弦概率 */
-    vibratoProbability: number;
-    /** 手掌闷音概率（仅低音弦） */
-    palmMuteProbability: number;
-    /** 同弦相邻音做击/勾弦的概率（1-2 品） */
-    hammerPullProbability: number;
-    /** 同弦移动做滑弦的概率（含 1-2 品短滑；两端都不能是空弦） */
-    slideProbability: number;
-    /** 单音制音概率（仅低音弦、非收尾音） */
-    deadNoteProbability: number;
-    /** 单音断音概率 */
-    staccatoProbability: number;
-    /** 单音自由延音概率 */
-    letRingProbability: number;
-    /** 单音泛音概率（自然/人工/捏弦按可用性选择） */
-    harmonicProbability: number;
-    /** 泛音命中后优先做自然泛音的条件概率（可用时） */
-    naturalHarmonicShare: number;
-    /** 未成自然泛音时做捏弦泛音的条件概率（可用时），其余为人工泛音 */
-    pinchHarmonicShare: number;
-    /** 给旋律拍位加和弦音的概率（仅强拍/句尾/长时值） */
-    chordProbability: number;
-    /** 和弦拍位追加第二个下方声部的概率 */
-    secondVoicingProbability: number;
-    /** 和弦组做琶音的概率（仅组首） */
-    arpeggioProbability: number;
-    /** 和弦组做扫弦的概率（仅组首，优先于琶音） */
-    strumProbability: number;
-    /** 乐句结构参数 */
-    phrase: PhraseProfile;
-}
-
-/**
- * 可演奏性参数。
- *
- * 品位范围、单步音程与技法最短时值由生成器/校验硬性检查；
- * `maxHandSpan`、`maxStringJump` 只作为把位 DP 的高额代价（软约束），
- * 因为换把时允许暂时超出同一把位的手距。
- */
-export interface PlayabilityRules {
-    fretMin: number;
-    fretMax: number;
-    /** 同一把位内的品位跨度；超过后 DP 加重代价（不硬性禁止换把） */
-    maxHandSpan: number;
-    /** 允许的跨弦数；超过后 DP 加重代价（不硬性禁止大跨弦） */
-    maxStringJump: number;
-    /** 单步最大音程（半音），与风格取更严者；校验会强制执行 */
-    maxLeapSemitones: number;
-    /** 句间换把/全曲收束允许的最大音程（半音），通常为一个八度 */
-    maxPhraseLeapSemitones: number;
-    /** 允许推弦的最短时值 */
-    minBendDuration: NoteDuration;
-    /** 允许「推上去再放回」的最短时值（释放需要更多时间） */
-    minBendReleaseDuration: NoteDuration;
-    /** 允许揉弦的最短时值 */
-    minVibratoDuration: NoteDuration;
-    /** 允许手掌闷音的最短时值 */
-    minPalmMuteDuration: NoteDuration;
-    /** 允许手掌闷音的最粗弦范围 [最低弦号, 最高弦号]（4-6） */
-    palmMuteStrings: readonly [number, number];
-    /** 允许击/勾/滑的最短时值 */
-    minConnectDuration: NoteDuration;
-    /** 击/勾弦允许的最大品位跨度 */
-    maxHammerPullFrets: number;
-    /** 滑弦允许的最大品位跨度 */
-    maxSlideFrets: number;
-    /** 允许制音的最短时值 */
-    minDeadNoteDuration: NoteDuration;
-    /** 允许断音的最短时值 */
-    minStaccatoDuration: NoteDuration;
-    /** 允许自由延音的最短时值 */
-    minLetRingDuration: NoteDuration;
-    /** 允许泛音的最短时值 */
-    minHarmonicDuration: NoteDuration;
-    /** 允许制音的弦号范围 [最低弦号, 最高弦号] */
-    deadNoteStrings: readonly [number, number];
-    /** 允许捏弦泛音的弦号范围 [最低弦号, 最高弦号] */
-    pinchHarmonicStrings: readonly [number, number];
-    /** 自然泛音可用的绝对品位（节点就是 fret） */
-    naturalHarmonicFrets: readonly number[];
-    /** 人工/捏弦泛音可用的触弦点位差（相对按弦位置，不是绝对品位） */
-    harmonicFrets: readonly number[];
-    /** 触发和弦加厚的最短时值（强拍/句尾不受此限） */
-    minChordDuration: NoteDuration;
-    /** 和弦组最大声部数（含旋律） */
-    maxChordVoices: number;
-    /** 和弦组最高与最低声部的最大半音跨度 */
-    maxVoicingSpanSemitones: number;
-    /** 和弦组相邻声部的最小半音间隔 */
-    minVoicingGapSemitones: number;
-    /** 和弦组内最大品位跨度 */
-    maxChordSpanFrets: number;
-    /** 和弦组内最大弦号跨度 */
-    maxChordStringSpan: number;
-}
-
-/** 本地即兴的完整配置 */
-export interface LocalImprovConfig {
-    numMeasures: {
-        default: number;
-        min: number;
-        max: number;
-        options: readonly number[];
-    };
-    timeSignatures: readonly string[];
-    /** 每小节和弦数（等分）；1 表示沿用 progression 的逐小节铺法 */
-    chordsPerMeasure: {
-        default: number;
-        options: readonly number[];
-    };
-    defaults: {
-        numMeasures: number;
-        key: string;
-        scaleType: ScaleType;
-        style: LocalStyle;
-        density: LocalDensity;
-        timeSignature: string;
-        tuning: Tuning;
-        seed: number;
-    };
-    styleProfiles: Record<LocalStyle, StyleProfile>;
-    densityProfiles: Record<LocalDensity, DensityProfile>;
-    playability: PlayabilityRules;
-}
-
-/** 生成结果：Note[] 可直接交给 scoreStore.loadNotes */
-export interface LocalImprovResult {
-    notes: Note[];
-    options: ResolvedImprovOptions;
-    /** 每小节实际使用的和弦与可用音池（仅生成期数据，不写入 Score） */
-    harmony: HarmonyMeasure[];
-    /** 本次生成的乐句计划（仅生成期数据） */
-    phrases: PhrasePlan[];
-}
+export type {
+    LocalImprovConfig,
+    LocalImprovResult,
+} from './improv/localConfig.ts';
