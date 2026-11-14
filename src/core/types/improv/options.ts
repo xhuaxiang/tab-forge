@@ -2,7 +2,7 @@
  * 本地即兴的选项、音阶/风格/密度取值与补齐后的配置。
  */
 
-import type { Tuning } from '../tuning.ts';
+import type { Tuning } from '../tuning/index.ts';
 import type { ChordEvent, Progression } from './harmony.ts';
 
 /** 本地生成支持的音阶（取值与 IMPROV_CONFIG.scaleTypes 保持一致） */

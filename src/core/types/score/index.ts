@@ -6,8 +6,8 @@
  * 乐器特有字段（六线谱是 `tuning`）。
  */
 
-import type { Measure, MeasureBase } from './measure.ts';
-import type { Tuning } from './tuning.ts';
+import type { Measure, MeasureBase } from '../measure/index.ts';
+import type { Tuning } from '../tuning/index.ts';
 
 /**
  * 所有乐器谱共有的头部信息与小节容器。

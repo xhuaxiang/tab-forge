@@ -5,7 +5,7 @@
  * 留在这里（历史上就在 types 内），后续若要迁去 `core/utils/` 应单独做。
  */
 
-import type { Tuning } from './tuning.ts';
+import type { Tuning } from '../tuning/index.ts';
 
 /**
  * 音符音频频率 (A4 = 440Hz)

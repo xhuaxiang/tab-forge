@@ -2,7 +2,7 @@
  * 乐句、节奏、旋律骨架与把位的计划类型（生成链中间表示）。
  */
 
-import type { NoteDuration } from '../note.ts';
+import type { NoteDuration } from '../note/index.ts';
 
 /** 乐句在段落中的功能 */
 export type PhraseRole = 'statement' | 'answer' | 'development' | 'cadence';

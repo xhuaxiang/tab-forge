@@ -5,7 +5,7 @@
  * （钢琴双谱表会换成左右手/高低音谱表，而不是一条 `Note[]`）。
  */
 
-import type { Note } from './note.ts';
+import type { Note } from '../note/index.ts';
 
 /** 所有乐器小节共有的字段 */
 export interface MeasureBase {

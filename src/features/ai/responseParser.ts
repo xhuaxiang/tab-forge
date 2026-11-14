@@ -66,7 +66,7 @@ const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 /**
  * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
  *
- * 这是 `Note.technique` 的全集（core/types/note.ts）：五种都给 AI。
+ * 这是 `Note.technique` 的全集（core/types/note/index.ts）：五种都给 AI。
  * bend / vibrato 是 blues、jazz 味道的主要载体（推弦哭腔、揉弦呼吸），
  * 早先只开放三种时，那两种风格无论提示词怎么写都出不来。
  * ⚠️ 往 noteContract.ts 加技法时务必同步这一行，否则 AI 发来的技法会落不进去。

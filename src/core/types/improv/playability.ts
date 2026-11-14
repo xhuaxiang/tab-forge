@@ -2,7 +2,7 @@
  * 可演奏性参数。
  */
 
-import type { NoteDuration } from '../note.ts';
+import type { NoteDuration } from '../note/index.ts';
 
 /**
  * 可演奏性参数。

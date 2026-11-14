@@ -2,8 +2,8 @@
  * 本地即兴的完整配置与生成结果。
  */
 
-import type { Note } from '../note.ts';
-import type { Tuning } from '../tuning.ts';
+import type { Note } from '../note/index.ts';
+import type { Tuning } from '../tuning/index.ts';
 import type { HarmonyMeasure } from './harmony.ts';
 import type {
     LocalDensity,

@@ -2,7 +2,7 @@
  * 密度、乐句与风格参数。
  */
 
-import type { NoteDuration } from '../note.ts';
+import type { NoteDuration } from '../note/index.ts';
 import type { MelodicContour } from './plan.ts';
 
 /** 时值权重（用于加权随机选择） */
