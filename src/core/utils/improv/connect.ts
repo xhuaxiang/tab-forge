@@ -6,7 +6,7 @@
  */
 
 import type { Note } from '../../types/index.ts';
-import type { PlayabilityRules } from '../../types/improv.ts';
+import type { PlayabilityRules } from '../../types/improv/index.ts';
 import type { ConnectingTechnique } from '../technique.ts';
 import { canSourceTechnique } from '../technique.ts';
 

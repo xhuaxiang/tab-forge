@@ -4,7 +4,7 @@
 
 import { describe, it, expect } from 'vitest';
 import type { Note } from '../../../../core/types/index.ts';
-import type { RhythmMeasure } from '../../../../core/types/improv.ts';
+import type { RhythmMeasure } from '../../../../core/types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
 import { buildPhrasePlan } from '../../../../core/utils/improv/phrase.ts';
 import { createRng } from '../../../../core/utils/improv/random.ts';

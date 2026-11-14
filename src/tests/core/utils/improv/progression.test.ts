@@ -6,7 +6,7 @@ import { describe, it, expect } from 'vitest';
 import type {
     ChordSpec,
     ProgressionStep,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import {
     buildChordChart,
     chordChartFromBars,

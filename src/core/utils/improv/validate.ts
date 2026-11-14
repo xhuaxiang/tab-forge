@@ -16,7 +16,7 @@ import type {
     PlayabilityRules,
     ResolvedImprovOptions,
     RhythmMeasure,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import {
     BEND_AMOUNT_LABELS,
     HARMONIC_FRET_MAX,

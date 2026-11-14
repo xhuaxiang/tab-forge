@@ -7,7 +7,7 @@ import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
 import type {
     LocalStyle,
     ScaleType,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import { buildHarmonyPlan } from '../../../../core/utils/improv/harmony.ts';
 import { buildPhrasePlan, phraseForMeasure } from '../../../../core/utils/improv/phrase.ts';
 import { buildRhythmPlan } from '../../../../core/utils/improv/rhythm.ts';

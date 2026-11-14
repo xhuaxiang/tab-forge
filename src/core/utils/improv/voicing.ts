@@ -14,7 +14,7 @@ import type {
     ResolvedImprovOptions,
     SkeletonSlot,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { segmentAt } from './harmony.ts';
 import { midiToFretPositions, pitchClassOf } from './pitch.ts';
 

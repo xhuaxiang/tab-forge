@@ -15,7 +15,7 @@ import type {
     PlayabilityRules,
     ResolvedImprovOptions,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { pickWeighted, randInt } from './random.ts';
 
 /** 轮廓偏置：每一步优先朝轮廓方向走的级数 */

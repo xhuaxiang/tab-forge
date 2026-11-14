@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
 import { STANDARD_TUNING } from '../../../../core/types/index.ts';
-import type { FretRange, ScaleType } from '../../../../core/types/improv.ts';
+import type { FretRange, ScaleType } from '../../../../core/types/improv/index.ts';
 import { resolveLocalImprovOptions } from '../../../../core/utils/improv/generate.ts';
 import { generateLocalImprovisation } from '../../../../core/utils/improv/generate.ts';
 import {

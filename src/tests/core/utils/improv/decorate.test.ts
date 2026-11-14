@@ -11,7 +11,7 @@ import type {
     PositionedSlot,
     SlotRole,
     StyleProfile,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import { decorateSlots } from '../../../../core/utils/improv/decorate.ts';
 import { createRng } from '../../../../core/utils/improv/random.ts';
 

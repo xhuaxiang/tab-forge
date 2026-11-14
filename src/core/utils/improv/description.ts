@@ -13,7 +13,7 @@ import type {
     Progression,
     ProgressionStep,
     ScaleType,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { parseKey } from './pitch.ts';
 import {

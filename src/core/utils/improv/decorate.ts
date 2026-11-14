@@ -11,7 +11,7 @@ import type {
     PlayabilityRules,
     PositionedSlot,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { BEND_AMOUNT_LABELS } from '../../config.ts';
 import type {
     NoteGroupBase,

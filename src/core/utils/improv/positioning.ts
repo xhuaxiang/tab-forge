@@ -15,7 +15,7 @@ import type {
     ResolvedImprovOptions,
     SkeletonSlot,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { voicingCandidatesForMidis } from './voicing.ts';
 
 interface State {

@@ -4,8 +4,8 @@
 
 import { describe, it, expect } from 'vitest';
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
-import type { LocalStyle, PhrasePlan } from '../../../../core/types/improv.ts';
-import { LOCAL_STYLES } from '../../../../core/types/improv.ts';
+import type { LocalStyle, PhrasePlan } from '../../../../core/types/improv/index.ts';
+import { LOCAL_STYLES } from '../../../../core/types/improv/index.ts';
 import {
     buildPhrasePlan,
     phraseForMeasure,

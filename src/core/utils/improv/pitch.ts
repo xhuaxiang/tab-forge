@@ -6,8 +6,8 @@
  */
 
 import type { Tuning } from '../../types/index.ts';
-import type { FretPosition, ScaleType } from '../../types/improv.ts';
-import { SCALE_INTERVALS } from '../../types/improv.ts';
+import type { FretPosition, ScaleType } from '../../types/improv/index.ts';
+import { SCALE_INTERVALS } from '../../types/improv/index.ts';
 import { noteNameToMidi } from '../scoreMapping.ts';
 
 /** 音高 class（0-11），对负数也安全 */

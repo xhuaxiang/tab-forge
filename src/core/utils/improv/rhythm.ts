@@ -18,7 +18,7 @@ import type {
     RhythmSlot,
     SlotRole,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { parseTimeSignature, capacityFromTimeSignature } from '../measureUtils.ts';
 import { pickWeighted } from './random.ts';
 

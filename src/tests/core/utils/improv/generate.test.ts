@@ -9,7 +9,7 @@ import type { Note } from '../../../../core/types/index.ts';
 import type {
     LocalStyle,
     ScaleType,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import {
     generateLocalImprovisation,
     resolveLocalImprovOptions,

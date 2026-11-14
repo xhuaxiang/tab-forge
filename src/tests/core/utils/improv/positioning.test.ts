@@ -8,7 +8,7 @@ import type {
     LocalStyle,
     ScaleType,
     SkeletonSlot,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import { buildSkeleton } from '../../../../core/utils/improv/melody.ts';
 import { choosePositions } from '../../../../core/utils/improv/positioning.ts';
 import { buildRhythmPlan } from '../../../../core/utils/improv/rhythm.ts';

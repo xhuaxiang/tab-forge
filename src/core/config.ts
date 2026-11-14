@@ -9,7 +9,7 @@ import type {
     LocalImprovConfig,
     ProgressionStep,
     SlotRole,
-} from './types/improv.ts';
+} from './types/improv/index.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {

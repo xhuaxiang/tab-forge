@@ -14,7 +14,7 @@ import {
     type ChordSpec,
     type Progression,
     type ScaleType,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import {
     generateLocalImprovisation,
     resolveLocalImprovOptions,

@@ -12,12 +12,12 @@ import type {
     LocalImprovConfig,
     LocalImprovResult,
     ResolvedImprovOptions,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import {
     LOCAL_DENSITIES,
     LOCAL_STYLES,
     SCALE_TYPES,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { decorateSlots } from './decorate.ts';

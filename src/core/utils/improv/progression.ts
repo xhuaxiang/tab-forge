@@ -14,8 +14,8 @@ import type {
     ChordSpec,
     Progression,
     ProgressionStep,
-} from '../../types/improv.ts';
-import { CHORD_QUALITIES } from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
+import { CHORD_QUALITIES } from '../../types/improv/index.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { noteNameToMidi } from '../scoreMapping.ts';
 import { pitchClassOf } from './pitch.ts';

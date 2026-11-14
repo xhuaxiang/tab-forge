@@ -14,7 +14,7 @@ import { STANDARD_TUNING } from '../../../../core/types/index.ts';
 import type {
     SkeletonSlot,
     StyleProfile,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import { buildHarmonyPlan } from '../../../../core/utils/improv/harmony.ts';
 import { midiToFretPositions, pitchClassOf } from '../../../../core/utils/improv/pitch.ts';
 import { createRng } from '../../../../core/utils/improv/random.ts';

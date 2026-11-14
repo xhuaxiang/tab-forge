@@ -18,11 +18,11 @@ import type {
     Progression,
     ProgressionStep,
     ResolvedImprovOptions,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import {
     CHORD_INTERVALS,
     SCALE_INTERVALS,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { pitchClassOf, scalePitchClasses } from './pitch.ts';
 

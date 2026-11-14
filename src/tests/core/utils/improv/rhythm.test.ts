@@ -11,8 +11,8 @@ import type {
     ResolvedImprovOptions,
     RhythmMeasure,
     StyleProfile,
-} from '../../../../core/types/improv.ts';
-import { LOCAL_DENSITIES, LOCAL_STYLES } from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
+import { LOCAL_DENSITIES, LOCAL_STYLES } from '../../../../core/types/improv/index.ts';
 import { capacityFromTimeSignature } from '../../../../core/utils/measureUtils.ts';
 import { buildHarmonyPlan } from '../../../../core/utils/improv/harmony.ts';
 import { buildPhrasePlan } from '../../../../core/utils/improv/phrase.ts';

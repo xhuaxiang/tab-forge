@@ -15,12 +15,12 @@ import type {
     Progression,
     ResolvedImprovOptions,
     ScaleType,
-} from '../../core/types/improv.ts';
+} from '../../core/types/improv/index.ts';
 import {
     LOCAL_DENSITIES,
     LOCAL_STYLES,
     SCALE_TYPES,
-} from '../../core/types/improv.ts';
+} from '../../core/types/improv/index.ts';
 import type { ImprovSelectOption } from '../../core/config.ts';
 import {
     IMPROV_CONFIG,

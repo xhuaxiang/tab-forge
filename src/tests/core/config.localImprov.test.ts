@@ -18,7 +18,7 @@ import {
     LOCAL_STYLES,
     SCALE_INTERVALS,
     SCALE_TYPES,
-} from '../../core/types/improv.ts';
+} from '../../core/types/improv/index.ts';
 import { NOTE_DURATIONS, STANDARD_TUNING } from '../../core/types/index.ts';
 import {
     isProgressionStep,

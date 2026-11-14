@@ -13,7 +13,7 @@ import type {
     RhythmMeasure,
     SkeletonSlot,
     StyleProfile,
-} from '../../types/improv.ts';
+} from '../../types/improv/index.ts';
 import { buildHarmonyPlan, segmentAt, segmentIndexAt } from './harmony.ts';
 import { pickWeighted } from './random.ts';
 import {
