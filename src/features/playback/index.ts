@@ -13,7 +13,6 @@ export {
     GuitarEngine,
     buildSchedule,
     beatDurationSec,
-    DURATION_TO_BEATS,
     generateStringData,
     toAudioBuffer,
     getBodyFilterPreset,

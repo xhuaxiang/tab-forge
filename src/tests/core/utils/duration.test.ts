@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { durationName } from '../../../core/utils/duration.ts';
+import { durationName, durationToBeats } from '../../../core/utils/duration.ts';
 
 describe('durationName 合法时值', () => {
     it('1 → 全音符', () => {
@@ -77,5 +77,31 @@ describe('durationName 非法/未覆盖时值兜底', () => {
 
     it('0.015625（三十二分再细分，映射表未收录）→ 兜底而非被截断', () => {
         expect(durationName(0.015625)).toBe('0.015625拍');
+    });
+});
+
+describe('durationToBeats 时值 → 拍数', () => {
+    it('6 个合法时值按比例换算（全音符=4 拍、四分=1 拍）', () => {
+        const cases: Array<[number, number]> = [
+            [1, 4],
+            [0.5, 2],
+            [0.25, 1],
+            [0.125, 0.5],
+            [0.0625, 0.25],
+            [0.03125, 0.125],
+        ];
+        for (const [d, beats] of cases) {
+            expect(durationToBeats(d)).toBeCloseTo(beats, 10);
+        }
+    });
+
+    it('清单外的 1/3（三连音时值）→ 4/3 拍，不会被当成 1 拍', () => {
+        expect(durationToBeats(1 / 3)).toBeCloseTo(4 / 3, 10);
+        expect(durationToBeats(1 / 3)).not.toBeCloseTo(1, 10);
+    });
+
+    it('清单外的 0.3 → 1.2 拍，按比例换算而非回落', () => {
+        expect(durationToBeats(0.3)).toBeCloseTo(1.2, 10);
+        expect(durationToBeats(0.3)).not.toBeCloseTo(1, 10);
     });
 });

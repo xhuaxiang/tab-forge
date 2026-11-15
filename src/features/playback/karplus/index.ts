@@ -25,7 +25,6 @@ export {
     computeForceRepluck,
     computeTechniqueChainInfo,
     computeTechniqueRing,
-    DURATION_TO_BEATS,
 } from './scheduling.ts';
 export type {
     ScheduledEvent,

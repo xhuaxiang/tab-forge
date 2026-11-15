@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { STANDARD_TUNING, type Measure, type Note } from '../../../../core/types/index.ts';
+import { STANDARD_TUNING, type Measure, type Note, type NoteDuration } from '../../../../core/types/index.ts';
 import { KARPLUS_ARTICULATION } from '../../../../core/config.ts';
 import { semitonesToRate } from '../../../../core/utils/frequency.ts';
 import { resolveNoteFrequency } from '../../../../core/utils/noteFrequency.ts';
@@ -53,6 +53,19 @@ describe('buildSchedule', () => {
         expect(s.events[2].duration).toBeCloseTo(0.25, 5);
         expect(s.events[1].delayMs).toBeCloseTo(100 + 2000, 0);
         expect(s.events[2].delayMs).toBeCloseTo(100 + 2000 + 1000, 0);
+    });
+
+    it('清单外时值 1/3（三连音）按比例换算为 4/3 拍，不回落到 1 拍', () => {
+        // 1/4 小节容量 = 1 拍；1/3 全音符 = 4/3 拍，会越过容量且不补齐，
+        // 若被当成 1 拍则总时长恰好等于容量，两者可区分。
+        const third = (1 / 3) as NoteDuration;
+        const s = buildSchedule([measure([note({ duration: third })], 1, 4)], BPM);
+        expect(s.events).toHaveLength(1);
+        // 120 BPM：一拍 0.5s，4/3 拍 = 0.6667s（不是 0.5s）
+        expect(s.events[0].duration).toBeCloseTo((4 / 3) * 0.5, 6);
+        expect(s.events[0].duration).not.toBeCloseTo(0.5, 6);
+        expect(s.totalDurationMs).toBeCloseTo(100 + (4 / 3) * 500, 1);
+        expect(s.totalDurationMs).not.toBeCloseTo(100 + 500, 1);
     });
 
     it('休止符不产生事件但占用时值', () => {

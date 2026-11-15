@@ -15,6 +15,7 @@
 import type { Measure, Note } from '../../../core/types/index.ts';
 import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
 import { resolveNoteDynamics } from '../../../core/utils/metricAccent.ts';
+import { durationToBeats } from '../../../core/utils/duration.ts';
 import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
 import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
 import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
@@ -50,16 +51,6 @@ export interface PlaybackSchedule {
 export function beatDurationSec(bpm: number): number {
     return 60 / bpm;
 }
-
-/** 时值 → 拍数 */
-export const DURATION_TO_BEATS: Record<number, number> = {
-    1: 4,         // 全音符
-    0.5: 2,       // 二分音符
-    0.25: 1,      // 四分音符
-    0.125: 0.5,   // 八分音符
-    0.0625: 0.25, // 十六分音符
-    0.03125: 0.125, // 三十二分音符
-};
 
 /**
  * buildSchedule 的扫弦/琶音偏移在极端速度下可能越过下一个 slot，
@@ -245,7 +236,8 @@ export function buildSchedule(
             const slotStart = slotOffset;
             slotOffset += first.duration;
 
-            const durSec = beat * (DURATION_TO_BEATS[first.duration] ?? 1);
+            // 时值换算的唯一实现在 core/utils/duration.ts（清单外时值按比例换算）
+            const durSec = beat * durationToBeats(first.duration);
             const durMs = durSec * 1000;
 
             // 整拍静默（休止）会打断同弦技法连接
@@ -324,11 +316,11 @@ export function buildSchedule(
         });
 
         // 小节内容不足自身容量时补齐（部分填充的小节也会补齐）。
-        // 容量以全音符为 1，换算成四分音符拍数要 ×4；不能用固定 4/4，
-        // 否则 3/4、6/8 的谱子会多出拍子。
+        // 容量与 Note.duration 同为「全音符 = 1」，换算成四分音符拍数走
+        // durationToBeats；不能用固定 4/4，否则 3/4、6/8 的谱子会多出拍子。
         // 非法/零容量拍号回退旧的 4 拍，避免 NaN/Infinity 毒化总时长。
         const capacity = measureCapacity(measure);
-        const measureBeats = Number.isFinite(capacity) && capacity > 0 ? capacity * 4 : 4;
+        const measureBeats = Number.isFinite(capacity) && capacity > 0 ? durationToBeats(capacity) : 4;
         const capacityEndMs = measureStartMs + beat * measureBeats * 1000;
         if (cursorMs < capacityEndMs - 1) {
             // 内容不足时补齐的空白同样是静默：空小节也走这里（cursorMs 仍在起点）
