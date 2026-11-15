@@ -27,6 +27,29 @@ export const LOCAL_DENSITIES = ['低', '中', '高'] as const;
 export type LocalDensity = (typeof LOCAL_DENSITIES)[number];
 
 /**
+ * 标准五型指法（国内通行口径）。
+ *
+ * 以「关系大调」级数命名：Mi=3、Sol=5、La=6、Si=7、Re=2。锚点是 6 弦上
+ * 该级音的最低可用品位，窗口固定 4 品（C 大调 La = 5-8 品）。
+ */
+export const FINGERING_PATTERNS = ['Mi', 'Sol', 'La', 'Si', 'Re'] as const;
+export type FingeringPattern = (typeof FINGERING_PATTERNS)[number];
+
+/** 练习意图：只调整表现密度/跳进/把位，不改变音高选择算法 */
+export const PRACTICE_FOCUSES = ['none', 'fretboard', 'ear', 'technique', 'warmup'] as const;
+export type PracticeFocus = (typeof PRACTICE_FOCUSES)[number];
+
+/** 练习预设（数值本体在 core/config.ts 的 LOCAL_IMPROV_CONFIG.practiceProfiles） */
+export interface PracticeProfile {
+    /** 表情类概率的统一乘数；建议保持 > 0 */
+    expressionScale: number;
+    /** 收紧风格 maxLeapSemitones（只收紧不放大）；null = 不覆盖 */
+    maxLeapSemitones: number | null;
+    /** 无显式把位时锁定到风格低把位的 4 品窗口 */
+    keepPosition: boolean;
+}
+
+/**
  * 音阶音程（相对主音的半音数）。
  *
  * Blues 用六音蓝调音阶（小调五声 + b5），与 AI hint 的
@@ -67,9 +90,36 @@ export interface ImprovOptions {
     chordChart?: readonly ChordEvent[];
     /** 用户锁定的把位范围；不传时按风格偏好 */
     fretRange?: FretRange;
+    /** 标准五型指法；显式 fretRange 优先于它 */
+    fingering?: FingeringPattern;
+    /** 练习意图；不传时视为 none */
+    practice?: PracticeFocus;
     /** 固定种子；不传时由 UI 生成，core 默认 1 */
     seed?: number;
 }
+
+/**
+ * AI 需求解析允许覆盖的字段子集。
+ *
+ * 与 `ImprovOptions` 分开，编译期禁止 AI 注入 `tuning` / `seed` /
+ * `chordChart`。`chordsPerMeasure` 只存在于 brief 侧，合并后由 UI
+ * 展开成 `chordChart`。
+ */
+export type ImprovBriefOptions = Pick<
+    ImprovOptions,
+    | 'numMeasures'
+    | 'key'
+    | 'scaleType'
+    | 'style'
+    | 'density'
+    | 'timeSignature'
+    | 'fingering'
+    | 'fretRange'
+    | 'progression'
+> & {
+    /** 每个和弦占几小节；缺省 / 1 表示逐小节铺 */
+    chordsPerMeasure?: number;
+};
 
 /** 补齐缺省值后的生成选项 */
 export interface ResolvedImprovOptions {
@@ -88,5 +138,11 @@ export interface ResolvedImprovOptions {
     chordChart: readonly ChordEvent[];
     /** 规范化后的用户把位；null 表示未锁定，按风格偏好 */
     fretRange: FretRange | null;
+    /** 把位来源：重试阶梯据此判断窄窗是用户显式要的还是推理出来的 */
+    fretRangeSource: 'explicit' | 'fingering' | 'practice' | 'style';
+    /** 规范化后的五型指法；null 表示未指定 */
+    fingering: FingeringPattern | null;
+    /** 规范化后的练习意图（缺省 none） */
+    practice: PracticeFocus;
     seed: number;
 }

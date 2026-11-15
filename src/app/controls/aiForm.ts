@@ -1,11 +1,40 @@
 /**
- * aiForm — AI 即兴生成表单事件绑定
+ * aiForm — AI 即兴面板（本地底稿 + AI 表现扩展）。
+ *
+ * 面板选项与当前乐谱作为 base，额外要求交给本地关键词解析 + AI brief，
+ * 本地生成器出合法底稿，AI patch 只加奏法与表情。无 Key / 任一段失败
+ * 都只降级 AI，底稿照样写谱。
  */
 
 import { $, setStatus } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
-import { getApiKey, saveApiKey, generateImprovisation, isSystemPromptTrigger, openSystemPromptEditor, openPromptDebug, type GenerationOptions } from '../../features/ai/index.ts';
-import { IMPROV_CONFIG } from '../../core/config.ts';
+import type { Note } from '../../core/types/index.ts';
+import type {
+    ImprovBriefOptions,
+    LocalDensity,
+    LocalStyle,
+    ResolvedImprovOptions,
+    ScaleType,
+} from '../../core/types/improv/index.ts';
+import {
+    LOCAL_DENSITIES,
+    LOCAL_STYLES,
+    SCALE_TYPES,
+} from '../../core/types/improv/index.ts';
+import { IMPROV_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import {
+    detectUnsupportedDescription,
+    parseImprovDescription,
+} from '../../core/utils/improv/index.ts';
+import {
+    getApiKey,
+    saveApiKey,
+    isSystemPromptTrigger,
+    openImprovPromptEditor,
+    openImprovPromptDebug,
+    runImprovPipeline,
+} from '../../features/ai/index.ts';
+import { buildImprovSummary } from './improvSummary.ts';
 import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
 
 /** 从 IMPROV_CONFIG 生成即兴选项下拉（小节数/音阶/风格/密度），单一来源 */
@@ -36,79 +65,164 @@ async function initAIKeyInput(): Promise<void> {
     });
 }
 
+function readSelect<T extends string>(
+    id: string,
+    options: readonly T[],
+    fallback: T,
+): T {
+    const value = (document.getElementById(id) as HTMLSelectElement | null)?.value;
+    return value !== undefined && (options as readonly string[]).includes(value)
+        ? value as T
+        : fallback;
+}
+
+/** 读取面板选项 + 当前乐谱元数据，合成 brief 的 base */
+function readBaseOptions(): ImprovBriefOptions {
+    const rawNum = Number(
+        (document.getElementById('aiNumMeasures') as HTMLSelectElement | null)?.value,
+    );
+    const { min, max } = LOCAL_IMPROV_CONFIG.numMeasures;
+    const numMeasures = Number.isFinite(rawNum)
+        ? Math.max(min, Math.min(max, Math.round(rawNum)))
+        : LOCAL_IMPROV_CONFIG.defaults.numMeasures;
+
+    return {
+        numMeasures,
+        key: scoreStore.score.key || undefined,
+        timeSignature: scoreStore.score.timeSignature || undefined,
+        scaleType: readSelect<ScaleType>(
+            'aiScaleType', SCALE_TYPES, LOCAL_IMPROV_CONFIG.defaults.scaleType,
+        ),
+        style: readSelect<LocalStyle>(
+            'aiStyle', LOCAL_STYLES, LOCAL_IMPROV_CONFIG.defaults.style,
+        ),
+        density: readSelect<LocalDensity>(
+            'aiDensity', LOCAL_DENSITIES, LOCAL_IMPROV_CONFIG.defaults.density,
+        ),
+    };
+}
+
+function setSelectValue(id: string, value: string): void {
+    const select = document.getElementById(id) as HTMLSelectElement | null;
+    if (select && Array.from(select.options).some(option => option.value === value)) {
+        select.value = value;
+    }
+}
+
+/** 把音符与生效选项写进 store（主流程与调试面板共用） */
+function writeGeneratedScore(notes: Note[], options: ResolvedImprovOptions): void {
+    // 先落 store 的拍号/调性，loadNotes 才会按新拍号切小节
+    scoreStore.beginBatch();
+    try {
+        if (scoreStore.score.timeSignature !== options.timeSignature) {
+            scoreStore.setTimeSignature(options.timeSignature);
+        }
+        if (scoreStore.score.key !== options.key) {
+            scoreStore.setKey(options.key);
+        }
+        scoreStore.loadNotes(notes, options.numMeasures);
+    } finally {
+        scoreStore.endBatch();
+    }
+    syncAIFormControls(options);
+}
+
+/** 把最终生效的选项回写到面板与顶部下拉（描述/AI 覆盖后保持同步） */
+function syncAIFormControls(options: ResolvedImprovOptions): void {
+    setSelectValue('aiNumMeasures', String(options.numMeasures));
+    setSelectValue('aiStyle', options.style);
+    setSelectValue('aiScaleType', options.scaleType);
+    setSelectValue('aiDensity', options.density);
+    setSelectValue('keySelect', options.key);
+    setSelectValue('timeSigSelect', options.timeSignature);
+}
+
 /** 处理 AI 生成按钮点击 */
 async function handleAIGenerate(): Promise<void> {
-    // 隐藏功能：额外要求填「修改系统对话」→ 打开系统提示词编辑弹窗（不依赖 API Key）
-    const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement)?.value?.trim();
+    // 隐藏功能：额外要求填「修改系统对话」→ 打开提示词编辑弹窗（不依赖 API Key）
+    const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement)?.value?.trim() ?? '';
     if (isSystemPromptTrigger(extraPrompt)) {
-        openSystemPromptEditor();
+        openImprovPromptEditor({ onStatus: setStatus });
         return;
     }
 
     const apiKeyInput = document.getElementById('aiApiKey') as HTMLInputElement;
     const statusEl = document.getElementById('aiGenStatus');
     const btn = document.getElementById('aiGenerateBtn') as HTMLButtonElement;
+    // 无 Key 不再阻塞：只跳过两段 AI，本地底稿照常生成
+    const apiKey = apiKeyInput?.value?.trim() || null;
+    if (apiKey) await saveApiKey(apiKey);
 
-    const apiKey = apiKeyInput?.value?.trim();
-    if (!apiKey) {
-        setStatus('请先输入 DeepSeek API Key', 'error');
-        if (statusEl) statusEl.textContent = '⚠️ 请先输入 API Key';
-        return;
-    }
-
-    // 保存 Key
-    await saveApiKey(apiKey);
-
-    // 最少 3 小节，避免 AI 产出过短（如 1 拍）；默认值统一取 IMPROV_CONFIG
-    const numMeasures = Math.max(IMPROV_CONFIG.numMeasures.min, parseInt((document.getElementById('aiNumMeasures') as HTMLSelectElement)?.value || String(IMPROV_CONFIG.numMeasures.default), 10));
-    const scaleType = (document.getElementById('aiScaleType') as HTMLSelectElement)?.value || IMPROV_CONFIG.scaleTypes[0].value;
-    const style = (document.getElementById('aiStyle') as HTMLSelectElement)?.value || IMPROV_CONFIG.styles[0].value;
-    const density = (document.getElementById('aiDensity') as HTMLSelectElement)?.value || IMPROV_CONFIG.densities[1].value;
-
-    const options: GenerationOptions = {
-        numMeasures,
-        scaleType,
-        style,
-        density,
-        extraPrompt: extraPrompt || undefined,
-    };
-
-    // UI 反馈：禁用按钮，显示加载状态
     if (btn) {
         btn.disabled = true;
         btn.textContent = '⏳ 生成中...';
     }
-    if (statusEl) statusEl.textContent = '⏳ 正在调用 DeepSeek AI...';
-    setStatus('⏳ AI 正在生成即兴谱...', 'info');
+    setStatus('⏳ 正在生成本地底稿...', 'info');
+    if (statusEl) statusEl.textContent = '⏳ 正在生成本地底稿...';
 
     // 确保至少有一个小节
     if (scoreStore.score.measures.length === 0) {
         scoreStore.addMeasure();
     }
 
+    const seed = Math.floor(Math.random() * 0x100000000) >>> 0;
+    const base = readBaseOptions();
+    const described = parseImprovDescription(extraPrompt);
+
     try {
-        const result = await generateImprovisation(scoreStore.score, options, apiKey);
+        const result = await runImprovPipeline({
+            score: scoreStore.score,
+            base,
+            extraPrompt,
+            apiKey,
+            seed,
+        });
 
-        if (result.error) {
-            setStatus(`AI 生成失败: ${result.error}`, 'error');
-            if (statusEl) statusEl.textContent = `❌ ${result.error}`;
+        if (result.fatal || !result.notes || !result.local) {
+            const message = result.error ?? '本地生成失败';
+            setStatus(`本地即兴生成失败: ${message}`, 'error');
+            if (statusEl) statusEl.textContent = `❌ ${message}`;
             return;
         }
 
-        if (result.notes.length === 0) {
-            setStatus('AI 未返回有效音符', 'error');
-            if (statusEl) statusEl.textContent = '❌ AI 未返回有效音符';
-            return;
+        const { local, notes } = result;
+        writeGeneratedScore(notes, local.options);
+
+        // 本地不支持项；AI brief 已翻译掉的 CAGED 提示不再重复展示
+        const warnings = detectUnsupportedDescription(extraPrompt);
+        const translatedCaged = result.brief?.options.fingering !== undefined;
+        const shownWarnings = translatedCaged
+            ? warnings.filter(message => !message.startsWith('D 型 / CAGED'))
+            : warnings;
+        if (result.brief?.unsupported.length) {
+            shownWarnings.push(...result.brief.unsupported);
+        }
+        if (result.messages.length > 0) {
+            shownWarnings.push(...result.messages);
         }
 
-        // 用拍平音符重建整谱（loadNotes 内部：beginBatch → 清空 → 按容量切小节 → 补足小节数 → 统一渲染）
-        const written = scoreStore.loadNotes(result.notes, numMeasures);
+        const summary = buildImprovSummary(
+            local, seed, extraPrompt, described, shownWarnings,
+        );
+        const sounding = notes.filter(note => !note.isRest).length;
+        const applied = result.apply?.applied ?? 0;
+        const dropped = result.apply?.dropped.length ?? 0;
+        const aiText = apiKey
+            ? ` + AI 扩展 ${applied} 处${dropped > 0 ? `（丢弃 ${dropped}）` : ''}`
+            : '（AI 扩展跳过）';
+        const headline = `✅ 本地底稿 ${sounding} 音${aiText}`;
 
-        setStatus(`✅ AI 已生成 ${written} 个音符`, 'success');
-        if (statusEl) statusEl.textContent = `✅ 成功！已生成 ${result.notes.length} 个音符，${scoreStore.score.measures.length} 个小节`;
+        setStatus(headline, 'success');
+        if (statusEl) {
+            statusEl.textContent = [
+                headline,
+                result.brief?.rationale ? `AI 判断：${result.brief.rationale}` : '',
+                summary,
+            ].filter(Boolean).join('\n');
+        }
     } catch (e) {
         const msg = e instanceof Error ? e.message : '未知错误';
-        setStatus(`AI 调用异常: ${msg}`, 'error');
+        setStatus(`AI 即兴异常: ${msg}`, 'error');
         if (statusEl) statusEl.textContent = `❌ 异常: ${msg}`;
     } finally {
         if (btn) {
@@ -126,6 +240,19 @@ export function initAIForm(): void {
     // AI 生成按钮
     $('aiGenerateBtn')?.addEventListener('click', handleAIGenerate);
 
-    // Prompt 调试面板
-    $('aiPromptDebugBtn')?.addEventListener('click', openPromptDebug);
+    // Prompt 调试面板（新两段式：需求解析 / 表现扩展）
+    $('aiPromptDebugBtn')?.addEventListener('click', () => {
+        const apiKey = (document.getElementById('aiApiKey') as HTMLInputElement | null)
+            ?.value?.trim() ?? '';
+        const extraPrompt = (document.getElementById('aiExtraPrompt') as HTMLInputElement | null)
+            ?.value?.trim() ?? '';
+        openImprovPromptDebug({
+            apiKey,
+            extraPrompt,
+            base: readBaseOptions(),
+            score: scoreStore.score,
+            onStatus: setStatus,
+            onWriteScore: writeGeneratedScore,
+        });
+    });
 }

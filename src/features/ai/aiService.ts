@@ -56,6 +56,68 @@ export interface AIGenerationResult {
     error?: string;
 }
 
+/** 一次 DeepSeek Chat Completions 调用的入参 */
+export interface DeepSeekCallInput {
+    system: string;
+    user: string;
+    apiKey: string;
+    temperature: number;
+    maxTokens: number;
+}
+
+export interface DeepSeekCallResult {
+    /** AI 返回的原始 content；失败时为空字符串 */
+    content: string;
+    error?: string;
+}
+
+/**
+ * 统一的 DeepSeek 调用（旧「从零生成」与新的 brief / patch 两段共用）。
+ *
+ * 错误统一翻译成可读文本，不抛异常；调用方按 `content` / `error` 分支。
+ */
+export async function callDeepSeek(input: DeepSeekCallInput): Promise<DeepSeekCallResult> {
+    try {
+        const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${input.apiKey}`,
+            },
+            body: JSON.stringify({
+                model: DEEPSEEK_CONFIG.model,
+                messages: [
+                    { role: 'system', content: input.system },
+                    { role: 'user', content: input.user },
+                ],
+                temperature: input.temperature,
+                max_tokens: input.maxTokens,
+                response_format: { type: 'json_object' },
+                // V4 默认开启思考模式：即兴这种 prompt 会长时间思考导致"超时"，
+                // 且思考可能耗尽 max_tokens 返回空 content（报"未返回内容"）。这里显式关闭。
+                thinking: { type: 'disabled' },
+            }),
+            // 兜底超时：避免无限挂起，超时给出明确错误
+            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+        });
+
+        if (!response.ok) {
+            return { content: '', error: await describeApiError(response) };
+        }
+
+        const data = await response.json();
+        const content = data?.choices?.[0]?.message?.content;
+        if (!content) return { content: '', error: 'AI 未返回内容' };
+        return { content };
+    } catch (e) {
+        if (e instanceof Error && e.name === 'TimeoutError') {
+            return { content: '', error: '请求超时（60 秒），请检查网络后重试' };
+        }
+        const msg = e instanceof Error ? e.message : '网络错误';
+        return { content: '', error: `请求失败: ${msg}` };
+    }
+}
+
 /**
  * 调用 DeepSeek API 生成即兴谱
  *
@@ -72,50 +134,16 @@ export async function generateImprovisation(
     // 生效的 system prompt：自定义（隐藏功能「修改系统对话」保存）优先，否则默认
     const systemPrompt = await getEffectiveSystemPrompt();
 
-    try {
-        const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: DEEPSEEK_CONFIG.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ],
-                temperature: DEEPSEEK_CONFIG.temperature,
-                max_tokens: DEEPSEEK_CONFIG.maxTokens,
-                response_format: { type: 'json_object' },
-                // V4 默认开启思考模式：即兴这种 prompt 会长时间思考导致"超时"，
-                // 且思考可能耗尽 max_tokens 返回空 content（报"未返回内容"）。这里显式关闭。
-                thinking: { type: 'disabled' },
-            }),
-            // 兜底超时：避免无限挂起，超时给出明确错误
-            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-        });
+    const response = await callDeepSeek({
+        system: systemPrompt,
+        user: userPrompt,
+        apiKey,
+        temperature: DEEPSEEK_CONFIG.temperature,
+        maxTokens: DEEPSEEK_CONFIG.maxTokens,
+    });
+    if (response.error) return { notes: [], error: response.error };
 
-        if (!response.ok) {
-            return { notes: [], error: await describeApiError(response) };
-        }
-
-        const data = await response.json();
-        const content = data?.choices?.[0]?.message?.content;
-
-        if (!content) {
-            return { notes: [], error: 'AI 未返回内容' };
-        }
-
-        const result = parseAIResponse(content);
-        return result;
-    } catch (e) {
-        if (e instanceof Error && e.name === 'TimeoutError') {
-            return { notes: [], error: '请求超时（60 秒），请检查网络后重试' };
-        }
-        const msg = e instanceof Error ? e.message : '网络错误';
-        return { notes: [], error: `请求失败: ${msg}` };
-    }
+    return parseAIResponse(response.content);
 }
 
 // ---- Prompt 调试：用显式 system/user prompt 直接调用（供 promptDebug 面板）----
@@ -137,41 +165,17 @@ export async function debugGenerate(
     userPrompt: string,
     apiKey: string,
 ): Promise<DebugGenerateResult> {
-    try {
-        const response = await fetch(DEEPSEEK_CONFIG.endpoint, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model: DEEPSEEK_CONFIG.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ],
-                temperature: DEEPSEEK_CONFIG.temperature,
-                max_tokens: DEEPSEEK_CONFIG.maxTokens,
-                response_format: { type: 'json_object' },
-                thinking: { type: 'disabled' },
-            }),
-            signal: AbortSignal.timeout(AI_TIMEOUT_MS),
-        });
+    const response = await callDeepSeek({
+        system: systemPrompt,
+        user: userPrompt,
+        apiKey,
+        temperature: DEEPSEEK_CONFIG.temperature,
+        maxTokens: DEEPSEEK_CONFIG.maxTokens,
+    });
+    if (response.error) return { raw: '', notes: [], error: response.error };
 
-        if (!response.ok) {
-            return { raw: '', notes: [], error: await describeApiError(response) };
-        }
-
-        const data = await response.json();
-        const raw = data?.choices?.[0]?.message?.content ?? '';
-        if (!raw) return { raw, notes: [], error: 'AI 未返回内容' };
-
-        const parsed = parseAIResponse(raw);
-        return { raw, notes: parsed.notes, error: parsed.error };
-    } catch (e) {
-        const msg = e instanceof Error ? e.message : '网络错误';
-        return { raw: '', notes: [], error: `请求失败: ${msg}` };
-    }
+    const parsed = parseAIResponse(response.content);
+    return { raw: response.content, notes: parsed.notes, error: parsed.error };
 }
 
 /**

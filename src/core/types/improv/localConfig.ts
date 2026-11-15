@@ -8,6 +8,8 @@ import type { HarmonyMeasure } from './harmony.ts';
 import type {
     LocalDensity,
     LocalStyle,
+    PracticeFocus,
+    PracticeProfile,
     ResolvedImprovOptions,
     ScaleType,
 } from './options.ts';
@@ -41,6 +43,8 @@ export interface LocalImprovConfig {
     };
     styleProfiles: Record<LocalStyle, StyleProfile>;
     densityProfiles: Record<LocalDensity, DensityProfile>;
+    /** 练习意图预设；只缩放表现层概率/跳进/把位，不改音高选择 */
+    practiceProfiles: Record<PracticeFocus, PracticeProfile>;
     playability: PlayabilityRules;
 }
 
@@ -52,4 +56,9 @@ export interface LocalImprovResult {
     harmony: HarmonyMeasure[];
     /** 本次生成的乐句计划（仅生成期数据） */
     phrases: PhrasePlan[];
+    /**
+     * 本次实际生效的单步最大音程（已叠加练习预设与 playability）。
+     * 补丁应用器必须用同一口径复检，否则练习模式收紧的跳进会被 AI 绕过。
+     */
+    maxLeapSemitones: number;
 }

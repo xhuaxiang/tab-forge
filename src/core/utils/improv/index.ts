@@ -27,3 +27,17 @@ export {
     parseProgressionToken,
     progressionEquals,
 } from './progression.ts';
+export { fingeringFretRange } from './fingering.ts';
+export { applyPracticeProfile } from './practice.ts';
+export { mergeImprovOptions } from './mergeOptions.ts';
+export {
+    applyPerformancePatches,
+    indexImprovSlots,
+    serializeImprovSlots,
+} from './performancePatch.ts';
+export type {
+    PatchApplyResult,
+    RejectedPatch,
+    SerializedImprovNote,
+    SerializedImprovSlot,
+} from './performancePatch.ts';

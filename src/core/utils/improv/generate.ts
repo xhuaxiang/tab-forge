@@ -14,13 +14,16 @@ import type {
     ResolvedImprovOptions,
 } from '../../types/improv/index.ts';
 import {
+    FINGERING_PATTERNS,
     LOCAL_DENSITIES,
     LOCAL_STYLES,
+    PRACTICE_FOCUSES,
     SCALE_TYPES,
 } from '../../types/improv/index.ts';
-import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
+import { FINGERING_PATTERN_SPAN, LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { decorateSlots } from './decorate.ts';
+import { fingeringFretRange } from './fingering.ts';
 import { buildHarmonyPlan, normalizeProgression } from './harmony.ts';
 import { buildSkeleton } from './melody.ts';
 import { buildPhrasePlan, validatePhrasePlan } from './phrase.ts';
@@ -30,6 +33,7 @@ import {
     parseKey,
     pitchClassOf,
 } from './pitch.ts';
+import { applyPracticeProfile } from './practice.ts';
 import {
     formatChordSpec,
     normalizeChordChart,
@@ -80,6 +84,26 @@ function resolveFretRange(
     return { min, max };
 }
 
+/**
+ * 练习模式（keepPosition）的默认把位：风格低把位起、最多 4 品。
+ *
+ * 显式 fretRange 与指型都不在时才用；窗口仍夹到可演奏范围内。
+ */
+function resolvePracticeFretRange(
+    preferredMin: number,
+    preferredMax: number,
+    config: LocalImprovConfig,
+): FretRange {
+    const clamp = (fret: number): number => Math.max(
+        config.playability.fretMin,
+        Math.min(config.playability.fretMax, Math.round(fret)),
+    );
+    let min = clamp(preferredMin);
+    let max = clamp(Math.min(preferredMax, preferredMin + FINGERING_PATTERN_SPAN - 1));
+    if (min > max) [min, max] = [max, min];
+    return { min, max };
+}
+
 /** 把用户输入补齐成完整选项；非法值回落到默认值 */
 export function resolveLocalImprovOptions(
     input: Partial<ImprovOptions> = {},
@@ -111,6 +135,35 @@ export function resolveLocalImprovOptions(
         : config.defaults.seed;
     const numMeasures = resolveNumMeasures(input.numMeasures, config);
     const capacity = capacityFromTimeSignature(timeSignature);
+    const tuning = isTuning(input.tuning)
+        ? { ...input.tuning }
+        : { ...config.defaults.tuning };
+
+    const practice = input.practice !== undefined && PRACTICE_FOCUSES.includes(input.practice)
+        ? input.practice
+        : 'none';
+    const fingering = input.fingering !== undefined && FINGERING_PATTERNS.includes(input.fingering)
+        ? input.fingering
+        : null;
+
+    // 把位来源优先级：显式 > 指型 > 练习锁定 > 风格偏好
+    let fretRange = resolveFretRange(input.fretRange, config);
+    let fretRangeSource: ResolvedImprovOptions['fretRangeSource'] = 'explicit';
+    if (fretRange === null && fingering !== null) {
+        fretRange = fingeringFretRange(
+            fingering, parsedKey.tonicPitchClass, scaleType,
+            tuning, config.playability, FINGERING_PATTERN_SPAN,
+        );
+        if (fretRange !== null) fretRangeSource = 'fingering';
+    }
+    if (fretRange === null && config.practiceProfiles[practice].keepPosition) {
+        const preferred = config.styleProfiles[style];
+        fretRange = resolvePracticeFretRange(
+            preferred.preferredFretMin, preferred.preferredFretMax, config,
+        );
+        fretRangeSource = 'practice';
+    }
+    if (fretRange === null) fretRangeSource = 'style';
 
     return {
         numMeasures,
@@ -120,12 +173,13 @@ export function resolveLocalImprovOptions(
         style,
         density,
         timeSignature,
-        tuning: isTuning(input.tuning)
-            ? { ...input.tuning }
-            : { ...config.defaults.tuning },
+        tuning,
         progression: normalizeProgression(input.progression),
         chordChart: normalizeChordChart(input.chordChart, numMeasures, capacity),
-        fretRange: resolveFretRange(input.fretRange, config),
+        fretRange,
+        fretRangeSource,
+        fingering,
+        practice,
         seed,
     };
 }
@@ -188,7 +242,12 @@ export function generateLocalImprovisation(
 ): LocalImprovResult {
     const options = resolveLocalImprovOptions(input, config);
     const density = config.densityProfiles[options.density];
-    const style = config.styleProfiles[options.style];
+    const style = applyPracticeProfile(
+        config.styleProfiles[options.style], options.practice, config.practiceProfiles,
+    );
+    const maxLeapSemitones = Math.min(
+        style.maxLeapSemitones, config.playability.maxLeapSemitones,
+    );
     const harmony = buildHarmonyPlan(options);
     assertLockedChordsPlayable(harmony, options);
 
@@ -237,7 +296,7 @@ export function generateLocalImprovisation(
 
     const noteErrors = validateNotes(
         notes, options, config.playability,
-        Math.min(style.maxLeapSemitones, config.playability.maxLeapSemitones),
+        maxLeapSemitones,
         harmony,
         phrases,
     );
@@ -245,5 +304,5 @@ export function generateLocalImprovisation(
         throw new Error(`本地即兴结果未通过校验:\n${noteErrors.join('\n')}`);
     }
 
-    return { notes, options, harmony, phrases };
+    return { notes, options, harmony, phrases, maxLeapSemitones };
 }

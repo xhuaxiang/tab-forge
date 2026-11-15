@@ -31,15 +31,27 @@ export {
     LOCAL_STYLES,
     LOCAL_DENSITIES,
     SCALE_INTERVALS,
+    FINGERING_PATTERNS,
+    PRACTICE_FOCUSES,
 } from './options.ts';
 export type {
     ScaleType,
     LocalStyle,
     LocalDensity,
     FretRange,
+    FingeringPattern,
+    PracticeFocus,
+    PracticeProfile,
+    ImprovBriefOptions,
     ImprovOptions,
     ResolvedImprovOptions,
 } from './options.ts';
+
+export { PERFORMANCE_TECHNIQUES } from './performance.ts';
+export type {
+    PerformancePatch,
+    PerformanceSlot,
+} from './performance.ts';
 
 export type {
     PhraseRole,

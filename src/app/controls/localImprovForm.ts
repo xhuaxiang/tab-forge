@@ -31,12 +31,12 @@ import {
     buildChordChart,
     chordChartFromBars,
     detectUnsupportedDescription,
-    formatChordSpec,
     generateLocalImprovisation,
     parseDescriptionChordChart,
     parseImprovDescription,
     progressionEquals,
 } from '../../core/utils/improv/index.ts';
+import { buildImprovSummary } from './improvSummary.ts';
 import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
 
 function readOption<T extends string>(
@@ -205,50 +205,6 @@ function readLocalOptions(
     return options;
 }
 
-/** 从实际和声计划反推展示用和弦，避免摘要显示未被采用的 progression */
-function harmonyLabel(result: ReturnType<typeof generateLocalImprovisation>): string {
-    const measures = result.harmony.map(measure =>
-        measure.segments
-            .map(segment => formatChordSpec(segment.chord))
-            .join('/'));
-    const shown = measures.slice(0, 4).join(' → ');
-    return measures.length > 4 ? `${shown} → …` : shown;
-}
-
-function buildSummary(
-    result: ReturnType<typeof generateLocalImprovisation>,
-    seed: number,
-    description: string,
-    described: Partial<ImprovOptions>,
-    warnings: string[],
-): string {
-    const sounding = result.notes.filter(note => !note.isRest).length;
-    const descriptionNote = description === ''
-        ? ''
-        : Object.keys(described).length > 0
-            ? ' · 描述已套用'
-            : ' · 描述未命中可识别项';
-    const chords = harmonyLabel(result);
-    const maxSegments = result.harmony.reduce(
-        (max, measure) => Math.max(max, measure.segments.length), 0,
-    );
-    const fretLabel = result.options.fretRange
-        ? `${result.options.fretRange.min}-${result.options.fretRange.max} 品`
-        : '风格把位';
-    const warningText = warnings.length > 0
-        ? ` · ⚠️ ${warnings.join('；')}`
-        : '';
-
-    return `✅ ${sounding} 个音符 / ${result.options.numMeasures} 小节 · `
-        + `${result.options.key} ${result.options.scaleType} · `
-        + `${result.options.style} · ${result.options.timeSignature} · ${fretLabel}`
-        + ` · seed ${seed}`
-        + (chords ? ` · 和弦 ${chords}` : '')
-        + (maxSegments > 1 ? ` · ${maxSegments} 和弦/小节` : '')
-        + descriptionNote
-        + warningText;
-}
-
 function handleLocalGenerate(): void {
     const statusEl = document.getElementById('localImprovStatus');
     const button = document.getElementById('localImprovBtn') as HTMLButtonElement | null;
@@ -282,7 +238,7 @@ function handleLocalGenerate(): void {
         }
         syncLocalControls(result.options);
 
-        const summary = buildSummary(
+        const summary = buildImprovSummary(
             result, seed, description, described, warnings,
         );
         setStatus(`✅ 本地即兴已生成（${result.options.style}）`, 'success');

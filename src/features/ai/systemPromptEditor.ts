@@ -14,9 +14,9 @@
 
 import { composeSystemPrompt, stripContract, DEFAULT_EXPERT_PROMPT } from './promptBuilder.ts';
 import { setStatus } from '../../app/dom.ts';
+import { TRIGGER_EXTRA_PROMPT, isSystemPromptTrigger } from './promptTriggers.ts';
 
-/** 触发隐藏功能的额外要求文案 */
-export const TRIGGER_EXTRA_PROMPT = '修改系统对话';
+export { TRIGGER_EXTRA_PROMPT, isSystemPromptTrigger };
 
 /** 本地存储键（与 api-key 同一套 chrome.storage/localStorage 逻辑） */
 const STORAGE_KEY = 'TabForge_CustomSystemPrompt';
@@ -24,11 +24,6 @@ const STORAGE_KEY = 'TabForge_CustomSystemPrompt';
 /** 检测是否在 Chrome Extension 环境 */
 function isChromeExtension(): boolean {
     return typeof chrome !== 'undefined' && !!chrome.storage;
-}
-
-/** 是否命中隐藏功能触发词（extraPrompt 精确等于「修改系统对话」） */
-export function isSystemPromptTrigger(extraPrompt?: string): boolean {
-    return extraPrompt?.trim() === TRIGGER_EXTRA_PROMPT;
 }
 
 /** 读取本地存的专业性描述原文（未设置返回 null） */

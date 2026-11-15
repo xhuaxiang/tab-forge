@@ -5,10 +5,16 @@
  * 对每个音符做边界校验，过滤非法值以免污染 scoreStore。
  */
 
-import type { Note, NoteDuration, AppHarmonic } from '../../core/types/index.ts';
-import { NOTE_DURATIONS, APP_HARMONICS } from '../../core/types/index.ts';
+import type { Note, NoteDuration } from '../../core/types/index.ts';
+import { NOTE_DURATIONS } from '../../core/types/index.ts';
 import { DEFAULT_HARMONIC_FRET, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
 import { normalizeHarmonicFret } from '../../core/utils/scoreMapping.ts';
+import {
+    isAIBendAmount,
+    isAIDynamics,
+    isAIHarmonic,
+    isAITechnique,
+} from './contractConstants.ts';
 
 /** AI 返回的原始音符结构（来自 JSON.parse，取值一律按不可信处理） */
 interface RawNote {
@@ -63,36 +69,7 @@ interface RawResponse {
 /** 合法的时值集合（来源：core/types 的 NOTE_DURATIONS，别在此另写一份） */
 const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 
-/**
- * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
- *
- * 这是 `Note.technique` 的全集（core/types/note/index.ts）：五种都给 AI。
- * bend / vibrato 是 blues、jazz 味道的主要载体（推弦哭腔、揉弦呼吸），
- * 早先只开放三种时，那两种风格无论提示词怎么写都出不来。
- * ⚠️ 往 noteContract.ts 加技法时务必同步这一行，否则 AI 发来的技法会落不进去。
- */
-const AI_TECHNIQUES = ['hammerOn', 'pullOff', 'slide', 'bend', 'vibrato'] as const;
-type AITechnique = (typeof AI_TECHNIQUES)[number];
-
-function isAITechnique(t: string): t is AITechnique {
-    return (AI_TECHNIQUES as readonly string[]).includes(t);
-}
-
-/** AI 允许输出的力度取值（`Note.dynamics` 的全集） */
-const VALID_DYNAMICS = ['soft', 'accent'] as const;
-type AIDynamics = (typeof VALID_DYNAMICS)[number];
-
-/** 合法的推弦幅度（半音）：1/4 音、1/2 音、全音 */
-const VALID_BEND_AMOUNTS = [0.25, 0.5, 1];
-
-function isAIDynamics(v: string): v is AIDynamics {
-    return (VALID_DYNAMICS as readonly string[]).includes(v);
-}
-
-/** 泛音白名单直接取 core/types 的 APP_HARMONICS，避免与契约各写一份 */
-function isAIHarmonic(v: string): v is AppHarmonic {
-    return (APP_HARMONICS as readonly string[]).includes(v);
-}
+// 技法 / 力度 / 推弦 / 泛音白名单统一收口在 contractConstants.ts
 
 /**
  * 规范化时值为最近的有效枚举值。
@@ -150,9 +127,7 @@ function sanitizeNote(raw: RawNote): Note | null {
             // 推弦幅度/释放只对 bend 有意义：非法幅度回落到全音，避免画出一条无意义的曲线
             if (raw.technique === 'bend') {
                 const amount = raw.bendAmount;
-                note.bendAmount = (typeof amount === 'number' && VALID_BEND_AMOUNTS.includes(amount))
-                    ? amount
-                    : 1;
+                note.bendAmount = isAIBendAmount(amount) ? amount : 1;
                 if (raw.bendRelease) note.bendRelease = true;
             }
         } else {

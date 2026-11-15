@@ -164,14 +164,52 @@ describe('parseImprovDescription', () => {
         });
     });
 
-    it('指型与自然音限制进入不支持的提示', () => {
+    it('五型指法已支持，只有 CAGED 命名与自然音限制进入不支持提示', () => {
         expect(detectUnsupportedDescription('把位固定在 7-10 品')).toEqual([]);
-        expect(detectUnsupportedDescription('在 La 指型（D 型）内')).toEqual([
-            '指型图案（La/D 型等）暂未支持，当前按音阶自由度生成',
+        expect(detectUnsupportedDescription('在 La 指型内')).toEqual([]);
+        expect(detectUnsupportedDescription('在 E 型（CAGED）内')).toEqual([
+            'C/A/G/E/D 型（CAGED）命名不由本地映射，交给 AI 需求解析（本地支持 Mi/Sol/La/Si/Re）',
         ]);
+        for (const shape of ['C 型', 'A 型', 'G 型']) {
+            expect(detectUnsupportedDescription(`在 ${shape} 内`)).toHaveLength(1);
+        }
+        // 五型里的 Re / La 不能被误判成 CAGED
+        expect(detectUnsupportedDescription('在 Re 型内')).toEqual([]);
+        expect(detectUnsupportedDescription('在 La 型内')).toEqual([]);
         expect(detectUnsupportedDescription('不要 A#，尽量落在 A-G 这些音上')).toContain(
             '自然音/升降音限制暂未支持，生成仍按音阶与和弦音池',
         );
+    });
+
+    it('解析标准五型与练习意图', () => {
+        expect(parseImprovDescription('主要在 C 的 la 指型上做即兴')).toEqual({
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            fingering: 'La',
+        });
+        expect(parseImprovDescription('A 小调 Mi 指型，熟悉指板寻找音感')).toEqual({
+            key: 'Am',
+            scaleType: 'Natural Minor (Aeolian)',
+            fingering: 'Mi',
+            practice: 'fretboard',
+        });
+        expect(parseImprovDescription('练推弦和揉弦')).toEqual({ practice: 'technique' });
+        expect(parseImprovDescription('先热身四小节')).toEqual({ practice: 'warmup' });
+    });
+
+    it('指型前缀调性可省略，`型` 与 `指型` 写法都认', () => {
+        expect(parseImprovDescription('用 La 指型随便弹')).toEqual({ fingering: 'La' });
+        expect(parseImprovDescription('La型即兴')).toEqual({ fingering: 'La' });
+        expect(parseImprovDescription('A小调 Mi型')).toEqual({
+            key: 'Am',
+            scaleType: 'Natural Minor (Aeolian)',
+            fingering: 'Mi',
+        });
+        expect(parseImprovDescription('Am La指型')).toEqual({
+            key: 'Am',
+            scaleType: 'Natural Minor (Aeolian)',
+            fingering: 'La',
+        });
     });
 
     it('不支持提示不会误伤自然音阶与和弦范围写法', () => {

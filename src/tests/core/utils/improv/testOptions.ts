@@ -26,6 +26,10 @@ export function makeOptions(
         progression: overrides.progression ?? [1],
         chordChart: overrides.chordChart ?? [],
         fretRange: overrides.fretRange ?? null,
+        fretRangeSource: overrides.fretRangeSource
+            ?? (overrides.fretRange ? 'explicit' : 'style'),
+        fingering: overrides.fingering ?? null,
+        practice: overrides.practice ?? 'none',
         seed: overrides.seed ?? defaults.seed,
     };
 }

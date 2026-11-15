@@ -6,14 +6,17 @@
  */
 
 import type {
+    FingeringPattern,
     FretRange,
     ImprovOptions,
     LocalDensity,
     LocalStyle,
+    PracticeFocus,
     Progression,
     ProgressionStep,
     ScaleType,
 } from '../../types/improv/index.ts';
+import { FINGERING_PATTERNS } from '../../types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { parseKey } from './pitch.ts';
 import {
@@ -154,15 +157,59 @@ export function parseDescriptionFretRange(text: string): FretRange | null {
 }
 
 /**
+ * 解析标准五型指法，如 `C 的 La 指型`、`A小调 Mi型`、`用 La 指型`。
+ *
+ * 调性前缀可省略；只在正文其他地方没写调性时作为兜底
+ * （`C的la指型` 里的 C 会被拿来补 key）。本地只认五型，CAGED 命名
+ * （C/A/G/E/D 型）留给 AI 需求解析。
+ */
+function parseDescriptionFingering(
+    text: string,
+): { fingering: FingeringPattern; key?: string } | undefined {
+    const match = text.match(
+        /(?:^|[^A-Za-z])\s*(?:([A-Ga-g])([#b]?)?\s*(?:的|大调|小调|调|maj(?:or)?|m(?:in(?:or)?)?)?\s*)?(Mi|Sol|La|Si|Re)\s*(?:指型|型)/i,
+    );
+    if (!match) return undefined;
+
+    const rawPattern = match[3].toLowerCase();
+    const fingering = FINGERING_PATTERNS.find(
+        pattern => pattern.toLowerCase() === rawPattern,
+    );
+    if (!fingering) return undefined;
+
+    const keyLetter = match[1]?.toUpperCase();
+    const key = keyLetter
+        ? parseKey(`${keyLetter}${match[2] ?? ''}`)?.key
+        : undefined;
+    return key ? { fingering, key } : { fingering };
+}
+
+/**
+ * 解析练习意图。`熟悉指板` 优先级最高：同一句里既说指板又说音感时，
+ * 先保证「音弹得清楚、把位不乱跑」，再谈听感。
+ */
+function parsePracticeFocus(text: string): PracticeFocus | undefined {
+    if (/熟悉指板|熟悉把位|指板练习|把位练习/.test(text)) return 'fretboard';
+    if (/找音感|音感|听音|唱名|练耳/.test(text)) return 'ear';
+    if (/练推弦|练揉弦|击勾弦|滑弦|技巧练习/.test(text)) return 'technique';
+    if (/热身|warmup/i.test(text)) return 'warmup';
+    return undefined;
+}
+
+/**
  * 识别当前本地引擎不支持、但用户明确写出来的需求。
  *
- * 只用于 UI 提示，不参与生成；`La/D 指型` 与自然音限制都属于这一类。
+ * 只用于 UI 提示，不参与生成。五型指法现已支持；CAGED 的
+ * C / A / G / E / D 型命名本地不做映射，交给 AI 需求解析。
  */
 export function detectUnsupportedDescription(text: string): string[] {
     const unsupported: string[] = [];
 
-    if (/指型|CAGED/i.test(text)) {
-        unsupported.push('指型图案（La/D 型等）暂未支持，当前按音阶自由度生成');
+    // 前置边界：避免把五型里的 `Re型` 当成 CAGED 的 E 型
+    if (/(?:^|[^A-Za-z])[A-EG]\s*型|CAGED/i.test(text)) {
+        unsupported.push(
+            'C/A/G/E/D 型（CAGED）命名不由本地映射，交给 AI 需求解析（本地支持 Mi/Sol/La/Si/Re）',
+        );
     }
     if (/自然音(?!阶)|只用白键|不要\s*[A-G][#b]|不要[^。；;\n]{0,6}[升降]|落在\s*[A-G]\s*[-–]\s*[A-G]\s*(?:这些|之间|范围|内|上)/i.test(text)) {
         unsupported.push('自然音/升降音限制暂未支持，生成仍按音阶与和弦音池');
@@ -376,6 +423,19 @@ export function parseImprovDescription(text: string): Partial<ImprovOptions> {
 
     const scale = findFirst(normalized, SCALE_KEYWORDS);
     if (scale !== undefined) result.scaleType = scale;
+
+    const fingeringInfo = parseDescriptionFingering(normalized);
+    if (fingeringInfo) {
+        result.fingering = fingeringInfo.fingering;
+        // 指型前缀带来的调性只做兜底，正文明确写的调性优先
+        if (result.key === undefined && fingeringInfo.key !== undefined) {
+            result.key = fingeringInfo.key;
+            if (result.scaleType === undefined) result.scaleType = 'Major (Ionian)';
+        }
+    }
+
+    const practice = parsePracticeFocus(normalized);
+    if (practice !== undefined) result.practice = practice;
 
     const progression = parseDescriptionProgression(normalized);
     if (progression !== undefined) result.progression = progression;

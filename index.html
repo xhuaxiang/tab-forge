@@ -276,7 +276,7 @@
                         </div>
                     </div>
                     <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                        描述里写到的项优先；只写调性时自动配大/小调音阶；可识别 7-10品 这类把位范围，和弦可写 | C G | Am F | 或「和弦进行：C G Am F」。La/D 指型与自然音限制暂不支持，会在结果里提示。推弦、滑弦等技法描述暂不解析。
+                        描述里写到的项优先；只写调性时自动配大/小调音阶；可识别 7-10品 这类把位范围、Mi/Sol/La/Si/Re 指型（如「C 的 La 指型」）与熟悉指板/找音感等练习意图；和弦可写 | C G | Am F | 或「和弦进行：C G Am F」。CAGED 的 E 型/A 型命名与自然音限制暂不支持，会在结果里提示。推弦、滑弦等技法描述暂不解析。
                     </div>
                     <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;">🎸 生成即兴谱</button>
                     <div id="localImprovStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
@@ -286,7 +286,7 @@
             <!-- 折叠面板：AI 即兴设置 -->
             <details class="collapse-section" id="aiSettingsPanel" open style="display:none;">
                 <summary style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span>🤖 AI 即兴生成</span>
+                    <span>🤖 AI 即兴（本地底稿 + 加花）</span>
                     <span id="aiApiKeyWrap" style="display:flex; align-items:center; gap:4px;">
                         <span style="font-size:11px; color:var(--text-muted);">API Key</span>
                         <input type="password" id="aiApiKey" class="compact-input" placeholder="sk-..." title="DeepSeek API Key" style="width:200px;">
@@ -314,12 +314,15 @@
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
                             <label>额外需求（可选）</label>
-                            <textarea id="aiExtraPrompt" class="compact-input" rows="5" placeholder="如：多用滑弦、结尾渐慢..." style="width:100%; resize:vertical;"></textarea>
+                            <textarea id="aiExtraPrompt" class="compact-input" rows="5" placeholder="如：主要在 C 的 La 指型上做即兴，目的在于熟悉指板寻找音感；结尾渐慢..." style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                        本地先生成合法底稿；AI 只解析额外要求，并在底稿上增加奏法与表情（不改音高/节奏）。未配置 API Key 时直接出本地底稿。
+                    </div>
                     <button id="aiGenerateBtn" class="btn btn-primary" style="width:100%; margin-top:4px;">🤖 生成即兴谱</button>
-                    <div id="aiGenStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
-                    <!-- <button id="aiPromptDebugBtn" class="btn btn-sm" style="margin-top:6px; width:100%;" title="调试 AI 即兴生成的提示词（System Prompt + User Prompt）">🧪 调试 Prompt</button> -->
+                    <div id="aiGenStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px; white-space:pre-wrap;"></div>
+                    <button id="aiPromptDebugBtn" class="btn btn-sm" style="margin-top:6px; width:100%;" title="调试 AI 即兴两段提示词（需求解析 / 表现扩展）">🧪 调试 Prompt</button>
                 </div>
             </details>
 

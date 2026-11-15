@@ -359,6 +359,77 @@ describe('generateLocalImprovisation', () => {
     });
 });
 
+describe('generateLocalImprovisation（指型与练习意图）', () => {
+    it('C 大调 La 指型锁定 5-8 品，没有把位漂移', () => {
+        const { notes, options } = generateLocalImprovisation({
+            numMeasures: 4,
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            style: 'Rock',
+            fingering: 'La',
+            practice: 'fretboard',
+            seed: 4,
+        });
+
+        expect(options.fingering).toBe('La');
+        expect(options.practice).toBe('fretboard');
+        expect(options.fretRange).toEqual({ min: 5, max: 8 });
+        expect(options.fretRangeSource).toBe('fingering');
+        expect(notes.some(note => !note.isRest)).toBe(true);
+
+        for (const note of notes) {
+            if (note.isRest) continue;
+            expect(note.fret).toBeGreaterThanOrEqual(5);
+            expect(note.fret).toBeLessThanOrEqual(8);
+        }
+    });
+
+    it('同选项同 seed 的指型结果完全一致', () => {
+        const input = {
+            numMeasures: 4,
+            key: 'C',
+            scaleType: 'Major (Ionian)' as const,
+            style: 'Rock' as const,
+            fingering: 'La' as const,
+            practice: 'fretboard' as const,
+            seed: 4,
+        };
+        expect(generateLocalImprovisation(input).notes)
+            .toEqual(generateLocalImprovisation(input).notes);
+    });
+
+    it('只给练习意图时锁定风格低把位的 4 品窗口', () => {
+        const { options } = generateLocalImprovisation({
+            style: 'Rock',
+            practice: 'fretboard',
+            seed: 1,
+        });
+        expect(options.fretRange).toEqual({ min: 5, max: 8 });
+        expect(options.fretRangeSource).toBe('practice');
+    });
+
+    it('显式 fretRange 覆盖指型，指型仅保留用于展示', () => {
+        const options = resolveLocalImprovOptions({
+            key: 'C',
+            fingering: 'La',
+            fretRange: { min: 1, max: 4 },
+        });
+        expect(options.fretRange).toEqual({ min: 1, max: 4 });
+        expect(options.fretRangeSource).toBe('explicit');
+        expect(options.fingering).toBe('La');
+    });
+
+    it('音阶缺该级音时指型回退到风格把位', () => {
+        const options = resolveLocalImprovOptions({
+            key: 'A',
+            scaleType: 'Pentatonic Minor',
+            fingering: 'Si',
+        });
+        expect(options.fretRange).toBeNull();
+        expect(options.fretRangeSource).toBe('style');
+    });
+});
+
 describe('generateLocalImprovisation（乐句计划）', () => {
     it('结果带完整乐句计划，首句 statement、末句 cadence', () => {
         for (const caseItem of CASES) {

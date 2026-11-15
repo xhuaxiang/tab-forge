@@ -433,6 +433,17 @@ export const DEEPSEEK_CONFIG = {
 /** AI 请求超时（毫秒）：兜底，避免无限挂起，超时给出明确错误 */
 export const AI_TIMEOUT_MS = 60000;
 
+/**
+ * 「本地底稿 + AI 表现扩展」两段请求的参数。
+ *
+ * brief 只做需求结构化，温度低、输出短；patch 在已合法的底稿上加花，
+ * 允许更高温度，但条数设上限，避免 AI 把每个音都改一遍。
+ */
+export const IMPROV_AI_CONFIG = {
+    brief: { temperature: 0.2, maxTokens: 600 },
+    patch: { temperature: 0.8, maxTokens: 2048, maxPatches: 128 },
+} as const;
+
 export interface ImprovSelectOption {
     /** 提交给 AI 的值 */
     value: string;
@@ -575,6 +586,9 @@ export const LOCAL_PROGRESSIONS: readonly LocalProgressionOption[] = [
     { value: 'I-vi-IV-V', label: 'I–vi–IV–V', steps: [1, 6, 4, 5] },
 ];
 
+/** 标准五型指法的窗口宽度（品）。C 大调 La = 5-8 即 4 品窗口 */
+export const FINGERING_PATTERN_SPAN = 4;
+
 /**
  * 本地即兴生成参数。
  *
@@ -605,6 +619,13 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         timeSignature: SCORE_DEFAULTS.timeSignature,
         tuning: { ...SCORE_DEFAULTS.tuning },
         seed: 1,
+    },
+    practiceProfiles: {
+        none: { expressionScale: 1, maxLeapSemitones: null, keepPosition: false },
+        fretboard: { expressionScale: 0.25, maxLeapSemitones: 3, keepPosition: true },
+        ear: { expressionScale: 0.2, maxLeapSemitones: 3, keepPosition: true },
+        technique: { expressionScale: 1, maxLeapSemitones: null, keepPosition: false },
+        warmup: { expressionScale: 0.5, maxLeapSemitones: 4, keepPosition: true },
     },
     densityProfiles: {
         低: {

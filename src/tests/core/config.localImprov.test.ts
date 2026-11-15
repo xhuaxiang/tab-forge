@@ -16,6 +16,7 @@ import {
 import {
     LOCAL_DENSITIES,
     LOCAL_STYLES,
+    PRACTICE_FOCUSES,
     SCALE_INTERVALS,
     SCALE_TYPES,
 } from '../../core/types/improv/index.ts';
@@ -103,6 +104,29 @@ describe('LOCAL_IMPROV_CONFIG', () => {
             fretMax: 24,
             palmMuteStrings: [4, 6],
         });
+    });
+
+    it('练习预设覆盖全部练习意图，且取值只收紧不放大', () => {
+        expect(Object.keys(LOCAL_IMPROV_CONFIG.practiceProfiles).sort())
+            .toEqual([...PRACTICE_FOCUSES].sort());
+
+        const maxLeap = LOCAL_IMPROV_CONFIG.playability.maxLeapSemitones;
+        for (const focus of PRACTICE_FOCUSES) {
+            const profile = LOCAL_IMPROV_CONFIG.practiceProfiles[focus];
+            expect(profile.expressionScale).toBeGreaterThan(0);
+            expect(profile.expressionScale).toBeLessThanOrEqual(1);
+            if (profile.maxLeapSemitones !== null) {
+                expect(profile.maxLeapSemitones).toBeGreaterThan(0);
+                expect(profile.maxLeapSemitones).toBeLessThanOrEqual(maxLeap);
+            }
+        }
+
+        expect(LOCAL_IMPROV_CONFIG.practiceProfiles.none).toEqual({
+            expressionScale: 1,
+            maxLeapSemitones: null,
+            keepPosition: false,
+        });
+        expect(LOCAL_IMPROV_CONFIG.practiceProfiles.fretboard.keepPosition).toBe(true);
     });
 });
 
