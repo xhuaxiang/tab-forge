@@ -12,7 +12,7 @@ import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { BEND_AMOUNT_LABELS, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
-import { buildNotesFromForm, updateTechniqueUI, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
+import { buildNotesFromForm, updateTechniqueUI, initTargetFretFollow, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
 
 export function initNoteInput(): void {
     // ============================================================
@@ -31,6 +31,9 @@ export function initNoteInput(): void {
             updateTechniqueUI(tech as AppTechnique);
         });
     });
+
+    // 品变化时 H/P/S 的目标品默认跟随（用户显式改过目标品后不再覆盖）
+    initTargetFretFollow();
 
     // ============================================================
     // 奏法开关 / 泛音（与技法栏正交，可同时生效）

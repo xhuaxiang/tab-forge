@@ -25,22 +25,58 @@ export function initPlaybackControls(): void {
             },
         };
         // 取值不合法（HTML 与 PLAYBACK_ENGINES 漂了）就回落到默认引擎，而不是静默变成别的
-        const engineValue = ($('engineSelect') as HTMLSelectElement | null)?.value;
+        const engineSelect = $('engineSelect') as HTMLSelectElement | null;
+        const engineValue = engineSelect?.value;
         const engine = isPlaybackEngine(engineValue) ? engineValue : DEFAULT_PLAYBACK_ENGINE;
+
+        const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
+        const { currentAudioEngine } = await import('../../features/playback/karplus/index.ts');
+
+        // 正在响的引擎与下拉框一致时，按钮才是「暂停」；不一致说明用户刚切换了
+        // 引擎，继续走下面的播放路径（先停旧引擎，再从新引擎起播）。
+        const playingEngine = alphaTabPlayer.getState() === 'playing'
+            ? 'alphatab'
+            : currentAudioEngine.getState() === 'playing'
+                ? 'ks'
+                : null;
+        if (playingEngine === engine) {
+            if (engine === 'alphatab') {
+                alphaTabPlayer.setCallbacks(callbacks);
+                alphaTabPlayer.pause();
+            } else {
+                currentAudioEngine.setCallbacks(callbacks);
+                currentAudioEngine.pause();
+            }
+            return;
+        }
+
+        // 两个引擎各自独立出声，若另一个还在播，换引擎播放会叠成两轨（听感：节奏错乱）
+        const stopOtherEngine = async (target: 'alphatab' | 'karplus') => {
+            if (target === 'alphatab') {
+                if (currentAudioEngine.getState() === 'playing' || currentAudioEngine.getState() === 'paused') {
+                    currentAudioEngine.stop();
+                }
+            } else if (alphaTabPlayer.getState() === 'playing' || alphaTabPlayer.getState() === 'paused') {
+                alphaTabPlayer.stop();
+            }
+        };
+
         if (engine === 'alphatab') {
             try {
-                const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
+                await stopOtherEngine('alphatab');
                 alphaTabPlayer.setCallbacks(callbacks);
                 await alphaTabPlayer.play(scoreStore.score);
                 return;
             } catch (e) {
                 console.error('alphaTab 播放失败，回退 Karplus-Strong', e);
                 setStatus('SoundFont 播放失败，已回退合成器', 'error');
+                // 下拉框同步到实际发声的引擎，否则下次点击仍会先尝试已失败的 SoundFont
+                if (engineSelect) engineSelect.value = 'ks';
             }
         }
-        const audioEngine = (await import('../../features/playback/karplus/index.ts')).currentAudioEngine;
-        audioEngine.setCallbacks(callbacks);
-        await audioEngine.play(scoreStore.score);
+        await stopOtherEngine('karplus');
+        currentAudioEngine.setCallbacks(callbacks);
+        await currentAudioEngine.play(scoreStore.score);
     });
 
     $('stopBtn')?.addEventListener('click', async () => {

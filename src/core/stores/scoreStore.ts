@@ -8,7 +8,7 @@
 import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
 import { locateSlotAt, measureTotalBeats, measureCapacity, canAddToMeasure, createEmptyMeasure, parseTimeSignature } from '../utils/measureUtils.ts';
 import { applyNoteChange, muteNoteGroup } from '../utils/measureEdit.ts';
-import { nextChordGroupId, validateNoteGroup } from '../utils/noteGroup.ts';
+import { groupFlatNotes, nextChordGroupId, validateNoteGroup } from '../utils/noteGroup.ts';
 import { SCORE_DEFAULTS } from '../config.ts';
 
 export const scoreStore = {
@@ -169,17 +169,7 @@ export const scoreStore = {
         if (this.score.measures.length === 0) this.addMeasure();
 
         // 按 chordGroup 分组成拍位：和弦整体进一小节，不被切开，容量按拍位计
-        const slots: Note[][] = [];
-        let current: Note[] = [];
-        for (const n of notes) {
-            if (n.chordGroup !== undefined && current.length > 0 && current[0].chordGroup === n.chordGroup) {
-                current.push(n);
-            } else {
-                if (current.length > 0) slots.push(current);
-                current = [n];
-            }
-        }
-        if (current.length > 0) slots.push(current);
+        const slots = groupFlatNotes(notes);
 
         let written = 0;
         for (const slot of slots) {

@@ -9,4 +9,21 @@ export {
     generateLocalImprovisation,
     resolveLocalImprovOptions,
 } from './generate.ts';
-export { parseImprovDescription } from './description.ts';
+export {
+    detectUnsupportedDescription,
+    parseDescriptionChordChart,
+    parseDescriptionFretRange,
+    parseImprovDescription,
+} from './description.ts';
+export {
+    buildChordChart,
+    chordChartFromBars,
+    formatChordSpec,
+    formatProgression,
+    formatProgressionStep,
+    normalizeChordChart,
+    parseChordChartText,
+    parseProgressionText,
+    parseProgressionToken,
+    progressionEquals,
+} from './progression.ts';

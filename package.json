@@ -6,11 +6,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "tsc && vite build",
+    "build": "tsc && node scripts/lint-layers.mjs && vite build",
     "dev:web": "vite dev --config vite.web.config.ts",
-    "build:web": "tsc && vite build --config vite.web.config.ts",
+    "build:web": "tsc && node scripts/lint-layers.mjs && vite build --config vite.web.config.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:layers": "node scripts/lint-layers.mjs"
   },
   "keywords": [
     "guitar",

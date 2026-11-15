@@ -1,9 +1,11 @@
 /**
  * positioning — 为旋律骨架选把位（Viterbi 动态规划，纯函数）。
  *
- * 同一个 MIDI 音在吉他上通常有多个 (弦, 品) 候选。DP 的代价同时考虑
- * 风格偏好把位、把位内品位跨度、跨弦距离与同音重复；结果对同一输入
- * 完全确定（候选按品位/弦号排序，平局取先出现的）。
+ * 同一个 MIDI 音在吉他上通常有多个 (弦, 品) 候选；和弦拍位则需要一整组
+ * 可同时按出的位置。DP 的代价同时考虑风格偏好把位、把位内品位跨度、
+ * 跨弦距离与同音重复；结果对同一输入完全确定。
+ *
+ * 单声部是 voicing 元组长度为 1 的特例，代价与候选顺序都与旧实现一致。
  */
 
 import type {
@@ -13,11 +15,11 @@ import type {
     ResolvedImprovOptions,
     SkeletonSlot,
     StyleProfile,
-} from '../../types/improv.ts';
-import { midiToFretPositions } from './pitch.ts';
+} from '../../types/improv/index.ts';
+import { voicingCandidatesForMidis } from './voicing.ts';
 
 interface State {
-    position: FretPosition;
+    positions: FretPosition[];
     cost: number;
     /** 上一层候选的下标；第一层为 -1 */
     previous: number;
@@ -65,11 +67,51 @@ function transitionCost(
     return cost;
 }
 
+/** 一个 voicing 的静态代价；单声部与旧实现完全相同 */
+function voicingCost(
+    positions: FretPosition[],
+    style: StyleProfile,
+): number {
+    let cost = positions.reduce(
+        (sum, position) => sum + positionCost(position, style),
+        0,
+    );
+    if (positions.length > 1) {
+        const frets = positions.map(position => position.fret);
+        const strings = positions.map(position => position.string);
+        cost += (Math.max(...frets) - Math.min(...frets)) * 0.05;
+        cost += (Math.max(...strings) - Math.min(...strings)) * 0.1;
+    }
+    return cost;
+}
+
+/**
+ * 两个 voicing 之间的移动代价。
+ *
+ * 多声部时，next 的每个声部取与 previous 各声部移动代价的最小值，再求和；
+ * 单声部时严格退化为 `transitionCost`。
+ */
+function voicingTransitionCost(
+    previous: FretPosition[],
+    next: FretPosition[],
+    playability: PlayabilityRules,
+): number {
+    if (previous.length === 1 && next.length === 1) {
+        return transitionCost(previous[0], next[0], playability);
+    }
+    return next.reduce(
+        (sum, nextPosition) => sum + Math.min(
+            ...previous.map(previousPosition =>
+                transitionCost(previousPosition, nextPosition, playability)),
+        ),
+        0,
+    );
+}
+
 /**
  * 为骨架选把位。
  *
- * v1 单声部：每个发音 slot 的 midis 长度必须为 0（休止）或 1。
- * 双音需要把状态扩成 voicing 元组，属于第二刀。
+ * 发音 slot 的 `midis` 可以是单音，也可以是一组升序和弦音；休止必须为空。
  */
 export function choosePositions(
     skeleton: SkeletonSlot[],
@@ -78,7 +120,9 @@ export function choosePositions(
     style: StyleProfile,
 ): PositionedSlot[] {
     const noteIndices: number[] = [];
-    const noteCandidates: FretPosition[][] = [];
+    const noteCandidates: FretPosition[][][] = [];
+    const fretMin = options.fretRange?.min ?? playability.fretMin;
+    const fretMax = options.fretRange?.max ?? playability.fretMax;
 
     skeleton.forEach((slot, index) => {
         if (slot.isRest) {
@@ -87,18 +131,34 @@ export function choosePositions(
             }
             return;
         }
-        if (slot.midis.length !== 1) {
-            throw new Error(`v1 只支持单声部，slot ${index} 有 ${slot.midis.length} 个音`);
+        if (slot.midis.length === 0) {
+            throw new Error(`发音 slot ${index} 缺少音高`);
+        }
+        if (slot.midis.length > playability.maxChordVoices) {
+            throw new Error(
+                `slot ${index} 声部过多: ${slot.midis.length} > ${playability.maxChordVoices}`,
+            );
+        }
+        for (let i = 1; i < slot.midis.length; i++) {
+            if (slot.midis[i] <= slot.midis[i - 1]) {
+                throw new Error(`slot ${index} 的音高必须按升序排列`);
+            }
         }
 
-        const candidates = midiToFretPositions(
+        const candidates = voicingCandidatesForMidis(
             options.tuning,
-            slot.midis[0],
-            playability.fretMin,
-            playability.fretMax,
+            slot.midis,
+            fretMin,
+            fretMax,
+            playability,
         );
         if (candidates.length === 0) {
-            throw new Error(`MIDI ${slot.midis[0]} 在指板上没有可用位置`);
+            if (slot.midis.length === 1) {
+                throw new Error(`MIDI ${slot.midis[0]} 在指板上没有可用位置`);
+            }
+            throw new Error(
+                `MIDI [${slot.midis.join(', ')}] 在指板上无法同时按出`,
+            );
         }
         noteIndices.push(index);
         noteCandidates.push(candidates);
@@ -111,21 +171,21 @@ export function choosePositions(
 
     const layers: State[][] = [];
 
-    layers.push(noteCandidates[0].map(position => ({
-        position,
-        cost: positionCost(position, style),
+    layers.push(noteCandidates[0].map(positions => ({
+        positions,
+        cost: voicingCost(positions, style),
         previous: -1,
     })));
 
     for (let noteIndex = 1; noteIndex < noteIndices.length; noteIndex++) {
         const previousLayer = layers[noteIndex - 1];
-        const currentLayer = noteCandidates[noteIndex].map(position => {
+        const currentLayer = noteCandidates[noteIndex].map(positions => {
             let bestCost = Number.POSITIVE_INFINITY;
             let bestPrevious = -1;
 
             previousLayer.forEach((state, previousIndex) => {
-                const cost = state.cost + transitionCost(
-                    state.position, position, playability,
+                const cost = state.cost + voicingTransitionCost(
+                    state.positions, positions, playability,
                 );
                 if (cost < bestCost) {
                     bestCost = cost;
@@ -134,8 +194,8 @@ export function choosePositions(
             });
 
             return {
-                position,
-                cost: bestCost + positionCost(position, style),
+                positions,
+                cost: bestCost + voicingCost(positions, style),
                 previous: bestPrevious,
             };
         });
@@ -148,18 +208,18 @@ export function choosePositions(
         if (lastLayer[index].cost < lastLayer[bestIndex].cost) bestIndex = index;
     }
 
-    const chosen: FretPosition[] = new Array(noteIndices.length);
+    const chosen: FretPosition[][] = new Array(noteIndices.length);
     let layerIndex = layers.length - 1;
     let stateIndex = bestIndex;
     while (layerIndex >= 0) {
         const state = layers[layerIndex][stateIndex];
-        chosen[layerIndex] = state.position;
+        chosen[layerIndex] = state.positions;
         stateIndex = state.previous;
         layerIndex--;
     }
 
-    chosen.forEach((position, index) => {
-        positionsBySlot[noteIndices[index]] = [position];
+    chosen.forEach((positions, index) => {
+        positionsBySlot[noteIndices[index]] = positions;
     });
 
     return skeleton.map((slot, index) => ({

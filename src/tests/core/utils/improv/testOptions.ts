@@ -5,7 +5,7 @@
  */
 
 import { LOCAL_IMPROV_CONFIG } from '../../../../core/config.ts';
-import type { ResolvedImprovOptions } from '../../../../core/types/improv.ts';
+import type { ResolvedImprovOptions } from '../../../../core/types/improv/index.ts';
 import { parseKey } from '../../../../core/utils/improv/pitch.ts';
 
 export function makeOptions(
@@ -24,6 +24,8 @@ export function makeOptions(
         timeSignature: overrides.timeSignature ?? defaults.timeSignature,
         tuning: overrides.tuning ?? { ...defaults.tuning },
         progression: overrides.progression ?? [1],
+        chordChart: overrides.chordChart ?? [],
+        fretRange: overrides.fretRange ?? null,
         seed: overrides.seed ?? defaults.seed,
     };
 }

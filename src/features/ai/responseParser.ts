@@ -66,7 +66,7 @@ const VALID_DURATIONS = new Set<number>(NOTE_DURATIONS);
 /**
  * AI 允许输出的技法 —— 必须与 noteContract.ts 中 `technique` 的取值保持一致。
  *
- * 这是 `Note.technique` 的全集（core/types/index.ts）：五种都给 AI。
+ * 这是 `Note.technique` 的全集（core/types/note/index.ts）：五种都给 AI。
  * bend / vibrato 是 blues、jazz 味道的主要载体（推弦哭腔、揉弦呼吸），
  * 早先只开放三种时，那两种风格无论提示词怎么写都出不来。
  * ⚠️ 往 noteContract.ts 加技法时务必同步这一行，否则 AI 发来的技法会落不进去。
@@ -94,16 +94,27 @@ function isAIHarmonic(v: string): v is AppHarmonic {
     return (APP_HARMONICS as readonly string[]).includes(v);
 }
 
-/** 规范化时值为最近的有效枚举值 */
-function clampDuration(d: number | undefined): NoteDuration {
-    if (!d || !VALID_DURATIONS.has(d)) {
-        const arr = NOTE_DURATIONS;
-        const closest = arr.reduce((prev, curr) =>
-            Math.abs(curr - (d ?? 0.25)) < Math.abs(prev - (d ?? 0.25)) ? curr : prev
-        );
-        return closest as NoteDuration;
+/**
+ * 规范化时值为最近的有效枚举值。
+ *
+ * AI 输出是不可信输入：非数字（`true` / `{}` / `"abc"` / `null`）、负数、
+ * NaN 和 Infinity 先收口到默认四分音符，避免 `Math.abs` 得到 NaN 后比较恒为
+ * false、循环停在 `NOTE_DURATIONS[0]` 把非法值放大成全音符。
+ * 有限非负数字仍按距离取最近合法值（0 → 0.03125）。
+ */
+function clampDuration(d: unknown): NoteDuration {
+    if (typeof d === 'number' && VALID_DURATIONS.has(d)) {
+        return d as NoteDuration;
     }
-    return d as NoteDuration;
+
+    const target = typeof d === 'number' && Number.isFinite(d) && d >= 0 ? d : 0.25;
+    let closest: NoteDuration = NOTE_DURATIONS[0];
+    for (const candidate of NOTE_DURATIONS) {
+        if (Math.abs(candidate - target) < Math.abs(closest - target)) {
+            closest = candidate;
+        }
+    }
+    return closest;
 }
 
 /** 校验单个音符 */

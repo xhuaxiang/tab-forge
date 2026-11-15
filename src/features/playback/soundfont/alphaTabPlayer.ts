@@ -38,6 +38,7 @@ class AlphaTabPlayer {
     private mod: AlphaTabModule | null = null;
     private synth: AlphaSynthHandle | null = null;
     private callbacks: PlaybackCallbacks = {};
+    private state: PlaybackState = 'idle';
     private measureStarts: number[] = [];
     private lastMeasure = -1;
     private initializing: Promise<void> | null = null;
@@ -47,8 +48,20 @@ class AlphaTabPlayer {
         this.callbacks = callbacks;
     }
 
+    /** 当前播放状态（供切引擎时判断是否需要先停掉本引擎） */
+    getState(): PlaybackState {
+        return this.state;
+    }
+
     async play(score: TabScore): Promise<void> {
         if (this.broken) throw new Error('alphaTab player 不可用（上次初始化失败）');
+        // 暂停中再次播放 = 继续；绝不能重新 loadMidiFile，否则会从曲首重播
+        if (this.state === 'paused') {
+            this.resume();
+            return;
+        }
+        if (this.state === 'playing') return;
+
         await this.ensureInitialized();
         if (!this.synth || !this.mod) throw new Error('alphaTab player 未初始化');
 
@@ -73,6 +86,7 @@ class AlphaTabPlayer {
 
     stop(): void {
         if (this.synth) this.synth.stop();
+        this.state = 'stopped';
         this.lastMeasure = -1;
         this.callbacks.onPositionChange?.(0, 0);
     }
@@ -81,10 +95,17 @@ class AlphaTabPlayer {
         this.synth?.pause();
     }
 
+    /** 从暂停位置继续（不重新加载 MIDI） */
+    private resume(): void {
+        if (this.state !== 'paused' || !this.synth) return;
+        this.synth.play();
+    }
+
     dispose(): void {
         this.synth?.destroy();
         this.synth = null;
         this.mod = null;
+        this.state = 'idle';
         this.measureStarts = [];
     }
 
@@ -144,6 +165,7 @@ class AlphaTabPlayer {
     }
 
     private emitState(state: PlaybackState): void {
+        this.state = state;
         this.callbacks.onStateChange?.(state);
     }
 

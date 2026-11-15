@@ -122,15 +122,18 @@ export function detectTechnique(n: model.Note, fallbackBendAmount: number): { te
         };
     }
 
-    if (n.slideOutType !== model.SlideOutType.None || n.slideInType !== model.SlideInType.None || n.slideOrigin) {
-        const target = n.slideOutType !== model.SlideOutType.None ? (n.slideTarget?.fret ?? n.fret) : n.fret;
-        return { tech: 'slide', targetFret: target };
+    // 连接类技法只从「到达音」回读：应用模型把 technique/targetFret 记在到达音上，
+    // 起点音只是普通音符。从起点回读会把上方的起点品当成目标（勾弦还会被判成击弦），
+    // 且编辑应用后会改写起点音的品，故这里只认 destination。
+    // 前提：音符来自已 finish() 的 alphaTab Score（hammerPullOrigin / slideOrigin 由
+    // finish 反填），且谱面由本应用写入；外部谱面导入时 origin 侧标记可能读不到。
+    if (n.slideOrigin !== null || n.slideInType !== model.SlideInType.None) {
+        return { tech: 'slide', targetFret: n.fret };
     }
 
-    if (n.isHammerPullOrigin || n.isHammerPullDestination) {
-        const other = n.isHammerPullOrigin ? n.hammerPullDestination : n.hammerPullOrigin;
-        const isHammer = other !== null && other.fret > n.fret;
-        return { tech: isHammer ? 'hammerOn' : 'pullOff', targetFret: other?.fret ?? n.fret };
+    if (n.hammerPullOrigin !== null) {
+        const isHammer = n.fret > n.hammerPullOrigin.fret;
+        return { tech: isHammer ? 'hammerOn' : 'pullOff', targetFret: n.fret };
     }
 
     return { tech: 'none' };
@@ -183,7 +186,7 @@ export function deltaFretToHarmonicValue(deltaFret: number): number {
  *
  * 与 `deltaFretToHarmonicValue` 不构成简单逆映射：alphaTab 发声时按区间查表，
  * 例如 12 品泛音升高 12 个半音，而 5 品泛音升高 24 个半音（两个八度）。
- * 自然泛音再叠加空弦音高，人工/捏弦泛音叠加按弦音高（见 Karplus audioEngine）。
+ * 自然泛音再叠加空弦音高，人工/捏弦泛音叠加按弦音高（见 core/utils/noteFrequency）。
  */
 export function harmonicValueToSemitones(value: number): number {
     const is = (v: number): boolean => Math.abs(value - v) < 1e-6;

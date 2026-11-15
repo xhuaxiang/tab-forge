@@ -9,11 +9,15 @@
  *
  * 该模块集中了最容易出错的调度规则：
  *   时值→秒换算、和弦音量补偿、扫弦/琶音的弦序与间隔、
- *   休止符与延音跳过、空小节按 4/4 兜底。
+ *   休止符与延音跳过、小节内容不足时按自身拍号容量补齐。
  */
 
 import type { Measure, Note } from '../../../core/types/index.ts';
-import { forEachSlot } from '../../../core/utils/measureUtils.ts';
+import { forEachSlot, measureCapacity } from '../../../core/utils/measureUtils.ts';
+import { resolveNoteDynamics } from '../../../core/utils/metricAccent.ts';
+import { resolvePlayDuration } from '../../../core/utils/playbackDuration.ts';
+import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
+import { canSourceTechnique, isConnectingTarget } from '../../../core/utils/technique.ts';
 import { STRUM_INTERVAL_MS, ARPEGGIO_INTERVAL_MS, DYNAMICS_VOLUME_FACTOR } from '../../../core/config.ts';
 
 /** 单条播放事件 */
@@ -24,12 +28,22 @@ export interface ScheduledEvent {
     /** 记谱时值对应的秒数（技法释放时间、音符时长用） */
     duration: number;
     volume: number;
+    /** 生效力度（谱面显式标识；默认不再按拍位派生）；volume 已含对应系数，消费方不要再乘一次 */
+    dynamics: Note['dynamics'];
+}
+
+/** 一段全曲静默（休止 / 空小节 / 内容不足补齐）的绝对时间范围（毫秒） */
+export interface SilenceSpan {
+    startMs: number;
+    endMs: number;
 }
 
 export interface PlaybackSchedule {
     events: ScheduledEvent[];
     /** 整曲预计时长（毫秒） */
     totalDurationMs: number;
+    /** 休止、空小节与内容不足补齐造成的静默区间，技法延音不能跨过 */
+    silenceSpansMs: SilenceSpan[];
 }
 
 /** 一拍（四分音符）的秒数 */
@@ -48,6 +62,161 @@ export const DURATION_TO_BEATS: Record<number, number> = {
 };
 
 /**
+ * buildSchedule 的扫弦/琶音偏移在极端速度下可能越过下一个 slot，
+ * 不能假定 events 已严格按时间排序。
+ */
+function orderByDelay(events: ScheduledEvent[]): number[] {
+    return events
+        .map((_, index) => index)
+        .sort((a, b) => (events[a].delayMs - events[b].delayMs) || (a - b));
+}
+
+function crossesSilence(
+    silenceSpansMs: readonly SilenceSpan[],
+    fromMs: number,
+    toMs: number,
+): boolean {
+    return silenceSpansMs.some(span => span.startMs < toMs && span.endMs > fromMs);
+}
+
+/** 技法链扫描结果：ring 与链上最高播放倍率同源 */
+export interface TechniqueChainInfo {
+    /** 每个事件作为源音需要**额外**保持发声的时长（秒，相对该事件起点） */
+    ring: number[];
+    /** 每个事件作为源音缓冲区需要承受的最高播放倍率（≥1，未夹上限） */
+    rateScales: number[];
+}
+
+/**
+ * 扫描同弦技法链，一次遍历同时产出 ring 与最高播放倍率。
+ *
+ * 击/勾/滑目标音复用源音的缓冲区，不重新拨弦；源音若按自己的时值提前
+ * 结束，目标音就只剩缓冲末尾的一点残余。这里向后扫描同弦事件，遇到连续
+ * 技法链就继续延伸，直到遇到下一个重新拨弦的音。
+ *
+ * 静默区间（休止/空小节/补齐段）会打断连接：缓冲区跨过整段静默后已经
+ * 衰减殆尽，目标音几乎无声，不如让播放层回落到重新拨弦。palmMute/制音/
+ * 断音源音由 {@link canSourceTechnique} 直接排除，ring 恒为 0。
+ *
+ * 倍率是「目标实际频率 / 源音缓冲区原始频率」：目标音本身不能是泛音
+ * （{@link isConnectingTarget} 排除），但源音可以是泛音，所以频率必须由
+ * 调用方传入（与播放层共用同一份泛音换算），不能只用品位差。
+ * 低于 1 的目标（勾弦到低品位）不会缩短缓冲，rateScales 保持 1。
+ *
+ * 传了 `frequencyOf` 时，频率解析为 0 的事件（非法品位/弦号）按播放层
+ * 的处理**跳过**：播放层会直接不发声、也不更新弦上记录，所以它既不能
+ * 当源音/目标，也不打断链。不传时保持纯 ring 的旧语义（不跳过）。
+ */
+function scanTechniqueChains(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+    frequencyOf?: (note: Note) => number,
+): TechniqueChainInfo {
+    const ring = events.map(() => 0);
+    const rateScales = events.map(() => 1);
+    const frequencies = frequencyOf ? events.map(e => frequencyOf(e.note)) : null;
+    // 播放层只对能解析出频率的音符发声（audioEngine.playNote 频率为 0 即返回）
+    const playable = frequencies
+        ? frequencies.map(f => Number.isFinite(f) && f > 0)
+        : null;
+    const order = orderByDelay(events);
+
+    for (let oi = 0; oi < order.length; oi++) {
+        const i = order[oi];
+        const source = events[i];
+        // 缺 string 的事件在播放层不会发声，也不能参与任何弦的技法链
+        if (source.note.string == null || !canSourceTechnique(source.note)) continue;
+        if (playable && !playable[i]) continue;
+        const stringNum = source.note.string;
+        const sourceFreq = frequencies?.[i] ?? 0;
+        const canRatio = Number.isFinite(sourceFreq) && sourceFreq > 0;
+        for (let oj = oi + 1; oj < order.length; oj++) {
+            const j = order[oj];
+            if (events[j].note.string !== stringNum) continue;
+            // 播放层跳过不可发声的事件，它不打断也不参与技法链
+            if (playable && !playable[j]) continue;
+            if (!isConnectingTarget(events[j].note)) break;
+            // 目标音在静默之后才出现：缓冲区已衰减，连接没有意义
+            if (crossesSilence(silenceSpansMs, source.delayMs, events[j].delayMs)) break;
+            const startRelSec = (events[j].delayMs - source.delayMs) / 1000;
+            // 目标音的奏法时值也要算进去（如 letRing 的额外延长）
+            const targetEnd = startRelSec
+                + resolvePlayDuration(events[j].note, events[j].duration);
+            ring[i] = Math.max(ring[i], targetEnd);
+            if (!canRatio) continue;
+            const targetFreq = frequencies?.[j] ?? 0;
+            if (!Number.isFinite(targetFreq) || targetFreq <= 0) continue;
+            const ratio = targetFreq / sourceFreq;
+            if (Number.isFinite(ratio)) rateScales[i] = Math.max(rateScales[i], ratio);
+        }
+    }
+    return { ring, rateScales };
+}
+
+/**
+ * 计算每个事件作为「源音」需要**额外**保持发声的时长（秒，相对该事件起点）。
+ *
+ * 返回 0 表示无需额外延长；调用方再与自身实际发声时长取 max。
+ * 播放层走 {@link computeTechniqueChainInfo}（ring + 倍率一次扫描）；
+ * 这里保留 ring-only 入口，供只需要延音的调用方与既有测试使用。
+ *
+ * @see scanTechniqueChains 断链规则与 ring 语义
+ */
+export function computeTechniqueRing(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+): number[] {
+    return scanTechniqueChains(events, silenceSpansMs).ring;
+}
+
+/**
+ * 计算每个事件作为源音时，缓冲需要承受的最高播放倍率（与 ring 同一套断链规则）。
+ *
+ * 技法链复用同一段缓冲，链上目标把 playbackRate 抬到目标音高/源音原始音高；
+ * 缓冲若只按源音自身时值生成，速率一高就会提前放完（目标音后半段静音）。
+ *
+ * @param frequencyOf 音符基频解析（与播放层共用；泛音源必须给实际泛音频率）
+ */
+export function computeTechniqueChainInfo(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+    frequencyOf: (note: Note) => number,
+): TechniqueChainInfo {
+    return scanTechniqueChains(events, silenceSpansMs, frequencyOf);
+}
+
+/**
+ * 标记「因静默而必须重新拨弦」的技法目标。
+ *
+ * ring 只决定源音预生成多长；短休止里源音缓冲区尚未结束，播放层仅靠
+ * `isNoteActive` 仍会把目标连到旧缓冲上。这里把调度层的静默语义显式传给
+ * 播放层，命中后跳过连接分支。
+ */
+export function computeForceRepluck(
+    events: ScheduledEvent[],
+    silenceSpansMs: readonly SilenceSpan[],
+): boolean[] {
+    const forced = events.map(() => false);
+    const order = orderByDelay(events);
+    const lastIndexByString = new Map<number, number>();
+
+    for (const j of order) {
+        const event = events[j];
+        // 与 computeTechniqueRing / 播放层一致：缺 string 的事件不参与弦链
+        if (event.note.string == null) continue;
+        const stringNum = event.note.string;
+        const previous = lastIndexByString.get(stringNum);
+        if (previous !== undefined
+            && isConnectingTarget(event.note)
+            && crossesSilence(silenceSpansMs, events[previous].delayMs, event.delayMs)) {
+            forced[j] = true;
+        }
+        lastIndexByString.set(stringNum, j);
+    }
+    return forced;
+}
+
+/**
  * 构建完整播放队列（按时间顺序）。
  *
  * @param measures      小节列表
@@ -61,21 +230,41 @@ export function buildSchedule(
 ): PlaybackSchedule {
     const beat = beatDurationSec(bpm);
     const events: ScheduledEvent[] = [];
+    const silenceSpansMs: SilenceSpan[] = [];
     let cursorMs = startDelayMs;
 
     for (const measure of measures) {
+        const signature = `${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}`;
         const measureStartMs = cursorMs;
+        // 拍位偏移（全音符 = 1），供 AUTO_METRIC_ACCENT 开启时派生重音
+        // （默认关闭，见 core/config.ts）；休止符也照常推进
+        let slotOffset = 0;
 
         forEachSlot(measure, (notes) => {
-            const durSec = beat * (DURATION_TO_BEATS[notes[0].duration] ?? 1);
+            const first = notes[0];
+            const slotStart = slotOffset;
+            slotOffset += first.duration;
+
+            const durSec = beat * (DURATION_TO_BEATS[first.duration] ?? 1);
             const durMs = durSec * 1000;
+
+            // 整拍静默（休止）会打断同弦技法连接
+            if (notes.every(n => n.isRest)) {
+                silenceSpansMs.push({ startMs: cursorMs, endMs: cursorMs + durMs });
+            }
 
             // 和弦音量补偿：多个音符同时播放时适当降低避免削波
             // 单音=0.5, 双音=0.4, 三音=0.33, 四音=0.29, 五音=0.25, 六音=0.22
             const chordVolume = 0.5 / (1 + (notes.length - 1) * 0.25);
+            // 该拍位组的力度：只认谱面显式标识；拍位派生默认关闭，保证与
+            // alphaTab 渲染的轻重记号一致（开关见 core/config.ts）。
+            const slotDynamics = resolveNoteDynamics(first.dynamics, slotStart, first.duration, signature);
             // 力度：每个音各按自己的 dynamics 缩放（重音抬、轻音压）——律动感就靠这个对比
-            const volumeOf = (n: Note): number =>
-                chordVolume * (n.dynamics ? DYNAMICS_VOLUME_FACTOR[n.dynamics] : 1);
+            const dynamicsOf = (n: Note): Note['dynamics'] => n.dynamics ?? slotDynamics;
+            const volumeOf = (n: Note): number => {
+                const d = dynamicsOf(n);
+                return chordVolume * (d ? DYNAMICS_VOLUME_FACTOR[d] : 1);
+            };
 
             const arpeggio = notes.length > 1 ? notes[0].arpeggio : undefined;
             const strum = notes.length > 1 ? notes[0].strum : undefined;
@@ -96,6 +285,7 @@ export function buildSchedule(
                         delayMs: cursorMs + i * STRUM_INTERVAL_MS,
                         duration: durSec,
                         volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
                     });
                 }
             } else if (arpeggio) {
@@ -113,26 +303,83 @@ export function buildSchedule(
                         delayMs: cursorMs + i * ARPEGGIO_INTERVAL_MS,
                         duration: durSec,
                         volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
                     });
                 }
             } else {
                 // 普通和弦或单音：同时播放
                 for (const note of notes) {
                     if (note.isRest || (note.tieToNext && !note.technique)) continue;
-                    events.push({ note, delayMs: cursorMs, duration: durSec, volume: volumeOf(note) });
+                    events.push({
+                        note,
+                        delayMs: cursorMs,
+                        duration: durSec,
+                        volume: volumeOf(note),
+                        dynamics: dynamicsOf(note),
+                    });
                 }
             }
 
             cursorMs += durMs;
         });
 
-        // 小节内容不足 4 拍时补齐到 4 拍（历史行为，保证小节时长稳定）。
-        // 注意：固定按 4/4 兜底，未参考小节自身 timeSignature；
-        // 且部分填充的小节同样会被补齐（不只是空小节）。
-        if (cursorMs - measureStartMs < beat * 4 * 1000 - 1) {
-            cursorMs = measureStartMs + beat * 4 * 1000;
+        // 小节内容不足自身容量时补齐（部分填充的小节也会补齐）。
+        // 容量以全音符为 1，换算成四分音符拍数要 ×4；不能用固定 4/4，
+        // 否则 3/4、6/8 的谱子会多出拍子。
+        // 非法/零容量拍号回退旧的 4 拍，避免 NaN/Infinity 毒化总时长。
+        const capacity = measureCapacity(measure);
+        const measureBeats = Number.isFinite(capacity) && capacity > 0 ? capacity * 4 : 4;
+        const capacityEndMs = measureStartMs + beat * measureBeats * 1000;
+        if (cursorMs < capacityEndMs - 1) {
+            // 内容不足时补齐的空白同样是静默：空小节也走这里（cursorMs 仍在起点）
+            silenceSpansMs.push({ startMs: cursorMs, endMs: capacityEndMs });
+            cursorMs = capacityEndMs;
         }
     }
 
-    return { events, totalDurationMs: cursorMs };
+    return { events, totalDurationMs: cursorMs, silenceSpansMs };
+}
+
+/**
+ * 计算自然收尾点（毫秒，相对播放开始）。
+ *
+ * 最后一个事件的实际发声终点 = 事件偏移 + KS 实时发声时长
+ * （`max(奏法修正时值, 技法链 ring, 最短发声) + 自然尾音`，直接复用
+ * {@link karplusBufferTiming}，不内联第二份公式）。扫弦/琶音的弦间偏移、
+ * letRing 额外延长、同弦击/勾/滑目标的 ring 都因此自动计入；不能改用固定
+ * 尾音估算，否则末音会被提前切断。
+ *
+ * 结果不小于 {@link PlaybackSchedule.totalDurationMs}：末音在谱面结束前
+ * 就自然衰减完时，仍播放到整曲结束再收尾。非有限输入按 0 处理，避免
+ * NaN/Infinity 毒化播放完成判定。
+ *
+ * 传了 `frequencyOf` 时与 {@link computeTechniqueChainInfo} 同口径：解析
+ * 不出频率的事件不会发声，也不计入收尾点；不传时按事件时长给出上界。
+ *
+ * @param events           播放事件队列
+ * @param ringSecs         每个事件作为源音需要保持发声的最短时长（秒），
+ *                         与 {@link computeTechniqueChainInfo} 的 ring 对齐
+ * @param totalDurationMs  整曲预计时长（毫秒）
+ * @param frequencyOf      可选：音符基频解析（与播放层共用）
+ */
+export function naturalSoundEndMs(
+    events: readonly ScheduledEvent[],
+    ringSecs: readonly number[],
+    totalDurationMs: number,
+    frequencyOf?: (note: Note) => number,
+): number {
+    let end = Number.isFinite(totalDurationMs) ? totalDurationMs : 0;
+    events.forEach((event, index) => {
+        // 播放层不发声的事件（缺弦号/非法音高）不产生尾音，不能拖长收尾
+        if (frequencyOf && !(frequencyOf(event.note) > 0)) return;
+        const ringSec = ringSecs[index] ?? 0;
+        const duration = Math.max(
+            resolvePlayDuration(event.note, event.duration),
+            Number.isFinite(ringSec) ? ringSec : 0,
+        );
+        const { soundDur } = karplusBufferTiming(duration);
+        const delayMs = Number.isFinite(event.delayMs) ? Math.max(0, event.delayMs) : 0;
+        end = Math.max(end, delayMs + soundDur * 1000);
+    });
+    return end;
 }

@@ -4,11 +4,12 @@
  * 集中定义乐谱全局默认与 AI 即兴生成配置，页面 UI 与业务逻辑统一从这里读。
  */
 
-import { STANDARD_TUNING, type Tuning } from './types/index.ts';
+import { STANDARD_TUNING, type Note, type Tuning } from './types/index.ts';
 import type {
     LocalImprovConfig,
     ProgressionStep,
-} from './types/improv.ts';
+    SlotRole,
+} from './types/improv/index.ts';
 
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {
@@ -42,6 +43,25 @@ export const DEFAULT_PLAYBACK_ENGINE: PlaybackEngine = 'alphatab';
 /** 把 DOM 上取到的字符串收敛成 PlaybackEngine（不合法时返回 false，调用方决定回落） */
 export function isPlaybackEngine(v: string | null | undefined): v is PlaybackEngine {
     return v != null && (PLAYBACK_ENGINES as readonly string[]).includes(v);
+}
+
+/**
+ * 谱面显示模式取值（唯一来源）。
+ *
+ * `tab` = 只画六线谱（alphaTab 原生支持，休止符/拍号都落在六线上）；
+ * `scoretab` = 五线谱 + 六线谱（alphaTab 会隐藏六线上的休止符）。
+ * 与 index.html 的 `#displayModeSelect` option value 对应，启动时同样做漂移自检。
+ */
+export const DISPLAY_MODES = ['tab', 'scoretab'] as const;
+
+export type DisplayMode = (typeof DISPLAY_MODES)[number];
+
+/** 默认显示模式：六线谱（扒谱工具的主视图，且六线上能看到休止符） */
+export const DEFAULT_DISPLAY_MODE: DisplayMode = 'tab';
+
+/** 把 DOM 上取到的字符串收敛成 DisplayMode（不合法时返回 false，调用方决定回落） */
+export function isDisplayMode(v: string | null | undefined): v is DisplayMode {
+    return v != null && (DISPLAY_MODES as readonly string[]).includes(v);
 }
 
 /** alphaTab 整体显示缩放（含字体），适配紧凑布局 */
@@ -81,6 +101,29 @@ export const DYNAMICS_VOLUME_FACTOR: Record<'soft' | 'accent', number> = {
 };
 
 /**
+ * 拍位自动重音总开关。
+ *
+ * 默认关闭：播放只认谱面显式 `dynamics`（alphaTab 渲染的轻重标识），
+ * 未标注的音符不再按拍位额外派生重音，保证听感与谱面一致。
+ * 置 true 时，未显式标注的音符在强拍上按 {@link METRIC_ACCENT_DYNAMICS}
+ * 派生重音；显式标注永远优先。
+ */
+export const AUTO_METRIC_ACCENT = false;
+
+/**
+ * 拍位角色 → 派生力度（唯一策略表）。
+ *
+ * 只派生强拍重音：4/4 的第 2、4 拍是 backbeat，按理论弱拍压成 soft 会把律动压反；
+ * “轻音”仍只由显式 `dynamics: 'soft'` 触发。
+ * 角色判定复用 `core/utils/improv/rhythm.ts` 的 classifySlotRole，不另写拍号规则。
+ */
+export const METRIC_ACCENT_DYNAMICS: Record<SlotRole, Note['dynamics']> = {
+    strong: 'accent',
+    weak: undefined,
+    passing: undefined,
+};
+
+/**
  * 推弦幅度档位 → 显示标签（0.25=1/4 音，0.5=1/2 音，1=全音）。
  *
  * 状态栏提示用；新增档位只在这里加。
@@ -99,12 +142,19 @@ export const HARMONIC_FRET_MIN = 1;
 export const HARMONIC_FRET_MAX = 24;
 
 /**
- * P0 奏法在 Karplus 引擎里的近似参数。
+ * Karplus 引擎的奏法与输出音量参数。
  *
  * SoundFont 侧由 alphaTab 的 MIDI 生成器处理，不读这里；
  * 这些值只决定合成器听起来是否像那么回事，别当成乐理规则。
  */
 export const KARPLUS_ARTICULATION = {
+    /**
+     * Karplus 输出总增益。
+     *
+     * KS 缓冲本身已与 SoundFont 同量级（起音约 -20dBFS），但单音
+     * volume 0.5 与 masterGain 0.5 会再压 12dB；这里补回链路衰减。
+     */
+    masterGain: 2.0,
     /** 手掌闷音的最长发声（秒） */
     palmMuteMaxSec: 0.18,
     /** 制音/死音的最长发声（秒） */
@@ -127,6 +177,245 @@ export const KARPLUS_ARTICULATION = {
     palmMuteLowpassFreq: 1800,
     /** 手掌闷音的共振增益上限（不超过琴体预设） */
     palmMuteResonanceGain: 2.0,
+    /**
+     * 正常音在记谱时值内衰减到的电平比例（仅 Karplus）。
+     * 基频理论目标是 0.5 ≈ -6dB；叠加反馈滤波损失后实测末尾
+     * -8 ~ -14dB（音区相关）。0.1 会让半秒以上的音明显偏短。
+     */
+    normalDecayTarget: 0.5,
+    /**
+     * 高音区反馈滤波衰减的起止频率（Hz）。
+     *
+     * 反馈低通在基频处的衰减会按圈数累计：880Hz 以上若不减弱滤波，
+     * sustain 末尾会比 {@link normalDecayTarget} 低几十 dB，高音会“早死”。
+     */
+    highFreqDampingStartHz: 150,
+    highFreqDampingEndHz: 900,
+    /** 高音区反馈滤波强度保留比例（0 = 完全不滤，1 = 保留原权重） */
+    highFreqDampingFloor: 0.05,
+    /** 缓冲区结尾淡出时长（秒），避免硬切咔哒 */
+    tailFadeSec: 0.02,
+    /** 音符停止/释放的淡出时长（秒） */
+    releaseSec: 0.03,
+    /** 实时发声时长的下限（秒）：极短音也留出起音与释音 */
+    minSoundSec: 0.05,
+    /** 记谱时值之后的自然衰减尾音（秒）；缓冲区预拉长时随内容一起放大 */
+    noteTailSec: 0.2,
+    /**
+     * 自然收尾的淡出时长（秒）。
+     *
+     * 播放到最后一个音符的实际发声终点后，用这段长淡出释放剩余尾音与共享
+     * 混响，而不是在谱面结束时用 {@link releaseSec} 硬切。用户手动
+     * stop/pause 仍走短淡出，只有「播完」才用这个值。
+     *
+     * 完成回调固定等满这段淡出；末音全是制音/闷音（不送混响）时也会有
+     * 这段静音等待，换取播完判定与听感一致。
+     */
+    naturalEndFadeSec: 0.5,
+    /**
+     * 播放变速倍率的上限，缓冲区预拉长与 playbackRate 目标**两侧共用**。
+     *
+     * 覆盖推弦与技法链（击/勾/滑）：合法品位 0–24，同弦 0→24 品的频率比
+     * 正好是 2^(24/12) = 4×。上限压得太低会把大跨度滑音夹低一个八度
+     * （音高错比静音更隐蔽），只用来防异常输入把缓冲区/音高拉到不可控范围。
+     * 两侧不同步会让缓冲先于实时时值放完，等于退回「技法吞时值」。
+     *
+     * 使用点（改这个值时必须一起核对）：
+     *   - karplusTiming.clampPlaybackRateScale / karplusBufferTiming（缓冲拉长）
+     *   - guitarEngine.bendNote（推弦速率，只夹上界）
+     *   - guitarEngine.glideTo（击/勾/滑速率，只夹上界以保留下滑的 <1）
+     *   - guitarEngine.rearticulate（目标点重新激励速率，与 glideTo 同源换算）
+     */
+    maxPlaybackRateScale: 4,
+    /** 推弦：拨弦后多久开始上弯（秒），先让起音站稳 */
+    bendStartSec: 0.05,
+    /** 推弦上弯时长（秒） */
+    bendTimeSec: 0.12,
+    /** 推弦释放：在音符结束前多久开始回弹（秒） */
+    bendReleaseLeadSec: 0.15,
+    /** 推弦释放回弹时长（秒） */
+    bendReleaseTimeSec: 0.1,
+    /**
+     * 揉弦深度（playbackRate 相对 1 的调制幅度，0.012 ≈ ±20 音分）。
+     * 揉弦是对原速的对称调制，与推弦的缓冲预拉长倍率无关。
+     */
+    vibratoDepth: 0.012,
+    /** 揉弦频率（Hz） */
+    vibratoRate: 5.5,
+    /** 揉弦在拨弦后多久开始（秒），避开起音 */
+    vibratoStartSec: 0.08,
+    // ---- 技法连接：相对源音音量的系数 ----
+    /** 击弦相对源音音量的系数 */
+    hammerOnVolumeFactor: 1.2,
+    /** 勾弦相对源音音量的系数 */
+    pullOffVolumeFactor: 0.8,
+    /** 滑弦相对源音音量的系数 */
+    slideVolumeFactor: 1.2,
+    /** 推弦相对源音音量的系数 */
+    bendVolumeFactor: 1.3,
+    // ---- 短音缩放与技法时序 ----
+    /**
+     * 击弦音高跳变时长（秒）。真实击弦在约一个弦周期内完成音高切换
+     * （2–5ms）；20ms 以上会被听成连续的「滑过去」而不是敲击。
+     */
+    hammerOnSec: 0.004,
+    /** 勾弦音高跳变时长（秒），同上 */
+    pullOffSec: 0.003,
+    /** 滑弦时长（秒）；短音按自身时值封顶。真滑音保留连续音高变化 */
+    slideSec: 0.15,
+    /** 滑弦的最短时长（秒） */
+    slideMinSec: 0.02,
+    // ---- 击/勾弦目标点的重新激励 ----
+    /**
+     * 目标点短促激励电平（相对缓冲区原始幅度，还会乘上面的持续段系数）。
+     *
+     * 旧缓冲在目标时刻已经衰减掉约 14dB，且高频只剩约 1/7；只改增益听起来
+     * 仍是「同一根弦滑过去」。复用源缓冲开头的拨弦瞬态按目标倍率重放一次，
+     * 再叠一个短包络，才能给出「敲击/勾动」的起音。
+     */
+    hammerOnAttackGain: 0.4,
+    /** 勾弦目标点的重新激励电平；勾弦本身带手指拨动，通常比击弦更亮更响 */
+    pullOffAttackGain: 0.7,
+    /**
+     * 重新激励的起音时长（秒），避免增益硬起产生咔哒。
+     *
+     * 激励层一直持续到该音的可听终点（目标音自己的自然衰减），不再用固定
+     * 短包络：旧缓冲到目标时刻高频已衰减，提前收掉激励会让尾音发闷。
+     */
+    techniqueAttackRiseSec: 0.002,
+    /**
+     * 旧激励层的交叉淡出时长（秒）：链式技法换目标、滑弦/推弦/揉弦接管、
+     * 停止音符时共用，避免固定音高的旧层与新音高叠在一起。
+     */
+    techniqueAttackFadeSec: 0.03,
+    /** 缺少可复用音符时，技法目标音兜底发声时长（秒） */
+    techniqueFallbackDurationSec: 0.6,
+    /** 缺少可复用音符时，技法目标音兜底音量 */
+    techniqueFallbackVolume: 0.6,
+    /** 推弦持音的最短时长（秒），用于极短音的时序换算 */
+    bendMinHoldSec: 0.05,
+    /** 推弦起始延迟占时值的比例上限（短音按比例提前） */
+    bendStartRatio: 0.2,
+    /** 推弦上弯时长占时值的比例上限 */
+    bendRiseRatio: 0.5,
+    /** 推弦上弯的最短时长（秒） */
+    bendMinRiseSec: 0.02,
+    /** 推弦释放提前量占时值的比例上限 */
+    bendReleaseLeadRatio: 0.3,
+    /** 推弦回弹时长占时值的比例上限 */
+    bendReleaseTimeRatio: 0.2,
+    /** 揉弦起始延迟占时值的比例上限 */
+    vibratoStartRatio: 0.25,
+    /** 揉弦深度渐入时长（秒） */
+    vibratoFadeInSec: 0.08,
+    /** 揉弦渐入时长占时值的比例上限 */
+    vibratoFadeRatio: 0.4,
+    /** 短音也要保证的 LFO 周期数（用于提高速率） */
+    vibratoMinCycles: 1.5,
+    /** 揉弦速率上限（Hz） */
+    vibratoMaxRate: 12,
+} as const;
+
+/**
+ * Karplus 混音总线（琴体三频段、限幅、共享混响与声像）。
+ *
+ * 与 {@link KARPLUS_ARTICULATION} 的分工：那边管单个音符的技法与包络，
+ * 这里管所有音符汇入 master 之前的整体音色与空间。SoundFont 侧不读。
+ */
+export const KARPLUS_MIX = {
+    /** 低音弦（5–6 弦）高通截止（Hz），去掉次低频隆隆声 */
+    highpassLowStringHz: 55,
+    /** 中音弦（3–4 弦）高通截止（Hz） */
+    highpassMidStringHz: 70,
+    /** 高音弦（1–2 弦）高通截止（Hz） */
+    highpassHighStringHz: 90,
+    /** 高通 Q（0.7 ≈ Butterworth，无明显峰） */
+    highpassQ: 0.7,
+    /** 总线限幅器阈值（dB） */
+    limiterThresholdDb: -3,
+    /** 限幅器拐点宽度（dB），0 = 硬拐点，只削峰值 */
+    limiterKneeDb: 0,
+    /** 限幅比 */
+    limiterRatio: 20,
+    /** 起音时间（秒），要短于拨弦瞬态 */
+    limiterAttackSec: 0.003,
+    /** 释放时间（秒） */
+    limiterReleaseSec: 0.15,
+    /** 共享混响：湿声返回电平（相对干声） */
+    roomWet: 0.1,
+    /** IR 时长（秒） */
+    roomDurationSec: 1.2,
+    /** IR 指数衰减强度：越大衰减越快 */
+    roomDecay: 2.5,
+    /** IR 随机种子，保证每次启动得到同一脉冲响应 */
+    roomSeed: 0x5eed,
+    /** IR 起音前留白（秒），让混响只做湿声 */
+    roomPreDelaySec: 0.003,
+    /** IR 噪声低通（Hz），避免混响过亮 */
+    roomLowpassHz: 5000,
+    /** 声像步进：每根弦相对中心的偏移量 */
+    panStep: 0.08,
+    /** 声像中心弦号（3.5 = 3/4 弦之间），低弦偏左、高弦偏右 */
+    panCenterString: 3.5,
+    /**
+     * 声像后补偿增益。StereoPanner 中心位按等功率定律每声道 0.707，
+     * 相对旧链路（mono up-mix 到左右两声道）整体低约 3dB；乘 √2 补平。
+     */
+    panCompensationGain: Math.SQRT2,
+    /** stop/pause 时把共享混响返回压掉的时长（秒），避免残留空间尾巴 */
+    roomStopFadeSec: 0.03,
+} as const;
+
+/**
+ * Karplus-Strong 激励与弦参数（可调音色旋钮）。
+ *
+ * 与 {@link KARPLUS_ARTICULATION} 的分工：那边管技法时长/音量，
+ * 这里管“拨弦本身”的激励、反馈滤波与力度响应。SoundFont 侧不读。
+ */
+export const KARPLUS_SYNTHESIS = {
+    /**
+     * 每弦反馈低通权重 [w2, w3]（w1 = 1 - w2 - w3）。
+     * w1 越小低通越强、音色越暖；高音弦保留更多高频。
+     */
+    stringFeedbackWeights: [
+        [0.18, 0.08], // 1 弦
+        [0.19, 0.09], // 2 弦
+        [0.21, 0.09], // 3 弦
+        [0.22, 0.14], // 4 弦
+        [0.24, 0.16], // 5 弦
+        [0.25, 0.19], // 6 弦
+    ] as ReadonlyArray<readonly [number, number]>,
+    /** 每弦延音系数（乘到 sustain 上）：低音弦稍长、高音弦稍短 */
+    stringSustainFactor: [0.92, 0.92, 0.97, 1.0, 1.03, 1.05],
+    /** 每弦基准拨弦位置（距琴桥的弦长比例） */
+    stringPickPosition: [0.10, 0.11, 0.12, 0.13, 0.14, 0.15],
+    /** 把位对拨弦位置比例的放大指数：手指位置固定时，有效弦长越短比例越大 */
+    fretPickPositionFactor: 0.75,
+    /** 拨弦位置上下限（太小接近琴桥、太大会让梳状零点过低而发空） */
+    minPickPosition: 0.02,
+    maxPickPosition: 0.32,
+    /** 把位对延音的轻微削弱（每品） */
+    fretDampingPerFret: 0.004,
+    /** 力度 → 合成强度 0..1（未标注按 normal） */
+    dynamicsStrength: { soft: 0.25, normal: 0.55, accent: 1.0 } as Record<'soft' | 'normal' | 'accent', number>,
+    /** 激励低通截止的 soft / accent 两端（Hz），按强度指数插值 */
+    excitationLowpassSoftHz: 900,
+    excitationLowpassAccentHz: 7000,
+    /** 每弦激励亮度系数（乘在低通截止上） */
+    stringBrightness: [1.25, 1.15, 1.0, 0.9, 0.8, 0.7],
+    /** 拨片/手指瞬态时长（秒） */
+    transientSec: 0.004,
+    /** 瞬态强度（相对激励 RMS），再乘力度强度 */
+    transientStrength: 1.2,
+    /**
+     * 激励 RMS 归一化目标：低/中音弦的起音对齐 P0（0.25 会整体响约 6dB）；
+     * 高音弦因激励更亮仍残留约 +2dB。力度只改频谱与衰减，不靠这里改响度。
+     */
+    excitationRms: 0.12,
+    /** 力度对延音的缩放：轻拨收得快、重拨稍长 */
+    dynamicsSustain: { soft: 0.85, normal: 1.0, accent: 1.1 } as Record<'soft' | 'normal' | 'accent', number>,
+    /** 力度对反馈阻尼的缩放（>1 更暗、<1 更亮） */
+    dynamicsDamping: { soft: 1.15, normal: 1.0, accent: 0.85 } as Record<'soft' | 'normal' | 'accent', number>,
 } as const;
 
 // ============================================================
@@ -303,11 +592,15 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         options: [...IMPROV_CONFIG.numMeasures.options],
     },
     timeSignatures: ['2/2', '2/4', '3/4', '4/4', '5/4', '6/8', '7/8', '9/8', '12/8'],
+    chordsPerMeasure: {
+        default: 1,
+        options: [1, 2, 4],
+    },
     defaults: {
         numMeasures: 4,
         key: SCORE_DEFAULTS.key,
         scaleType: 'Major (Ionian)',
-        style: 'Folk',
+        style: 'Rock',
         density: '中',
         timeSignature: SCORE_DEFAULTS.timeSignature,
         tuning: { ...SCORE_DEFAULTS.tuning },
@@ -356,13 +649,33 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             registerCenterMidi: 64,
             registerRangeSemitones: 21,
             maxLeapSemitones: 7,
-            motifLength: 2,
+            motifLength: 5,
             repetitionProbability: 0.45,
             accentProbability: 0.35,
             softProbability: 0.35,
             bendProbability: 0.12,
             vibratoProbability: 0.18,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.18,
+            slideProbability: 0.06,
+            deadNoteProbability: 0.02,
+            staccatoProbability: 0.06,
+            letRingProbability: 0.12,
+            harmonicProbability: 0.03,
+            naturalHarmonicShare: 0.5,
+            pinchHarmonicShare: 0.35,
+            chordProbability: 0.2,
+            secondVoicingProbability: 0.5,
+            arpeggioProbability: 0.35,
+            strumProbability: 0.05,
+            phrase: {
+                measures: 2,
+                contours: ['arch', 'wave', 'descending', 'ascending'],
+                endRestProbability: 0.3,
+                cadenceMinDuration: 0.5,
+                shiftProbability: 0.65,
+                shiftFrets: 3,
+            },
         },
         Blues: {
             durations: [
@@ -376,13 +689,33 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             registerCenterMidi: 62,
             registerRangeSemitones: 19,
             maxLeapSemitones: 5,
-            motifLength: 2,
+            motifLength: 4,
             repetitionProbability: 0.4,
             accentProbability: 0.4,
             softProbability: 0.3,
             bendProbability: 0.25,
             vibratoProbability: 0.25,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.2,
+            slideProbability: 0.1,
+            deadNoteProbability: 0.04,
+            staccatoProbability: 0.08,
+            letRingProbability: 0.12,
+            harmonicProbability: 0.04,
+            naturalHarmonicShare: 0.5,
+            pinchHarmonicShare: 0.35,
+            chordProbability: 0.18,
+            secondVoicingProbability: 0.5,
+            arpeggioProbability: 0.15,
+            strumProbability: 0.05,
+            phrase: {
+                measures: 2,
+                contours: ['descending', 'arch', 'wave', 'ascending'],
+                endRestProbability: 0.45,
+                cadenceMinDuration: 0.5,
+                shiftProbability: 0.45,
+                shiftFrets: 2,
+            },
         },
         Rock: {
             durations: [
@@ -396,13 +729,33 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             registerCenterMidi: 67,
             registerRangeSemitones: 24,
             maxLeapSemitones: 7,
-            motifLength: 3,
+            motifLength: 5,
             repetitionProbability: 0.5,
             accentProbability: 0.45,
             softProbability: 0.2,
             bendProbability: 0.12,
             vibratoProbability: 0.1,
             palmMuteProbability: 0.25,
+            hammerPullProbability: 0.18,
+            slideProbability: 0.08,
+            deadNoteProbability: 0.08,
+            staccatoProbability: 0.1,
+            letRingProbability: 0.1,
+            harmonicProbability: 0.06,
+            naturalHarmonicShare: 0.5,
+            pinchHarmonicShare: 0.35,
+            chordProbability: 0.18,
+            secondVoicingProbability: 0.5,
+            arpeggioProbability: 0.1,
+            strumProbability: 0.3,
+            phrase: {
+                measures: 2,
+                contours: ['ascending', 'arch', 'descending', 'wave'],
+                endRestProbability: 0.2,
+                cadenceMinDuration: 0.5,
+                shiftProbability: 0.55,
+                shiftFrets: 3,
+            },
         },
         Folk: {
             durations: [
@@ -416,13 +769,33 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             registerCenterMidi: 62,
             registerRangeSemitones: 19,
             maxLeapSemitones: 5,
-            motifLength: 2,
+            motifLength: 4,
             repetitionProbability: 0.35,
             accentProbability: 0.3,
             softProbability: 0.25,
             bendProbability: 0,
             vibratoProbability: 0.06,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.12,
+            slideProbability: 0.06,
+            deadNoteProbability: 0,
+            staccatoProbability: 0.04,
+            letRingProbability: 0.18,
+            harmonicProbability: 0.02,
+            naturalHarmonicShare: 0.5,
+            pinchHarmonicShare: 0.35,
+            chordProbability: 0.2,
+            secondVoicingProbability: 0.5,
+            arpeggioProbability: 0.45,
+            strumProbability: 0.15,
+            phrase: {
+                measures: 2,
+                contours: ['arch', 'wave', 'ascending', 'descending'],
+                endRestProbability: 0.3,
+                cadenceMinDuration: 0.5,
+                shiftProbability: 0.35,
+                shiftFrets: 2,
+            },
         },
         Classical: {
             durations: [
@@ -436,13 +809,33 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
             registerCenterMidi: 64,
             registerRangeSemitones: 24,
             maxLeapSemitones: 7,
-            motifLength: 2,
+            motifLength: 5,
             repetitionProbability: 0.25,
             accentProbability: 0.25,
             softProbability: 0.25,
             bendProbability: 0,
             vibratoProbability: 0.08,
             palmMuteProbability: 0,
+            hammerPullProbability: 0.15,
+            slideProbability: 0.05,
+            deadNoteProbability: 0,
+            staccatoProbability: 0.03,
+            letRingProbability: 0.15,
+            harmonicProbability: 0.03,
+            naturalHarmonicShare: 0.5,
+            pinchHarmonicShare: 0.35,
+            chordProbability: 0.12,
+            secondVoicingProbability: 0.5,
+            arpeggioProbability: 0.5,
+            strumProbability: 0.02,
+            phrase: {
+                measures: 2,
+                contours: ['arch', 'descending', 'wave', 'ascending'],
+                endRestProbability: 0.25,
+                cadenceMinDuration: 0.5,
+                shiftProbability: 0.6,
+                shiftFrets: 3,
+            },
         },
     },
     playability: {
@@ -451,10 +844,31 @@ export const LOCAL_IMPROV_CONFIG: LocalImprovConfig = {
         maxHandSpan: 5,
         maxStringJump: 2,
         maxLeapSemitones: 7,
+        // 句间换把与全曲收束允许的最大音程（一个八度）；句内仍按风格上限。
+        maxPhraseLeapSemitones: 12,
         minBendDuration: 0.125,
         minBendReleaseDuration: 0.25,
         minVibratoDuration: 0.25,
         minPalmMuteDuration: 0.125,
         palmMuteStrings: [4, 6],
+        minConnectDuration: 0.0625,
+        maxHammerPullFrets: 2,
+        maxSlideFrets: 7,
+        minDeadNoteDuration: 0.125,
+        minStaccatoDuration: 0.0625,
+        minLetRingDuration: 0.25,
+        minHarmonicDuration: 0.25,
+        deadNoteStrings: [4, 6],
+        pinchHarmonicStrings: [4, 6],
+        // 12 品自然泛音的发声音高与按弦音相同，不会让旋律跳八度。
+        naturalHarmonicFrets: [12],
+        // 人工/捏弦泛音的触弦点位差；12 = 高八度。5 会高两个八度，先不启用。
+        harmonicFrets: [12],
+        minChordDuration: 0.25,
+        maxChordVoices: 3,
+        maxVoicingSpanSemitones: 12,
+        minVoicingGapSemitones: 3,
+        maxChordSpanFrets: 5,
+        maxChordStringSpan: 4,
     },
 };

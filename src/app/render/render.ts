@@ -8,12 +8,15 @@
  */
 
 import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { DEFAULT_DISPLAY_MODE, isDisplayMode, type DisplayMode } from '../../core/config.ts';
 import { $ } from '../dom.ts';
 import { syncMeasureNav } from './measureNav.ts';
 // 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
 import type { AlphaTabRenderer } from '../../features/alphaTab/alphaTabRenderer.ts';
 
 let alphaTabRenderer: AlphaTabRenderer | null = null;
+/** 显示模式在渲染器动态加载完成前可能已被切换，先记在这里，mount 后再补一次 */
+let displayMode: DisplayMode = DEFAULT_DISPLAY_MODE;
 
 /** 挂载渲染器（启动时调用一次；alphaTab 核心按需动态加载） */
 export async function initRenderer(): Promise<void> {
@@ -22,7 +25,20 @@ export async function initRenderer(): Promise<void> {
     const { AlphaTabRenderer } = await import('../../features/alphaTab/alphaTabRenderer.ts');
     alphaTabRenderer = new AlphaTabRenderer();
     await alphaTabRenderer.mount(container);
+    alphaTabRenderer.setDisplayMode(displayMode);
     render();
+}
+
+/** 显示模式切换（六线谱 / 五线+六线）；六线谱模式下 alphaTab 才画休止符与时值 */
+export function initDisplayModeControl(): void {
+    const sel = $('displayModeSelect') as HTMLSelectElement | null;
+    if (!sel) return;
+    sel.value = displayMode;
+    sel.addEventListener('change', () => {
+        if (!isDisplayMode(sel.value)) return;
+        displayMode = sel.value;
+        alphaTabRenderer?.setDisplayMode(displayMode);
+    });
 }
 
 /** 用当前乐谱刷新渲染器 */

@@ -14,7 +14,16 @@
  */
 
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
-import { KARPLUS_ARTICULATION } from '../../../core/config.ts';
+import { KARPLUS_ARTICULATION, KARPLUS_MIX } from '../../../core/config.ts';
+import { generateRoomImpulse } from '../../../core/utils/roomImpulse.ts';
+import { highpassHzForString, panForString } from '../../../core/utils/karplusMix.ts';
+import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
+import { semitonesToRate } from '../../../core/utils/frequency.ts';
+
+/** source.stop 相对淡出结束的余量（秒），确保淡出完全生效 */
+const STOP_MARGIN_SEC = 0.005;
+/** 节点断开的延迟余量（秒），等 source.stop 与淡出走完 */
+const DISCONNECT_MARGIN_SEC = 0.05;
 
 export interface NoteOptions {
     frequency?: number;
@@ -25,6 +34,22 @@ export interface NoteOptions {
     mute?: boolean;
     /** 手掌闷音：短促、暗，但仍保留音高 */
     palmMute?: boolean;
+    /** 拨弦力度：影响激励亮度、起音瞬态、阻尼与延音 */
+    dynamics?: 'soft' | 'accent';
+    /** 把位（0 = 空弦）：影响拨弦位置与延音 */
+    fret?: number;
+    /**
+     * 本音缓冲区需要承受的最高 playbackRate 倍率。
+     *
+     * 变速只会让缓冲区按倍率**提前**放完：推弦 / 同弦击勾滑目标因此比记谱
+     * 时值短、衰减也更快。传入目标倍率后，缓冲区内容（长度与 sustain）按
+     * 同一倍率拉长，实时发声长度与停止时刻仍按原时长走。
+     *
+     * 由调用方取「本音推弦峰值」与「后续同弦技法链最高目标倍率」的最大值；
+     * 缓冲区侧与所有 playbackRate 目标（bendNote / glideTo）共用
+     * {@link KARPLUS_ARTICULATION.maxPlaybackRateScale} 上限。
+     */
+    playbackRateScale?: number;
     onEnd?: () => void;
 }
 
@@ -33,23 +58,83 @@ interface ActiveNote {
     gain: GainNode;
     /** 琴体低通：技法连接时手掌闷音要把它压暗 */
     bodyFilter: BiquadFilterNode | null;
+    /** 源音缓冲区：击/勾弦目标点复用其开头的拨弦瞬态做重新激励 */
+    buffer: AudioBuffer;
+    /** 琴体链入口（高通）：重新激励与持续段共用音量、闷音与声像 */
+    input: AudioNode;
+    /** 正在发声的重新激励层；换技法目标时先交叉淡出旧的，避免不同音高叠加 */
+    attacks: Array<{ source: AudioBufferSourceNode; gain: GainNode }>;
     nodes: AudioNode[];
+    /** 揉弦 LFO：音符结束后必须显式 stop，否则会一直跑下去 */
+    oscillators: OscillatorNode[];
     startTime: number;
     duration: number;
+    /** 当前发声音高（推弦/滑弦后更新，供技法链读取） */
     frequency: number;
+    /** 缓冲区原始音高：技法滑动的终点必须相对它换算，链式滑动才不会累积误差 */
+    baseFrequency: number;
+    /** 调度层给的基准音量：技法增益以它为基准，避免绝对值覆盖力度 */
+    baseVolume: number;
+    /** 缓冲区实际可听终点；节点清理比它晚 50ms，连接判断不能用清理时间 */
+    audibleUntil: number;
 }
 
 export class GuitarEngine {
     private ctx: AudioContext | null = null;
     private activeNotes: Map<symbol, ActiveNote> = new Map();
     private masterGain: GainNode | null = null;
+    private limiter: DynamicsCompressorNode | null = null;
+    /** 所有非闷音音符共用一条混响发送总线 */
+    private reverbSend: GainNode | null = null;
+    private reverbReturn: GainNode | null = null;
+    /** stopAll 是否把湿声压掉了；下一次发声前需恢复，避免旧尾音回涌 */
+    private reverbDucked = false;
 
     init(): AudioContext {
         if (!this.ctx) {
             this.ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            this.masterGain = this.ctx.createGain();
-            this.masterGain.gain.value = 0.5;
-            this.masterGain.connect(this.ctx.destination);
+            const ctx = this.ctx;
+
+            this.masterGain = ctx.createGain();
+            this.masterGain.gain.value = KARPLUS_ARTICULATION.masterGain;
+
+            // 总线限幅：6 音和弦/重音叠加时只削峰值，不压整体动态
+            this.limiter = ctx.createDynamicsCompressor();
+            this.limiter.threshold.value = KARPLUS_MIX.limiterThresholdDb;
+            this.limiter.knee.value = KARPLUS_MIX.limiterKneeDb;
+            this.limiter.ratio.value = KARPLUS_MIX.limiterRatio;
+            this.limiter.attack.value = KARPLUS_MIX.limiterAttackSec;
+            this.limiter.release.value = KARPLUS_MIX.limiterReleaseSec;
+            this.masterGain.connect(this.limiter);
+            this.limiter.connect(ctx.destination);
+
+            // 共享短混响：所有音符共用一个 Convolver，IR 由纯函数生成
+            // （不依赖外部音频资源，双构建都成立）。
+            this.reverbSend = ctx.createGain();
+            this.reverbReturn = ctx.createGain();
+            this.reverbReturn.gain.value = KARPLUS_MIX.roomWet;
+            const convolver = ctx.createConvolver();
+            convolver.normalize = true;
+            const impulses = generateRoomImpulse({
+                sampleRate: ctx.sampleRate,
+                durationSec: KARPLUS_MIX.roomDurationSec,
+                decay: KARPLUS_MIX.roomDecay,
+                seed: KARPLUS_MIX.roomSeed,
+                channels: 2,
+                preDelaySec: KARPLUS_MIX.roomPreDelaySec,
+                lowpassHz: KARPLUS_MIX.roomLowpassHz,
+            });
+            const ir = ctx.createBuffer(impulses.length, impulses[0].length, ctx.sampleRate);
+            impulses.forEach((data, channel) => ir.getChannelData(channel).set(data));
+            convolver.buffer = ir;
+            this.reverbSend.connect(convolver);
+            convolver.connect(this.reverbReturn);
+            // 湿声回到 master 前，和干声一起过限幅，混响尾音也不会顶出峰值
+            this.reverbReturn.connect(this.masterGain);
+            this.reverbDucked = false;
+        } else {
+            // stopAll 会把湿声返回压掉；重新开始播放时恢复 roomWet
+            this.ensureReverbWet();
         }
         if (this.ctx.state === 'suspended') {
             this.ctx.resume();
@@ -61,9 +146,43 @@ export class GuitarEngine {
         return this.ctx;
     }
 
+    /**
+     * 恢复被 stopAll 压掉的混响湿声。
+     *
+     * 用短 ramp 而不是瞬时跳回：Convolver 里可能还有上一轮未衰减完的尾音，
+     * 直接跳回会让旧尾音瞬间回涌（重播间隔短时尤其明显）。read-before-cancel
+     * 保证压降进行到一半时也从中途电平接着升，不产生跳变。
+     */
+    private ensureReverbWet(): void {
+        if (!this.reverbDucked || !this.reverbReturn || !this.ctx) return;
+        const gain = this.reverbReturn.gain;
+        const now = this.ctx.currentTime;
+        const current = Math.max(0.0001, gain.value);
+        gain.cancelScheduledValues(now);
+        gain.setValueAtTime(current, now);
+        gain.linearRampToValueAtTime(
+            KARPLUS_MIX.roomWet,
+            now + KARPLUS_MIX.roomStopFadeSec,
+        );
+        this.reverbDucked = false;
+    }
+
+    /** 该音符是否仍在发声（供技法连接判断，避免读私有 activeNotes） */
+    isNoteActive(noteId: symbol): boolean {
+        const note = this.activeNotes.get(noteId);
+        return note !== undefined && (this.ctx?.currentTime ?? 0) < note.audibleUntil;
+    }
+
+    /** 活跃音符的当前频率；已停止返回 null */
+    getNoteFrequency(noteId: symbol): number | null {
+        return this.activeNotes.get(noteId)?.frequency ?? null;
+    }
+
     playNote(options: NoteOptions = {}): symbol {
         const ctx = this.ctx;
         if (!ctx || !this.masterGain) throw new Error('请先调用 init()');
+        // 直接调用 playNote（不经 init）时也要恢复被 stopAll 压掉的湿声
+        this.ensureReverbWet();
 
         const {
             frequency = 440,
@@ -72,6 +191,9 @@ export class GuitarEngine {
             string: stringNum,
             mute = false,
             palmMute = false,
+            dynamics,
+            fret,
+            playbackRateScale = 1,
             onEnd = null,
         } = options;
 
@@ -86,32 +208,58 @@ export class GuitarEngine {
         // 音符发声时长 = 记谱时值 + 短衰减尾音。
         // 技法是"音高调制"，只作用于播放中的音符，不延长时值；
         // 这里只用短尾音让拨弦自然衰减，避免之前"统一拉长到 1.2s"导致的时值错乱。
-        const soundDur = Math.max(duration, 0.05) + 0.2;
+        // 变速播放（推弦）会把缓冲区按倍率预拉长，实时时长仍按 soundDur 走。
+        const { soundDur, bufferDur, sustain } = karplusBufferTiming(
+            duration,
+            playbackRateScale,
+        );
 
         // ---- 1) 调用 Karplus-Strong 生成琴弦振动 ----
         // 算法层输出裸采样数据，这里包装为 AudioBuffer
         const ks = generateStringData({
             frequency,
-            duration: soundDur,
+            duration: bufferDur,
             sampleRate: ctx.sampleRate,
             string: stringNum,
             mute,
             palmMute,
-            // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音
-            sustain: duration,
+            // 记谱时值传给 KS 做衰减：短音快速收干、长音自然延音；
+            // 缓冲区预拉长时同步放大，否则衰减会先于实时时值收干
+            sustain,
+            dynamics,
+            fret,
         });
         const buffer = toAudioBuffer(ctx, ks);
 
         // ---- 2) 构建音频信号链 ----
+        // mixGain 承载音量与技法增益；envGain 只负责音符收尾的释音包络。
+        // 两者分开，技法在起音后改写 mixGain 时不会让释音把电平拉回初始 volume。
         const mixGain = ctx.createGain();
         mixGain.gain.value = volume;
-        mixGain.connect(this.masterGain);
+        const envGain = ctx.createGain();
+        envGain.gain.value = 1;
+        mixGain.connect(envGain);
+
+        // 轻微声像：低弦偏左、高弦偏右；envGain 之后取声，混响仍为居中的湿声
+        const panner = ctx.createStereoPanner();
+        panner.pan.value = panForString(stringNum);
+        // StereoPanner 中心位是等功率 -3dB，补偿回来，切换 SoundFont 时响度不跳
+        const panComp = ctx.createGain();
+        panComp.gain.value = KARPLUS_MIX.panCompensationGain;
+        envGain.connect(panner);
+        panner.connect(panComp);
+        panComp.connect(this.masterGain);
 
         const source = ctx.createBufferSource();
         source.buffer = buffer;
 
-        // 琴体共鸣滤波器组
+        // 琴体三频段：高通去隆隆声 → 低通收高频 → peaking 补共鸣
         const preset = getBodyFilterPreset(stringNum);
+        const highpass = ctx.createBiquadFilter();
+        highpass.type = 'highpass';
+        highpass.frequency.value = highpassHzForString(stringNum);
+        highpass.Q.value = KARPLUS_MIX.highpassQ;
+
         const bodyFilter = ctx.createBiquadFilter();
         bodyFilter.type = 'lowpass';
         bodyFilter.frequency.value = mute
@@ -131,31 +279,34 @@ export class GuitarEngine {
                 ? Math.min(preset.resonanceGain, KARPLUS_ARTICULATION.palmMuteResonanceGain)
                 : preset.resonanceGain;
 
-        source.connect(bodyFilter);
+        source.connect(highpass);
+        highpass.connect(bodyFilter);
         bodyFilter.connect(resonance);
         resonance.connect(mixGain);
 
+        // 释音包络：在发声结束前淡出，避免 source.stop 在非零采样处硬切。
+        // 必须先用 setValueAtTime 锚定 releaseStart：新建 GainNode 上直接
+        // exponentialRampToValueAtTime 没有前置事件，会从调用时刻（≈now）
+        // 开始淡，整段音符提前收干。
+        const stopTime = now + soundDur;
+        const releaseSec = Math.min(KARPLUS_ARTICULATION.releaseSec, soundDur);
+        const releaseStart = stopTime - releaseSec;
+        envGain.gain.setValueAtTime(1, releaseStart);
+        envGain.gain.exponentialRampToValueAtTime(0.001, stopTime);
+
         source.start(now);
-        // 按发声时长截止（自然衰减尾音后静音）
-        source.stop(now + soundDur);
+        // 按发声时长截止；增益已在 stopTime 前淡到 0.001
+        source.stop(stopTime);
 
-        const allNodes: AudioNode[] = [source, bodyFilter, resonance, mixGain];
+        const allNodes: AudioNode[] = [
+            source, highpass, bodyFilter, resonance, mixGain, envGain, panner, panComp,
+        ];
 
-        // ---- 3) 混响（单延迟线） ----
-        // 手掌闷音要干、要收紧，不加混响
-        if (!mute && !palmMute) {
-            const delay = ctx.createDelay(0.1);
-            delay.delayTime.value = 0.025;
-            const delayGain = ctx.createGain();
-            // 回响压到极低，音符更干、前后音更分得开
-            delayGain.gain.value = volume * 0.04;
-            mixGain.connect(delay);
-            delay.connect(delayGain);
-            delayGain.connect(this.masterGain);
-            allNodes.push(delay, delayGain);
-            setTimeout(() => {
-                try { delay.disconnect(); delayGain.disconnect(); } catch {}
-            }, (duration + 0.5) * 1000);
+        // ---- 3) 共享混响发送 ----
+        // 手掌闷音/制音要干、要收紧，不送混响。发送电平已在 reverbReturn 上
+        // 统一控制（roomWet），单个音符不再各自缩放，保证干湿比稳定。
+        if (!mute && !palmMute && this.reverbSend) {
+            envGain.connect(this.reverbSend);
         }
 
         // ---- 4) 记录 & 清理 ----
@@ -164,17 +315,35 @@ export class GuitarEngine {
             source,
             gain: mixGain,
             bodyFilter,
+            buffer,
+            input: highpass,
+            attacks: [],
+            // 与 allNodes 同一个数组：技法目标点追加的临时节点也会被清理定时器断开
             nodes: allNodes,
+            oscillators: [],
             startTime: now,
             duration: soundDur,
             frequency,
+            baseFrequency: frequency,
+            baseVolume: volume,
+            audibleUntil: now + soundDur,
         });
 
-        const cleanupMs = (soundDur + 0.5) * 1000;
+        // source 在 soundDur 处停止；activeNotes 只需多留出断开节点的余量，
+        // 旧值多活的 0.5s 会被调度层误判为「仍可连接技法」，实际却没有声音。
+        const cleanupMs = (soundDur + DISCONNECT_MARGIN_SEC) * 1000;
         setTimeout(() => {
+            const active = this.activeNotes.get(noteId);
+            if (active) {
+                for (const osc of active.oscillators) {
+                    try { osc.stop(now); } catch {}
+                }
+            }
             try {
                 for (const n of allNodes) {
-                    if (n instanceof AudioBufferSourceNode) {
+                    // 单测环境没有 AudioBufferSourceNode 全局，浏览器侧才需要先 stop
+                    if (typeof AudioBufferSourceNode !== 'undefined'
+                        && n instanceof AudioBufferSourceNode) {
                         try { n.stop(now); } catch {}
                     }
                     try { n.disconnect(); } catch {}
@@ -191,103 +360,332 @@ export class GuitarEngine {
     // 演奏技巧
     // ============================================================
 
-    hammerOn(fromFreq: number, toFreq: number, noteId: symbol | null = null): symbol {
+    /**
+     * 让复用中的缓冲区滑到目标音高。
+     *
+     * 终点按「目标频率 / 缓冲区原始频率」绝对换算，而不是相对当前速率：
+     * 上一段滑动还没走完时，当前速率停在中间值，相对换算会把整条技法链
+     * 的音高带偏。起点仍读当前速率，保证滑动过程连续、不跳变。
+     *
+     * `cancelScheduledValues` 取消的是尚未发生的推弦上弯/回弹（新技法接管
+     * 音高轨迹），先读 `rate.value` 再取消，进行中的 ramp 会在当前值处平滑
+     * 转接，不会跳变。
+     *
+     * 上限与缓冲区预拉长共用 maxPlaybackRateScale：缓冲只按夹过的倍率拉长，
+     * 若这里写入更高速度，缓冲会先于实时时值放完。注意只夹上界——勾弦
+     * 下滑到低品位需要真实的 <1 倍率。
+     */
+    private glideTo(note: ActiveNote, toFreq: number, seconds: number): void {
+        if (!note.source) return;
+        const rate = note.source.playbackRate;
+        const now = this.ctx!.currentTime;
+        const current = Math.max(0.001, rate.value);
+        const target = this.techniquePlaybackRate(toFreq, note.baseFrequency);
+        // 复用前先停掉源音上的揉弦 LFO，否则目标音会一直带着抖动
+        this.stopOscillators(note);
+        rate.cancelScheduledValues(now);
+        rate.setValueAtTime(current, now);
+        rate.exponentialRampToValueAtTime(target, now + Math.max(0.001, seconds));
+    }
+
+    /**
+     * 技法目标频率 → 缓冲区播放倍率（glideTo 与目标点重新激励共用）。
+     *
+     * 按缓冲区原始频率绝对换算，链式技法不会累积误差；保留 <1 用于勾弦/
+     * 下滑，只夹共享上限，与缓冲预拉长保持同步。非有限输入回落到最小倍率。
+     */
+    private techniquePlaybackRate(toFreq: number, baseFrequency: number): number {
+        const raw = toFreq / baseFrequency;
+        if (!Number.isFinite(raw)) return 0.001;
+        return Math.min(
+            Math.max(0.001, raw),
+            KARPLUS_ARTICULATION.maxPlaybackRateScale,
+        );
+    }
+
+    /** 停掉音符上的调制振荡器（揉弦 LFO） */
+    private stopOscillators(note: ActiveNote): void {
+        if (note.oscillators.length === 0 || !this.ctx) return;
+        const now = this.ctx.currentTime;
+        for (const osc of note.oscillators) {
+            try { osc.stop(now); } catch {}
+            try { osc.disconnect(); } catch {}
+        }
+        note.oscillators = [];
+    }
+
+    /**
+     * 淡出并停止当前所有激励层，清空 note.attacks。
+     *
+     * 激励层是固定音高的独立 source，不会跟随主声源滑音/推弦；任何换目标
+     * （击/勾/滑、推弦、停止）之前都必须先释放它，否则旧音高会一直响到
+     * 音符终点，与新音高叠成双音。
+     */
+    private fadeOutAttacks(note: ActiveNote): void {
+        if (!this.ctx || note.attacks.length === 0) return;
+        const now = this.ctx.currentTime;
+        const remaining = Math.max(0, note.audibleUntil - now);
+        const fadeSec = Math.min(
+            KARPLUS_ARTICULATION.techniqueAttackFadeSec,
+            remaining,
+        );
+        for (const prev of note.attacks) {
+            const gain = prev.gain.gain;
+            const current = Math.max(0.0001, gain.value);
+            gain.cancelScheduledValues(now);
+            gain.setValueAtTime(current, now);
+            gain.linearRampToValueAtTime(0.0001, now + fadeSec);
+            // source 创建时已排了到 audibleUntil 的 stop；后一次 stop 更早，
+            // 规范允许重复调用，已结束的节点会抛错，忽略即可。
+            try { prev.source.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+        }
+        note.attacks = [];
+    }
+
+    /**
+     * 在技法目标点重新激励（击/勾弦的「敲击/勾动」起音与新的持续段）。
+     *
+     * 旧缓冲区在目标时刻已衰减约 14dB、高频只剩约 1/7；只靠增益台阶听起来
+     * 仍是同一根弦滑过去，而且之后的尾音发闷。这里复用源缓冲开头的拨弦瞬态，
+     * 按目标倍率重放，并让它一直响到本音的可听终点：目标音获得自己完整的
+     * 自然衰减（高频随新音头一起留下），旧缓冲只作为底下的残余。
+     *
+     * 链式技法换目标时，先把上一激励层短交叉淡出，否则不同音高的两层会叠在
+     * 一起。经过琴体链入口，因此与持续段共享 mixGain（音量/技法系数）、
+     * 闷音滤波、声像与混响发送。节点并入 note.nodes，随音符一起清理。
+     */
+    private rearticulate(note: ActiveNote, toFreq: number, level: number): void {
+        if (!this.ctx) return;
+        const ctx = this.ctx;
+        const now = ctx.currentTime;
+        const remaining = note.audibleUntil - now;
+        if (!(remaining > 0)) return;
+
+        // 旧激励层（上一个技法目标）交叉淡出；它的 source 也会在淡出后停止
+        this.fadeOutAttacks(note);
+
+        const source = ctx.createBufferSource();
+        source.buffer = note.buffer;
+        source.playbackRate.value = this.techniquePlaybackRate(toFreq, note.baseFrequency);
+
+        const attackGain = ctx.createGain();
+        const targetLevel = Number.isFinite(level) ? Math.max(0.0001, level) : 0.0001;
+        const riseSec = Math.min(
+            KARPLUS_ARTICULATION.techniqueAttackRiseSec,
+            remaining,
+        );
+        // 只有短起音：之后保持电平，让源缓冲自身的衰减发挥作用，直到音符终点。
+        // 不能用「指数衰减到近零」的短包络——半衰期约 3ms，会压成一声轻咔哒。
+        attackGain.gain.setValueAtTime(0.0001, now);
+        attackGain.gain.linearRampToValueAtTime(targetLevel, now + riseSec);
+
+        source.connect(attackGain);
+        attackGain.connect(note.input);
+        source.start(now);
+        source.stop(note.audibleUntil + STOP_MARGIN_SEC);
+        note.attacks.push({ source, gain: attackGain });
+        note.nodes.push(source, attackGain);
+    }
+
+    hammerOn(toFreq: number, noteId: symbol | null = null): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / fromFreq, now + 0.025);
-        }
-        note.gain.gain.setValueAtTime(0.6, now);
+        const now = this.ctx!.currentTime;
+        this.glideTo(note, toFreq, KARPLUS_ARTICULATION.hammerOnSec);
+        this.rearticulate(note, toFreq, KARPLUS_ARTICULATION.hammerOnAttackGain);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.hammerOnVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
 
-    pullOff(fromFreq: number, toFreq: number, noteId: symbol | null = null): symbol {
+    pullOff(toFreq: number, noteId: symbol | null = null): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.5, volume: 0.5 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / fromFreq, now + 0.02);
-        }
-        note.gain.gain.setValueAtTime(0.4, now);
+        const now = this.ctx!.currentTime;
+        this.glideTo(note, toFreq, KARPLUS_ARTICULATION.pullOffSec);
+        this.rearticulate(note, toFreq, KARPLUS_ARTICULATION.pullOffAttackGain);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.pullOffVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
 
-    slideTo(toFreq: number, slideDuration: number = 0.15, noteId: symbol | null = null): symbol {
+    slideTo(
+        toFreq: number,
+        slideDuration: number = KARPLUS_ARTICULATION.slideSec,
+        noteId: symbol | null = null,
+    ): symbol {
         if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+            return this.playNote({
+                frequency: toFreq,
+                duration: KARPLUS_ARTICULATION.techniqueFallbackDurationSec,
+                volume: KARPLUS_ARTICULATION.techniqueFallbackVolume,
+            });
         }
         const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / note.frequency, now + slideDuration);
-        }
-        note.gain.gain.setValueAtTime(0.6, now);
+        const now = this.ctx!.currentTime;
+        // 滑音是连续音高变化，旧激励层（静止在上一目标音高）必须先释放，
+        // 否则会与新音高叠成双音
+        this.fadeOutAttacks(note);
+        this.glideTo(note, toFreq, slideDuration);
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.slideVolumeFactor,
+            now,
+        );
         note.frequency = toFreq;
         return noteId;
     }
 
-    /** 推弦：从当前频率向上弯曲到目标频率 */
-    bendTo(toFreq: number, bendDuration: number = 0.12, noteId: symbol | null = null): symbol {
-        if (!noteId || !this.activeNotes.has(noteId)) {
-            return this.playNote({ frequency: toFreq, duration: 0.6, volume: 0.6 });
+    /**
+     * 推弦：在该音符自身音高基础上向上弯曲 semitones 个半音。
+     *
+     * 与 hammerOn/pullOff/slide 的「技法连接」不同：推弦是技法音符**自己发声**。
+     * 前一个同弦音可能已经停止或在别的弦上，不能借用它的声音。
+     * 全部用 AudioParam 的绝对时间排程，不走 setTimeout，避免与调度层抢时序。
+     *
+     * @param semitones 推弦幅度（半音，向上为正）
+     * @param holdSec   从拨弦起算的持音时长（用于计算回弹时机）
+     * @param release   是否在时值末尾回弹到原音高
+     */
+    bendNote(noteId: symbol, semitones: number, holdSec: number, release = false): void {
+        const note = this.activeNotes.get(noteId);
+        if (!note || !note.source || !this.ctx || semitones === 0) return;
+        const now = this.ctx.currentTime;
+        // 激励层是固定音高的独立 source，不会跟随推弦；先释放避免双音
+        this.fadeOutAttacks(note);
+        const rate = note.source.playbackRate;
+        // 与缓冲区预拉长共用同一上限，两侧不同步会提前耗尽缓冲（见 karplusBufferTiming）
+        const target = Math.min(
+            semitonesToRate(semitones),
+            KARPLUS_ARTICULATION.maxPlaybackRateScale,
+        );
+        // 短音按比例提前并缩短上弯：16 分音符也要在下一个音前到达目标音高。
+        // 极短音不能套用 bendMinHoldSec 把时值反向拉长，否则回弹会越过记谱结束。
+        const hold = holdSec > 0 ? holdSec : KARPLUS_ARTICULATION.bendMinHoldSec;
+        const startDelay = Math.min(
+            KARPLUS_ARTICULATION.bendStartSec,
+            hold * KARPLUS_ARTICULATION.bendStartRatio,
+        );
+        const riseSec = Math.min(
+            KARPLUS_ARTICULATION.bendTimeSec,
+            Math.max(KARPLUS_ARTICULATION.bendMinRiseSec, hold * KARPLUS_ARTICULATION.bendRiseRatio),
+            Math.max(0.001, hold - startDelay),
+        );
+        const start = now + startDelay;
+        const peak = start + riseSec;
+
+        rate.cancelScheduledValues(now);
+        rate.setValueAtTime(1, now);
+        rate.setValueAtTime(1, start);
+        rate.exponentialRampToValueAtTime(target, peak);
+
+        if (release) {
+            // 回弹不能早于推弦到达峰值，否则会被吞掉；短音同样按时值压缩，
+            // 避免回弹拖到记谱结束之后
+            const releaseLead = Math.min(
+                KARPLUS_ARTICULATION.bendReleaseLeadSec,
+                hold * KARPLUS_ARTICULATION.bendReleaseLeadRatio,
+            );
+            const releaseStart = Math.max(peak, now + hold - releaseLead);
+            // 回弹必须在记谱结束前走完；剩余时间不足时按剩余量压缩
+            const releaseTime = Math.max(0.001, Math.min(
+                KARPLUS_ARTICULATION.bendReleaseTimeSec,
+                hold * KARPLUS_ARTICULATION.bendReleaseTimeRatio,
+                now + hold - releaseStart,
+            ));
+            rate.setValueAtTime(target, releaseStart);
+            rate.exponentialRampToValueAtTime(1, releaseStart + releaseTime);
+            // 回弹后音高回到缓冲区原始值，后续同弦技法不能把推高的频率当作起点
+            note.frequency = note.baseFrequency;
+        } else {
+            note.frequency = note.baseFrequency * target;
         }
-        const note = this.activeNotes.get(noteId)!;
-        const ctx = this.ctx!;
-        const now = ctx.currentTime;
-        if (note.source) {
-            note.source.playbackRate.cancelScheduledValues(now);
-            note.source.playbackRate.setValueAtTime(1, now);
-            // 推弦只向上弯曲，不回落
-            note.source.playbackRate.exponentialRampToValueAtTime(toFreq / note.frequency, now + bendDuration);
-        }
-        // 推弦时稍微增大音量模拟张力增加
-        note.gain.gain.setValueAtTime(0.65, now);
-        note.frequency = toFreq;
-        return noteId;
+
+        // 推弦时稍微增大音量模拟张力增加（以调度层基准音量为底，保留力度差异）
+        note.gain.gain.setValueAtTime(
+            note.baseVolume * KARPLUS_ARTICULATION.bendVolumeFactor,
+            now,
+        );
     }
 
-    /** 揉弦：通过 LFO 调制 playbackRate 产生音高波动 */
-    vibrato(noteId: symbol, depth: number = 0.015, rate: number = 5.5): void {
+    /**
+     * 揉弦：通过 LFO 调制 playbackRate 产生音高波动。
+     * @param startDelaySec 拨弦后多久开始揉（秒），避开起音
+     * @param holdSec       音符实际发声时长（秒）；短音按比例提前/提速并做渐入
+     */
+    vibrato(
+        noteId: symbol,
+        depth: number = KARPLUS_ARTICULATION.vibratoDepth,
+        rate: number = KARPLUS_ARTICULATION.vibratoRate,
+        startDelaySec = 0,
+        holdSec = 0,
+    ): void {
         const note = this.activeNotes.get(noteId);
         if (!note || !note.source || !this.ctx) return;
         const ctx = this.ctx;
         const now = ctx.currentTime;
+        // 激励层不会跟随揉弦的 LFO；先释放，避免静止音高与揉弦叠在一起
+        this.fadeOutAttacks(note);
+
+        // 短音按比例压缩启动延迟与渐入，并提高速率凑够可辨识的周期数
+        const scaled = holdSec > 0;
+        const startDelay = scaled
+            ? Math.min(startDelaySec, holdSec * KARPLUS_ARTICULATION.vibratoStartRatio)
+            : startDelaySec;
+        const fadeIn = scaled
+            ? Math.min(
+                KARPLUS_ARTICULATION.vibratoFadeInSec,
+                holdSec * KARPLUS_ARTICULATION.vibratoFadeRatio,
+            )
+            : KARPLUS_ARTICULATION.vibratoFadeInSec;
+        const effectiveRate = scaled
+            ? Math.min(
+                KARPLUS_ARTICULATION.vibratoMaxRate,
+                Math.max(rate, KARPLUS_ARTICULATION.vibratoMinCycles / holdSec),
+            )
+            : rate;
 
         // 低频振荡器 → 增益 → playbackRate，产生周期性音高波动
         const lfo = ctx.createOscillator();
         lfo.type = 'sine';
-        lfo.frequency.value = rate;   // 揉弦频率 ~5.5Hz
+        lfo.frequency.value = effectiveRate;
 
         const lfoGain = ctx.createGain();
-        lfoGain.gain.value = depth;   // 调制深度（围绕当前 playbackRate 波动 ±depth）
+        const lfoStart = now + Math.max(0, startDelay);
+        // 渐入：直接满深度会像开关抖动；从 0 线性升到目标深度
+        lfoGain.gain.setValueAtTime(0, lfoStart);
+        lfoGain.gain.linearRampToValueAtTime(depth, lfoStart + Math.max(0.001, fadeIn));
 
         lfo.connect(lfoGain);
         lfoGain.connect(note.source.playbackRate);
 
-        lfo.start(now);
+        lfo.start(lfoStart);
         note.nodes.push(lfo, lfoGain);
+        note.oscillators.push(lfo);
     }
 
     /**
      * 对已发声的音符施加奏法收尾。
      *
-     * 技法连接（击弦/勾弦/滑弦/推弦/揉弦）只调制上一个音的播放速率、不重新拨弦，
-     * 所以闷音/断音无法通过重新生成缓冲区实现，只能直接写在当前音的包络上。
+     * 击弦/勾弦/滑弦复用上一个同弦音；推弦/揉弦作用于自身的新起音。
+     * 技法都不重新生成缓冲区，所以闷音/断音无法通过重新生成实现，只能直接写在当前音的包络上。
      * @param afterSec 从当前时刻起多久开始快速淡出（秒）
      * @param volumeFactor 起始音量系数（手掌闷音）
      * @param darken 是否压低琴体低通的截止频率（手掌闷音音色）
@@ -320,37 +718,87 @@ export class GuitarEngine {
     // 停止 & 释放
     // ============================================================
 
-    /** 停止单个活跃音符（快速淡出） */
+    /** 停止单个活跃音符（先淡出，再停 source） */
     stopNote(noteId: symbol): void {
         const note = this.activeNotes.get(noteId);
         if (!note || !this.ctx) return;
         const now = this.ctx.currentTime;
+        const fadeSec = KARPLUS_ARTICULATION.releaseSec;
+        // 激励层 source 的自停排期在音符终点；停止时提前释放，避免长音
+        // 被 stop/pause 后节点仍在后台跑到原终点
+        this.fadeOutAttacks(note);
         try {
+            // 顺序必须反过来：先让 gain 淡到接近 0，再停 source。
+            // 必须先读 gain.value 再 cancel：cancelScheduledValues 会删掉进行中的
+            // release ramp，参数回退到上一个 setValueAtTime，再读就会从被抬高的
+            // 电平起淡，产生一次上跳。
+            const gain = note.gain.gain;
+            const current = Math.max(0.001, gain.value);
+            gain.cancelScheduledValues(now);
+            gain.setValueAtTime(current, now);
+            gain.exponentialRampToValueAtTime(0.001, now + fadeSec);
             if (note.source) {
-                try { note.source.stop(now); } catch {}
+                try { note.source.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
             }
-            note.gain.gain.cancelScheduledValues(now);
-            note.gain.gain.setValueAtTime(note.gain.gain.value, now);
-            note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.03);
         } catch {}
+        for (const osc of note.oscillators) {
+            try { osc.stop(now + fadeSec + STOP_MARGIN_SEC); } catch {}
+        }
         this.activeNotes.delete(noteId);
-        // 延迟断开节点
+        // 延迟断开节点，等淡出与 source.stop 完成
         setTimeout(() => {
             for (const n of note.nodes) {
                 try { n.disconnect(); } catch {}
             }
-        }, 50);
+        }, (fadeSec + DISCONNECT_MARGIN_SEC) * 1000);
     }
 
-    stopAll(): void {
+    /**
+     * 停止所有活跃音符。
+     *
+     * @param fadeSec 淡出时长（秒）。手动 stop/pause 用默认的
+     *                {@link KARPLUS_ARTICULATION.releaseSec} 快速收掉；
+     *                自然收尾传入 {@link KARPLUS_ARTICULATION.naturalEndFadeSec}，
+     *                让末音残余与共享混响平滑衰减。
+     */
+    stopAll(fadeSec: number = KARPLUS_ARTICULATION.releaseSec): void {
         if (!this.ctx) return;
         const now = this.ctx.currentTime;
+        // 防异常输入：0/NaN 的指数 ramp 没有有效时长
+        const safeFadeSec = Number.isFinite(fadeSec) && fadeSec > 0
+            ? fadeSec
+            : KARPLUS_ARTICULATION.releaseSec;
+        // 混响至少按房间总线自己的最短淡出走；自然收尾时两者取更长者
+        const roomFadeSec = Math.max(safeFadeSec, KARPLUS_MIX.roomStopFadeSec);
         for (const [, note] of this.activeNotes) {
+            // 同 stopNote：提前释放激励层，不等它们跑到原音符终点
+            this.fadeOutAttacks(note);
             try {
+                const gain = note.gain.gain;
+                // 同 stopNote：先读当前电平，再清掉进行中的 release
+                const current = Math.max(0.001, gain.value);
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(current, now);
+                gain.exponentialRampToValueAtTime(0.001, now + safeFadeSec);
                 if (note.source) {
-                    note.source.stop(now);
+                    note.source.stop(now + safeFadeSec + STOP_MARGIN_SEC);
                 }
-                note.gain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
+            } catch {}
+            for (const osc of note.oscillators) {
+                try { osc.stop(now + safeFadeSec + STOP_MARGIN_SEC); } catch {}
+            }
+        }
+        // 共享混响的湿声不受上游干声 gain 影响：停止时把返回电平压掉，
+        // 否则 pause/stop 后还会拖出约半秒的空间尾巴。下一次 init（播放开始）
+        // 会恢复 roomWet；这里不能 disconnect 总线，否则后续音符没有混响。
+        if (this.reverbReturn) {
+            try {
+                const gain = this.reverbReturn.gain;
+                const current = Math.max(0.0001, gain.value);
+                gain.cancelScheduledValues(now);
+                gain.setValueAtTime(current, now);
+                gain.exponentialRampToValueAtTime(0.0001, now + roomFadeSec);
+                this.reverbDucked = true;
             } catch {}
         }
         this.activeNotes.clear();

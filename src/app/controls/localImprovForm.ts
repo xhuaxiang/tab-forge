@@ -8,17 +8,19 @@
 import { $, setStatus } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import type {
+    ChordEvent,
     ImprovOptions,
     LocalDensity,
     LocalStyle,
+    Progression,
     ResolvedImprovOptions,
     ScaleType,
-} from '../../core/types/improv.ts';
+} from '../../core/types/improv/index.ts';
 import {
     LOCAL_DENSITIES,
     LOCAL_STYLES,
     SCALE_TYPES,
-} from '../../core/types/improv.ts';
+} from '../../core/types/improv/index.ts';
 import type { ImprovSelectOption } from '../../core/config.ts';
 import {
     IMPROV_CONFIG,
@@ -26,8 +28,14 @@ import {
     LOCAL_PROGRESSIONS,
 } from '../../core/config.ts';
 import {
+    buildChordChart,
+    chordChartFromBars,
+    detectUnsupportedDescription,
+    formatChordSpec,
     generateLocalImprovisation,
+    parseDescriptionChordChart,
     parseImprovDescription,
+    progressionEquals,
 } from '../../core/utils/improv/index.ts';
 import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
 
@@ -83,10 +91,27 @@ function initLocalImprovOptions(): void {
         })),
         LOCAL_PROGRESSIONS[0].value,
     );
+    fillSelectOptions(
+        'localChordsPerMeasure',
+        config.chordsPerMeasure.options.map(value => ({
+            value: String(value),
+            label: value === 1 ? '1（整小节）' : `${value}（等分）`,
+        })),
+        String(config.chordsPerMeasure.default),
+    );
 }
 
 function readLocalDescription(): string {
     return (document.getElementById('localImprovDescription') as HTMLTextAreaElement | null)?.value ?? '';
+}
+
+function readChordsPerMeasure(): number {
+    const value = Number(
+        (document.getElementById('localChordsPerMeasure') as HTMLSelectElement | null)?.value,
+    );
+    return LOCAL_IMPROV_CONFIG.chordsPerMeasure.options.includes(value)
+        ? value
+        : LOCAL_IMPROV_CONFIG.chordsPerMeasure.default;
 }
 
 function setSelectValue(id: string, value: string): void {
@@ -99,9 +124,7 @@ function setSelectValue(id: string, value: string): void {
 function matchProgression(
     steps: ResolvedImprovOptions['progression'],
 ): (typeof LOCAL_PROGRESSIONS)[number] | undefined {
-    return LOCAL_PROGRESSIONS.find(option =>
-        option.steps.length === steps.length
-        && option.steps.every((step, index) => step === steps[index]));
+    return LOCAL_PROGRESSIONS.find(option => progressionEquals(option.steps, steps));
 }
 
 /** 把最终选项回写到控件，避免描述覆盖后下拉框还停在旧值 */
@@ -117,18 +140,48 @@ function syncLocalControls(options: ResolvedImprovOptions): void {
     if (progressionValue) setSelectValue('localProgression', progressionValue);
 }
 
+/**
+ * 读取控件 + 描述，合成生成选项。
+ *
+ * 和弦优先级：描述里的小节写法 > 描述里的标签/进行 > 下拉预设。
+ * 每小节多个和弦时，统一展开成 `chordChart`；1 个和弦时保留旧的
+ * `progression` 铺法（含最后一小节强制收尾）。
+ */
 function readLocalOptions(
     seed: number,
     described: Partial<ImprovOptions>,
+    description: string,
 ): Partial<ImprovOptions> {
+    const config = LOCAL_IMPROV_CONFIG;
     const numValue = (document.getElementById('localNumMeasures') as HTMLSelectElement | null)?.value;
     const parsed = numValue === undefined || numValue === '' ? NaN : Number(numValue);
-    const config = LOCAL_IMPROV_CONFIG;
-    const progressionValue = (document.getElementById('localProgression') as HTMLSelectElement | null)?.value;
-    const progression = LOCAL_PROGRESSIONS.find(option => option.value === progressionValue)?.steps;
+    const numMeasures = described.numMeasures
+        ?? (Number.isFinite(parsed) ? parsed : config.defaults.numMeasures);
+    const scoreTimeSignature = scoreStore.score.timeSignature;
+    const timeSignature = described.timeSignature
+        ?? (config.timeSignatures.includes(scoreTimeSignature)
+            ? scoreTimeSignature
+            : config.defaults.timeSignature);
 
-    return {
-        numMeasures: Number.isFinite(parsed) ? parsed : undefined,
+    const descriptionBars = parseDescriptionChordChart(description);
+    const selected = LOCAL_PROGRESSIONS.find(option =>
+        option.value === (document.getElementById('localProgression') as HTMLSelectElement | null)?.value);
+
+    // 和弦只来自描述或下拉预设；描述里的小节写法优先。
+    const progression: Progression | undefined = described.progression ?? selected?.steps;
+    const chartBars = descriptionBars;
+    const chordsPerMeasure = readChordsPerMeasure();
+    let chordChart: ChordEvent[] | undefined;
+    if (chartBars) {
+        chordChart = chordChartFromBars(chartBars, numMeasures, timeSignature);
+    } else if (chordsPerMeasure > 1) {
+        chordChart = buildChordChart(
+            progression ?? [1], numMeasures, chordsPerMeasure, timeSignature,
+        );
+    }
+
+    const options: Partial<ImprovOptions> = {
+        numMeasures,
         key: scoreStore.score.key || undefined,
         scaleType: readOption<ScaleType>(
             'localScaleType', SCALE_TYPES, config.defaults.scaleType,
@@ -139,13 +192,61 @@ function readLocalOptions(
         density: readOption<LocalDensity>(
             'localDensity', LOCAL_DENSITIES, config.defaults.density,
         ),
-        timeSignature: scoreStore.score.timeSignature || undefined,
+        timeSignature,
         tuning: { ...scoreStore.score.tuning },
-        progression,
         // 描述里写到的字段优先；没写到的沿用上面的控件/乐谱值。
         ...described,
+        // 和弦已经在本函数里合并过，避免 described 的旧值覆盖展开结果。
+        progression,
+        chordChart,
         seed,
     };
+
+    return options;
+}
+
+/** 从实际和声计划反推展示用和弦，避免摘要显示未被采用的 progression */
+function harmonyLabel(result: ReturnType<typeof generateLocalImprovisation>): string {
+    const measures = result.harmony.map(measure =>
+        measure.segments
+            .map(segment => formatChordSpec(segment.chord))
+            .join('/'));
+    const shown = measures.slice(0, 4).join(' → ');
+    return measures.length > 4 ? `${shown} → …` : shown;
+}
+
+function buildSummary(
+    result: ReturnType<typeof generateLocalImprovisation>,
+    seed: number,
+    description: string,
+    described: Partial<ImprovOptions>,
+    warnings: string[],
+): string {
+    const sounding = result.notes.filter(note => !note.isRest).length;
+    const descriptionNote = description === ''
+        ? ''
+        : Object.keys(described).length > 0
+            ? ' · 描述已套用'
+            : ' · 描述未命中可识别项';
+    const chords = harmonyLabel(result);
+    const maxSegments = result.harmony.reduce(
+        (max, measure) => Math.max(max, measure.segments.length), 0,
+    );
+    const fretLabel = result.options.fretRange
+        ? `${result.options.fretRange.min}-${result.options.fretRange.max} 品`
+        : '风格把位';
+    const warningText = warnings.length > 0
+        ? ` · ⚠️ ${warnings.join('；')}`
+        : '';
+
+    return `✅ ${sounding} 个音符 / ${result.options.numMeasures} 小节 · `
+        + `${result.options.key} ${result.options.scaleType} · `
+        + `${result.options.style} · ${result.options.timeSignature} · ${fretLabel}`
+        + ` · seed ${seed}`
+        + (chords ? ` · 和弦 ${chords}` : '')
+        + (maxSegments > 1 ? ` · ${maxSegments} 和弦/小节` : '')
+        + descriptionNote
+        + warningText;
 }
 
 function handleLocalGenerate(): void {
@@ -162,7 +263,9 @@ function handleLocalGenerate(): void {
     try {
         const description = readLocalDescription().trim();
         const described = parseImprovDescription(description);
-        const result = generateLocalImprovisation(readLocalOptions(seed, described));
+        const options = readLocalOptions(seed, described, description);
+        const warnings = detectUnsupportedDescription(description);
+        const result = generateLocalImprovisation(options);
 
         // 描述可能覆盖拍号/调性；先落到 store，loadNotes 才会按新拍号切小节。
         scoreStore.beginBatch();
@@ -179,18 +282,9 @@ function handleLocalGenerate(): void {
         }
         syncLocalControls(result.options);
 
-        const sounding = result.notes.filter(note => !note.isRest).length;
-        const descriptionNote = description === ''
-            ? ''
-            : Object.keys(described).length > 0
-                ? ' · 描述已套用'
-                : ' · 描述未命中可识别项';
-        const progressionLabel = matchProgression(result.options.progression)?.label;
-        const summary = `✅ ${sounding} 个音符 / ${result.options.numMeasures} 小节 · `
-            + `${result.options.key} ${result.options.scaleType} · `
-            + `${result.options.style} · ${result.options.timeSignature} · seed ${seed}`
-            + (progressionLabel ? ` · 和弦 ${progressionLabel}` : '')
-            + descriptionNote;
+        const summary = buildSummary(
+            result, seed, description, described, warnings,
+        );
         setStatus(`✅ 本地即兴已生成（${result.options.style}）`, 'success');
         if (statusEl) statusEl.textContent = summary;
     } catch (error) {

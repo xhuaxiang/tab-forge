@@ -29,8 +29,13 @@
                 <button id="stopBtn" title="停止播放" disabled>⏹ 停止</button>
                 <span class="toolbar-sep"></span>
                 <select id="engineSelect" title="播放引擎">
-                    <option value="ks">合成器</option>
-                    <option value="alphatab" selected>SoundFont</option>
+                    <option value="ks" selected>合成器</option>
+                    <option value="alphatab">SoundFont</option>
+                </select>
+                <span class="toolbar-sep"></span>
+                <select id="displayModeSelect" title="谱面显示模式（六线谱模式才显示休止符和时值）">
+                    <option value="tab" selected>六线谱</option>
+                    <option value="scoretab">五线+六线</option>
                 </select>
                 <span class="toolbar-sep"></span>
                 <select id="improvModeSelect" title="选择即兴生成方式">
@@ -257,17 +262,21 @@
                             <label>和弦进行</label>
                             <select id="localProgression" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 从 LOCAL_PROGRESSIONS 填充 --></select>
                         </div>
+                        <div class="input-group" style="flex:1;">
+                            <label>每小节和弦数</label>
+                            <select id="localChordsPerMeasure" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
+                        </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
                             <label>描述（可选）</label>
                             <textarea id="localImprovDescription" class="compact-input" rows="3"
-                                placeholder="如：爵士、16 小节、高密度、7/8、D 大调"
+                                placeholder="如：爵士、16 小节、高密度、7/8、D 大调、7-10品、| C G | Am F |"
                                 style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
                     <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
-                        描述里写到的项优先；只写调性时自动配大/小调音阶；没写到的沿用当前乐谱设置，乐谱为空时回落到默认配置。推弦、滑弦等技法描述暂不解析。
+                        描述里写到的项优先；只写调性时自动配大/小调音阶；可识别 7-10品 这类把位范围，和弦可写 | C G | Am F | 或「和弦进行：C G Am F」。La/D 指型与自然音限制暂不支持，会在结果里提示。推弦、滑弦等技法描述暂不解析。
                     </div>
                     <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;">🎸 生成即兴谱</button>
                     <div id="localImprovStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>

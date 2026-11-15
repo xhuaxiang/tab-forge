@@ -8,7 +8,7 @@
  */
 
 import type { TabScore } from '../../core/types/index.ts';
-import { ALPHATAB_DISPLAY_SCALE } from '../../core/config.ts';
+import { ALPHATAB_DISPLAY_SCALE, DEFAULT_DISPLAY_MODE, type DisplayMode } from '../../core/config.ts';
 import { tabScoreToAlphaTabScore } from './scoreAdapter.ts';
 import { handleScoreClick } from './scoreEditing.ts';
 
@@ -46,7 +46,46 @@ export class AlphaTabRenderer {
     private highlightEl: HTMLElement | null = null;
     /** 当前选中的小节号（-1 = 无）；由 scoreStore.selectMeasure → state 调用 setSelectedMeasure 维护 */
     private selectedMeasure = -1;
+    /** 谱面显示模式；mount 时套用，切换时即时重渲染（跨 mount 保留） */
+    private displayMode: DisplayMode = DEFAULT_DISPLAY_MODE;
     private readonly onClickBound = (e: MouseEvent): void => this.onContainerClick(e);
+
+    /**
+     * 切换显示模式（六线谱 / 五线+六线）。
+     *
+     * alphaTab 只在「纯六线谱」配置下画六线上的休止符（TabBarRenderer.showRests），
+     * 时值/节奏符号另需显式打开 rhythmMode；两者都只改显示设置，不动谱面数据。
+     */
+    setDisplayMode(mode: DisplayMode): void {
+        if (mode === this.displayMode) return;
+        this.displayMode = mode;
+        if (!this.api || !this.mod) return;
+        this.applyDisplaySettings(this.api.settings, this.mod, mode);
+        this.api.updateSettings();
+        // 空谱（未 load）时 renderer 没有 score，等下次 render 时自然套用新设置
+        if (this.api.score) this.api.render();
+    }
+
+    /**
+     * 显示模式 → alphaTab 设置。
+     *
+     * 六线谱模式必须显式打开 rhythmMode：alphaTab 的 Automatic 判断看的是
+     * `staff.showStandardNotation`（我们的模型始终为 true），而不是实际渲染出的谱表，
+     * 所以只切 StaveProfile 时六线谱上只有休止符、没有时值/节奏符。
+     */
+    private applyDisplaySettings(
+        settings: import('@coderline/alphatab').Settings,
+        mod: AlphaTabModule,
+        mode: DisplayMode,
+    ): void {
+        if (mode === 'tab') {
+            settings.display.staveProfile = mod.StaveProfile.Tab;
+            settings.notation.rhythmMode = mod.TabRhythmMode.ShowWithBars;
+        } else {
+            settings.display.staveProfile = mod.StaveProfile.Default;
+            settings.notation.rhythmMode = mod.TabRhythmMode.Automatic;
+        }
+    }
 
     /** 设置选中小节（-1 取消），并即时绘制高亮框 */
     setSelectedMeasure(index: number): void {
@@ -124,6 +163,8 @@ export class AlphaTabRenderer {
         settings.core.fontDirectory = new URL('font/', document.baseURI).href; // 字体放 public/font，dev/web/扩展通用
         settings.core.includeNoteBounds = true; // 收集音符边界，供点击命中
         settings.display.scale = ALPHATAB_DISPLAY_SCALE; // 整体缩放（含字体），适配紧凑布局
+        // 纯六线谱模式：alphaTab 才会在六线上画休止符与拍号（见 applyDisplaySettings）
+        this.applyDisplaySettings(settings, mod, this.displayMode);
         settings.player.playerMode = mod.PlayerMode.Disabled;
 
         // 深色主题适配：浅色音符/文字/谱线，让 alphaTab 内容在深色背景上可见

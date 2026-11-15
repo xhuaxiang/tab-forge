@@ -8,7 +8,7 @@ import type {
     LocalStyle,
     ScaleType,
     SkeletonSlot,
-} from '../../../../core/types/improv.ts';
+} from '../../../../core/types/improv/index.ts';
 import { buildSkeleton } from '../../../../core/utils/improv/melody.ts';
 import { choosePositions } from '../../../../core/utils/improv/positioning.ts';
 import { buildRhythmPlan } from '../../../../core/utils/improv/rhythm.ts';
@@ -144,7 +144,22 @@ describe('choosePositions', () => {
         expect(build()).toEqual(build());
     });
 
-    it('无法在指板落位、多声部、休止带音高都会报错', () => {
+    it('多声部拍位落到同拍可同时按出的位置', () => {
+        const options = makeOptions({ style: 'Folk', seed: 1 });
+        const style = LOCAL_IMPROV_CONFIG.styleProfiles.Folk;
+        const positioned = choosePositions(
+            [slot(60, { midis: [60, 64] }), slot(67)],
+            options, LOCAL_IMPROV_CONFIG.playability, style,
+        );
+
+        expect(positioned[0].positions.map(position => position.midi))
+            .toEqual([60, 64]);
+        const strings = positioned[0].positions.map(position => position.string);
+        expect(new Set(strings).size).toBe(2);
+        expect(positioned[1].positions).toHaveLength(1);
+    });
+
+    it('无法在指板落位、声部非法、休止带音高都会报错', () => {
         const options = makeOptions();
         const build = (skeleton: SkeletonSlot[]) => choosePositions(
             skeleton, options,
@@ -153,8 +168,12 @@ describe('choosePositions', () => {
         );
 
         expect(() => build([slot(120)])).toThrow(/没有可用位置/);
-        expect(() => build([slot(64, { midis: [64, 67] })]))
-            .toThrow(/只支持单声部/);
+        expect(() => build([slot(55, { midis: [55, 84] })]))
+            .toThrow(/无法同时按出/);
+        expect(() => build([slot(60, { midis: [48, 52, 55, 60] })]))
+            .toThrow(/声部过多/);
+        expect(() => build([slot(60, { midis: [64, 60] })]))
+            .toThrow(/升序/);
         expect(() => build([{
             measureIndex: 0,
             slotIndex: 0,

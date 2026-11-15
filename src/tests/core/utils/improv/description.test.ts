@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseImprovDescription } from '../../../../core/utils/improv/description.ts';
+import {
+    detectUnsupportedDescription,
+    parseDescriptionChordChart,
+    parseDescriptionFretRange,
+    parseImprovDescription,
+} from '../../../../core/utils/improv/description.ts';
 
 describe('parseImprovDescription', () => {
     it('空描述不产生任何覆盖', () => {
@@ -123,5 +128,163 @@ describe('parseImprovDescription', () => {
         expect(parseImprovDescription('随便弹点好听的')).toEqual({});
         expect(parseImprovDescription('AI 即兴')).toEqual({});
         expect(parseImprovDescription('I am ready')).toEqual({});
+    });
+
+    it('识别把位范围', () => {
+        expect(parseImprovDescription('7-10品')).toEqual({
+            fretRange: { min: 7, max: 10 },
+        });
+        expect(parseImprovDescription('把位固定在 8 到 13 品')).toEqual({
+            fretRange: { min: 8, max: 13 },
+        });
+        expect(parseImprovDescription('在 8–13 品内即兴')).toEqual({
+            fretRange: { min: 8, max: 13 },
+        });
+    });
+
+    it('识别小节写法的和弦进行，且不把进行里的 Am 误当调性', () => {
+        expect(parseImprovDescription('在 | C G | Am F | 内即兴')).toEqual({
+            progression: [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+        });
+    });
+
+    it('识别带标签的进行，且不把进行内容当成调性', () => {
+        expect(parseImprovDescription('和弦进行：C G Am F')).toEqual({
+            progression: [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+        });
+    });
+
+    it('指型与自然音限制进入不支持的提示', () => {
+        expect(detectUnsupportedDescription('把位固定在 7-10 品')).toEqual([]);
+        expect(detectUnsupportedDescription('在 La 指型（D 型）内')).toEqual([
+            '指型图案（La/D 型等）暂未支持，当前按音阶自由度生成',
+        ]);
+        expect(detectUnsupportedDescription('不要 A#，尽量落在 A-G 这些音上')).toContain(
+            '自然音/升降音限制暂未支持，生成仍按音阶与和弦音池',
+        );
+    });
+
+    it('不支持提示不会误伤自然音阶与和弦范围写法', () => {
+        expect(detectUnsupportedDescription('用自然音阶')).toEqual([]);
+        expect(detectUnsupportedDescription('和弦落在 C-G-Am-F 上')).toEqual([]);
+    });
+
+    it('标签进行只消费和弦 token，行尾的调性与把位仍然生效', () => {
+        expect(parseImprovDescription('和弦进行：C G Am F、D 大调、7-10品')).toEqual({
+            progression: [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+            key: 'D',
+            scaleType: 'Major (Ionian)',
+            fretRange: { min: 7, max: 10 },
+        });
+        expect(parseImprovDescription('和弦进行：2-5-1，7-10品')).toEqual({
+            progression: [2, 5, 1],
+            fretRange: { min: 7, max: 10 },
+        });
+    });
+
+    it('标签可以省略冒号', () => {
+        expect(parseImprovDescription('和弦进行 C G Am F')).toEqual({
+            progression: [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+        });
+    });
+
+    it('无标点时也不会把行尾把位/调性吞进进行', () => {
+        const cGAmF = [
+            { rootPitchClass: 0, quality: 'major' },
+            { rootPitchClass: 7, quality: 'major' },
+            { rootPitchClass: 9, quality: 'minor' },
+            { rootPitchClass: 5, quality: 'major' },
+        ];
+        expect(parseImprovDescription('和弦进行：C G Am F 7-10品')).toEqual({
+            progression: cGAmF,
+            fretRange: { min: 7, max: 10 },
+        });
+        expect(parseImprovDescription('和弦进行：C G Am F D 大调')).toEqual({
+            progression: cGAmF,
+            key: 'D',
+            scaleType: 'Major (Ionian)',
+        });
+    });
+
+    it('七和弦后缀不会被当成调性短语截断', () => {
+        expect(parseImprovDescription('和弦进行：Cmaj7 G7')).toEqual({
+            progression: [
+                { rootPitchClass: 0, quality: 'major7' },
+                { rootPitchClass: 7, quality: 'dominant7' },
+            ],
+        });
+    });
+});
+
+describe('parseDescriptionChordChart', () => {
+    it('从散文里截取含小节线的一行', () => {
+        expect(parseDescriptionChordChart('先来 | C G | Am F | 收尾')).toEqual([
+            [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+            ],
+            [
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+        ]);
+    });
+
+    it('支持跨行、单边小节线与行内夹散文的小节写法', () => {
+        const expected = [
+            [
+                { rootPitchClass: 0, quality: 'major' },
+                { rootPitchClass: 7, quality: 'major' },
+            ],
+            [
+                { rootPitchClass: 9, quality: 'minor' },
+                { rootPitchClass: 5, quality: 'major' },
+            ],
+        ];
+        expect(parseDescriptionChordChart('| C G |\n| Am F |')).toEqual(expected);
+        expect(parseDescriptionChordChart('| C G | 然后 | Am F |')).toEqual(expected);
+        expect(parseDescriptionChordChart('| C G | then | Am F |')).toEqual(expected);
+        expect(parseDescriptionChordChart('C G | Am F')).toEqual(expected);
+        expect(parseDescriptionChordChart('| C G | Am F')).toEqual(expected);
+        expect(parseDescriptionChordChart('| C G |\nAm F |')).toEqual(expected);
+    });
+
+    it('没有小节线或小节内容非法时返回 null', () => {
+        expect(parseDescriptionChordChart('C G Am F')).toBeNull();
+        expect(parseDescriptionChordChart('| C | H |')).toBeNull();
+        expect(parseDescriptionChordChart('| C | H')).toBeNull();
+    });
+});
+
+describe('parseDescriptionFretRange', () => {
+    it('支持连字符、en dash、中文「到/至」', () => {
+        expect(parseDescriptionFretRange('7-10品')).toEqual({ min: 7, max: 10 });
+        expect(parseDescriptionFretRange('8–13 品')).toEqual({ min: 8, max: 13 });
+        expect(parseDescriptionFretRange('10 至 7 品')).toEqual({ min: 7, max: 10 });
+        expect(parseDescriptionFretRange('没有范围限制')).toBeNull();
+    });
+
+    it('单个品位数字不构成锁定范围', () => {
+        expect(parseDescriptionFretRange('4 弦 10 品')).toBeNull();
     });
 });
