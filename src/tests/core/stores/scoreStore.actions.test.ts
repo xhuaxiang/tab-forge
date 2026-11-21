@@ -32,9 +32,186 @@ beforeEach(() => {
     scoreStore.score.key = SCORE_DEFAULTS.key;
     scoreStore.score.timeSignature = SCORE_DEFAULTS.timeSignature;
     scoreStore.selectedMeasure = null;
+    scoreStore.editCursor = null;
     scoreStore.onChange = null;
     scoreStore.onSelectChange = null;
     scoreStore._batchDepth = 0;
+});
+
+// ============================================================
+// 只读光标
+// ============================================================
+
+describe('setEditCursor', () => {
+    it('clamp 小节/拍位/弦号并同步 selectedMeasure，只走 onSelectChange', () => {
+        scoreStore.score.measures = [measure(quarters(2)), measure(quarters(4), 4, 4, 1)];
+        const selectSpy = vi.fn();
+        const changeSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+        scoreStore.onChange = changeSpy;
+
+        scoreStore.setEditCursor({ measureIndex: 9, beatOffset: 99, string: 9 });
+
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 1, beatOffset: 1, string: 6 });
+        expect(scoreStore.selectedMeasure).toBe(1);
+        expect(selectSpy).toHaveBeenCalledTimes(1);
+        expect(changeSpy).not.toHaveBeenCalled();
+    });
+
+    it('负值归零', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+        scoreStore.setEditCursor({ measureIndex: -5, beatOffset: -1, string: -3 });
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 0, beatOffset: 0, string: 1 });
+    });
+
+    it('无变化时不重复通知', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+        const selectSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        expect(selectSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('null 清空光标并触发轻量通知', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0, string: 1 });
+        const selectSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+        scoreStore.setEditCursor(null);
+        expect(scoreStore.editCursor).toBeNull();
+        expect(selectSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it('空谱忽略光标', () => {
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0, string: 1 });
+        expect(scoreStore.editCursor).toBeNull();
+    });
+
+    it('弦号边界 0 / 7 钳制到 1 / 6', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0, string: 0 });
+        expect(scoreStore.editCursor?.string).toBe(1);
+
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0, string: 7 });
+        expect(scoreStore.editCursor?.string).toBe(6);
+    });
+
+    it('小节号与弦号四舍五入，拍位保持原值', () => {
+        scoreStore.score.measures = [
+            measure(quarters(4), 4, 4, 0),
+            measure(quarters(4), 4, 4, 1),
+            measure(quarters(4), 4, 4, 2),
+        ];
+
+        scoreStore.setEditCursor({ measureIndex: 1.4, beatOffset: 0.25, string: 3.6 });
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 1, beatOffset: 0.25, string: 4 });
+
+        scoreStore.setEditCursor({ measureIndex: 1.6, beatOffset: 0.5, string: 2.4 });
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 2, beatOffset: 0.5, string: 2 });
+    });
+
+    it('非有限字段回落到 measure 0 / beat 0 / string 1', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+
+        scoreStore.setEditCursor({ measureIndex: NaN, beatOffset: Infinity, string: NaN });
+
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 0, beatOffset: 0, string: 1 });
+    });
+
+    it('目标小节为空时拍位钳到 0', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure([])];
+
+        scoreStore.setEditCursor({ measureIndex: 1, beatOffset: 0.75, string: 3 });
+
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 1, beatOffset: 0, string: 3 });
+        expect(scoreStore.selectedMeasure).toBe(1);
+    });
+
+    it('拍位恰好等于 / 略超总拍数都钳到小节尾', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 1, string: 1 });
+        expect(scoreStore.editCursor?.beatOffset).toBe(1);
+
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 1.25, string: 1 });
+        expect(scoreStore.editCursor?.beatOffset).toBe(1);
+    });
+
+    it('越界小节号钳到末尾后，拍位按内容总拍数钳制', () => {
+        scoreStore.score.measures = [
+            measure(quarters(4), 4, 4, 0), // 内容总拍数 1
+            measure(quarters(2), 4, 4, 1), // 内容总拍数 0.5
+        ];
+
+        scoreStore.setEditCursor({ measureIndex: 99, beatOffset: 0.75, string: 3 });
+
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 1, beatOffset: 0.5, string: 3 });
+    });
+
+    it('已为 null 时再次传 null 不触发通知', () => {
+        scoreStore.score.measures = [measure(quarters(4))];
+        const selectSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+
+        scoreStore.setEditCursor(null);
+        scoreStore.setEditCursor(null);
+
+        expect(scoreStore.editCursor).toBeNull();
+        expect(selectSpy).not.toHaveBeenCalled();
+    });
+
+    it('空谱传 null 不触发通知', () => {
+        const selectSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+
+        scoreStore.setEditCursor(null);
+
+        expect(selectSpy).not.toHaveBeenCalled();
+    });
+
+    it('选中被外部改到别的小节后，相同光标会重新同步选中并通知', () => {
+        scoreStore.score.measures = [
+            measure(quarters(4), 4, 4, 0),
+            measure(quarters(4), 4, 4, 1),
+        ];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        scoreStore.selectedMeasure = 1; // 模拟别处选中
+        const selectSpy = vi.fn();
+        scoreStore.onSelectChange = selectSpy;
+
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+
+        expect(scoreStore.selectedMeasure).toBe(0);
+        expect(selectSpy).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('光标随整谱替换清空', () => {
+    function setCursor(): void {
+        scoreStore.score.measures = [measure(quarters(4))];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 1 });
+        expect(scoreStore.editCursor).not.toBeNull();
+    }
+
+    it('clear() 清空', () => {
+        setCursor();
+        scoreStore.clear();
+        expect(scoreStore.editCursor).toBeNull();
+    });
+
+    it('deleteLastMeasure() 清空', () => {
+        setCursor();
+        scoreStore.deleteLastMeasure();
+        expect(scoreStore.editCursor).toBeNull();
+    });
+
+    it('loadNotes() 清空', () => {
+        setCursor();
+        scoreStore.loadNotes([note({ duration: 0.25 })], 1);
+        expect(scoreStore.editCursor).toBeNull();
+    });
 });
 
 // ============================================================
@@ -126,6 +303,58 @@ describe('selectMeasure', () => {
 
         expect(scoreStore.selectMeasure(null)).toBeNull();
         expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('改选到其它小节时清空光标，且选中与光标变化只通知一次', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure(quarters(4), 4, 4, 1)];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        const onSelect = vi.fn();
+        scoreStore.onSelectChange = onSelect;
+
+        expect(scoreStore.selectMeasure(1)).toBe(1);
+
+        expect(scoreStore.selectedMeasure).toBe(1);
+        expect(scoreStore.editCursor).toBeNull();
+        expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it('同一小节内改选保留光标（不因选中联动清掉）', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure(quarters(4), 4, 4, 1)];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        const onSelect = vi.fn();
+        scoreStore.onSelectChange = onSelect;
+
+        expect(scoreStore.selectMeasure(0)).toBe(0);
+
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        expect(onSelect).not.toHaveBeenCalled();
+    });
+
+    it('从别处选回光标所在小节时保留光标并通知一次', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure(quarters(4), 4, 4, 1)];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        scoreStore.selectedMeasure = 1; // 模拟别处选中
+        const onSelect = vi.fn();
+        scoreStore.onSelectChange = onSelect;
+
+        expect(scoreStore.selectMeasure(0)).toBe(0);
+
+        expect(scoreStore.selectedMeasure).toBe(0);
+        expect(scoreStore.editCursor).toEqual({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+        expect(onSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it('取消选中时同时清空光标，只通知一次', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure(quarters(4), 4, 4, 1)];
+        scoreStore.setEditCursor({ measureIndex: 1, beatOffset: 0.5, string: 3 });
+        const onSelect = vi.fn();
+        scoreStore.onSelectChange = onSelect;
+
+        expect(scoreStore.selectMeasure(null)).toBeNull();
+
+        expect(scoreStore.selectedMeasure).toBeNull();
+        expect(scoreStore.editCursor).toBeNull();
+        expect(onSelect).toHaveBeenCalledTimes(1);
     });
 });
 
@@ -244,6 +473,27 @@ describe('deleteLastMeasure', () => {
 
         expect(scoreStore.score.measures).toHaveLength(2);
         expect(scoreStore.selectedMeasure).toBe(0);
+    });
+
+    it('光标在存活小节、删除末尾小节后也清空', () => {
+        scoreStore.score.measures = [measure(quarters(4)), measure(quarters(4), 4, 4, 1)];
+        scoreStore.setEditCursor({ measureIndex: 0, beatOffset: 0.25, string: 2 });
+
+        scoreStore.deleteLastMeasure();
+
+        expect(scoreStore.score.measures).toHaveLength(1);
+        expect(scoreStore.editCursor).toBeNull();
+    });
+
+    it('空谱提前返回时也清掉残留光标（不通知）', () => {
+        scoreStore.editCursor = { measureIndex: 0, beatOffset: 0, string: 1 };
+        const onChange = vi.fn();
+        scoreStore.onChange = onChange;
+
+        expect(scoreStore.deleteLastMeasure()).toBe(false);
+
+        expect(scoreStore.editCursor).toBeNull();
+        expect(onChange).not.toHaveBeenCalled();
     });
 });
 

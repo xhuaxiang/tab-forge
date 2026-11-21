@@ -7,10 +7,19 @@
  * - mount 是异步（动态 import alphaTab）
  */
 
-import type { TabScore } from '../../core/types/index.ts';
+import type { TabScore, EditCursor } from '../../core/types/index.ts';
 import { ALPHATAB_DISPLAY_SCALE, DEFAULT_DISPLAY_MODE, type DisplayMode } from '../../core/config.ts';
+import { appStringToTabRow, beatOffsetInMeasure } from '../../core/utils/scoreMapping.ts';
+import { measureTotalBeats } from '../../core/utils/measureUtils.ts';
+import {
+    makeStaffGrid,
+    resolveSlotIndexAtX,
+    tabRowAtY,
+    tabRowY,
+    type StaffAnchor,
+} from '../../core/utils/tabGeometry.ts';
 import { tabScoreToAlphaTabScore } from './scoreAdapter.ts';
-import { handleScoreClick } from './scoreEditing.ts';
+import { handleScoreClick, type TabCellHit } from './scoreEditing.ts';
 
 type AlphaTabModule = typeof import('@coderline/alphatab');
 type AlphaTabBeat = import('@coderline/alphatab').model.Beat;
@@ -30,9 +39,44 @@ interface SimpleBounds {
     h: number;
 }
 
-/** 行(StaffSystem)内的 MasterBar bounds：index 即全局小节号（单轨），realBounds 覆盖整小节含空白 */
+/** BeatBounds 的子集：realBounds 供 x 定位，notes 提供弦行锚点 */
+interface BeatBoundsLike {
+    realBounds: SimpleBounds;
+    beat: AlphaTabBeat;
+    notes?: NoteBoundsLike[] | null;
+    /** 在该拍位内按坐标找音符（优先用本行 bounds，避免命中另一谱表行） */
+    findNoteAtPos?(x: number, y: number): AlphaTabNote | null;
+}
+
+/** NoteBounds 的子集：品位数字中心 y + alphaTab 弦号 */
+interface NoteBoundsLike {
+    noteHeadBounds: SimpleBounds;
+    note: AlphaTabNote;
+}
+
+/** BarBounds 的子集；bar.staff.tuning 给出弦数，showTablature 用于识别六线谱行 */
+interface BarBoundsLike {
+    realBounds: SimpleBounds;
+    beats: BeatBoundsLike[];
+    bar: {
+        staff: {
+            tuning: number[];
+            showTablature: boolean;
+        };
+    };
+}
+
+/** MasterBarBounds：index 即全局小节号（单轨），bars 为各谱表行（scoretab 下六线谱是最后一个） */
+interface MasterBarBoundsLike {
+    index: number;
+    realBounds: SimpleBounds;
+    bars: BarBoundsLike[];
+}
+
+/** 行(StaffSystem)内的 MasterBar bounds */
 interface StaffSystemLike {
-    bars: Array<{ index: number; realBounds: SimpleBounds }>;
+    realBounds: SimpleBounds;
+    bars: MasterBarBoundsLike[];
 }
 
 export class AlphaTabRenderer {
@@ -44,6 +88,12 @@ export class AlphaTabRenderer {
     private unsubscribeRenderFinished: (() => void) | null = null;
     private emptyStateEl: HTMLElement | null = null;
     private highlightEl: HTMLElement | null = null;
+    /** 当前渲染的应用乐谱（只读引用，用于把光标拍偏移与内容总拍数对齐） */
+    private score: TabScore | null = null;
+    /** 只读光标覆盖层：拍位列 + 弦行带 */
+    private editCellEl: HTMLElement | null = null;
+    private editRowEl: HTMLElement | null = null;
+    private editCursor: EditCursor | null = null;
     /** 当前选中的小节号（-1 = 无）；由 scoreStore.selectMeasure → state 调用 setSelectedMeasure 维护 */
     private selectedMeasure = -1;
     /** 谱面显示模式；mount 时套用，切换时即时重渲染（跨 mount 保留） */
@@ -111,22 +161,26 @@ export class AlphaTabRenderer {
             }
         }
         if (!Number.isFinite(minX)) { this.hideHighlight(); return; }
+        const off = this.surfaceOffset();
+        if (!off) { this.hideHighlight(); return; }
 
-        // alphaTab bounds 坐标以 .at-surface 左上角为原点；换算成相对容器的坐标
+        const pad = 3;
+        const el = this.ensureHighlightEl();
+        el.style.left = `${minX + off.offX - pad}px`;
+        el.style.top = `${minY + off.offY - pad}px`;
+        el.style.width = `${maxX - minX + pad * 2}px`;
+        el.style.height = `${maxY - minY + pad * 2}px`;
+        el.style.display = 'block';
+    }
+
+    /** alphaTab bounds 以 .at-surface 左上角为原点；返回相对容器的偏移 */
+    private surfaceOffset(): { offX: number; offY: number } | null {
+        if (!this.container) return null;
         const surface = this.container.querySelector('.at-surface') as HTMLElement | null;
         const base = surface ?? this.container;
         const baseRect = base.getBoundingClientRect();
         const containerRect = this.container.getBoundingClientRect();
-        const offX = baseRect.left - containerRect.left;
-        const offY = baseRect.top - containerRect.top;
-
-        const pad = 3;
-        const el = this.ensureHighlightEl();
-        el.style.left = `${minX + offX - pad}px`;
-        el.style.top = `${minY + offY - pad}px`;
-        el.style.width = `${maxX - minX + pad * 2}px`;
-        el.style.height = `${maxY - minY + pad * 2}px`;
-        el.style.display = 'block';
+        return { offX: baseRect.left - containerRect.left, offY: baseRect.top - containerRect.top };
     }
 
     private ensureHighlightEl(): HTMLElement {
@@ -144,6 +198,249 @@ export class AlphaTabRenderer {
 
     private hideHighlight(): void {
         if (this.highlightEl) this.highlightEl.style.display = 'none';
+    }
+
+    // ============================================================
+    // 只读光标覆盖层
+    // ============================================================
+
+    /** 设置只读光标（null = 隐藏）；不触任何数据变更 */
+    setEditCursor(cursor: EditCursor | null): void {
+        this.editCursor = cursor;
+        if (!this.mounted) return;
+        this.applyEditCursor();
+    }
+
+    /** 按当前光标重画拍位列与弦行带（renderFinished 后也会调用） */
+    private applyEditCursor(): void {
+        const cursor = this.editCursor;
+        const lookup = this.boundsLookup;
+        if (!cursor || !lookup || !this.container) { this.hideEditCursor(); return; }
+
+        const mb = this.findMasterBarBounds(cursor.measureIndex);
+        const tabBar = mb ? this.findTabBar(mb) : null;
+        const off = this.surfaceOffset();
+        if (!mb || !tabBar || !off) { this.hideEditCursor(); return; }
+
+        const barBounds = tabBar.realBounds;
+        const stringCount = tabBar.bar.staff.tuning.length;
+
+        // 拍位列：有对应 beat 用其 realBounds；小节尾画在右端
+        let columnX = barBounds.x;
+        let columnW = 12;
+        let foundBeat: BeatBoundsLike | null = null;
+        for (const bb of tabBar.beats) {
+            if (Math.abs(beatOffsetInMeasure(bb.beat) - cursor.beatOffset) < 1e-6) {
+                foundBeat = bb;
+                break;
+            }
+        }
+        if (foundBeat) {
+            const index = tabBar.beats.indexOf(foundBeat);
+            columnX = foundBeat.realBounds.x;
+            // 列宽取到下一拍起点，最后一拍画到小节右端（beat 的 realBounds 只有音符字形宽）
+            const nextX = index >= 0 && index + 1 < tabBar.beats.length
+                ? tabBar.beats[index + 1].realBounds.x
+                : barBounds.x + barBounds.w;
+            columnW = Math.max(nextX - columnX, 4);
+        } else {
+            // 没匹配到渲染 beat 时，只有「小节尾」可以画在右端；
+            // 其它偏移说明光标与当前渲染错位，宁可不画也不画到错误位置。
+            const measure = this.score?.measures[cursor.measureIndex];
+            const total = measure ? measureTotalBeats(measure) : NaN;
+            if (!Number.isFinite(total) || Math.abs(cursor.beatOffset - total) > 1e-6) {
+                this.hideEditCursor();
+                return;
+            }
+            columnW = Math.min(16, Math.max(6, barBounds.w * 0.06));
+            columnX = barBounds.x + barBounds.w - columnW;
+        }
+
+        const cell = this.ensureEditEl('cell');
+        cell.style.left = `${columnX + off.offX}px`;
+        cell.style.top = `${barBounds.y + off.offY}px`;
+        cell.style.width = `${columnW}px`;
+        cell.style.height = `${barBounds.h}px`;
+        cell.style.display = 'block';
+
+        // 弦行带：用该谱表行的音符品位中心拟合行距；几何不可用时只画列
+        if (stringCount >= 2 && barBounds.h > 0) {
+            const grid = makeStaffGrid({
+                anchors: this.collectStaffAnchors(tabBar, stringCount),
+                fallbackTopY: barBounds.y,
+                fallbackRowSpacing: barBounds.h / (stringCount - 1),
+                stringCount,
+            });
+            const rowAlphaString = appStringToTabRow(cursor.string, stringCount);
+            const rowY = tabRowY(grid, rowAlphaString);
+            const spacing = grid.rowSpacing > 0 ? grid.rowSpacing : barBounds.h / (stringCount - 1);
+            const rowH = Math.max(4, spacing * 0.7);
+            const row = this.ensureEditEl('row');
+            row.style.left = `${columnX + off.offX}px`;
+            row.style.top = `${rowY + off.offY - rowH / 2}px`;
+            row.style.width = `${columnW}px`;
+            row.style.height = `${rowH}px`;
+            row.style.display = 'block';
+        } else if (this.editRowEl) {
+            this.editRowEl.style.display = 'none';
+        }
+    }
+
+    /** 收集谱表行内所有音符品位数字中心，作为行距拟合锚点 */
+    private collectStaffAnchors(bar: BarBoundsLike, stringCount: number): StaffAnchor[] {
+        const anchors: StaffAnchor[] = [];
+        for (const bb of bar.beats) {
+            for (const nb of bb.notes ?? []) {
+                const row: number | undefined = nb.note?.string;
+                if (row === undefined || row < 1 || row > stringCount) continue;
+                const b = nb.noteHeadBounds;
+                if (!b) continue;
+                anchors.push({ y: b.y + b.h / 2, row });
+            }
+        }
+        return anchors;
+    }
+
+    private ensureEditEl(kind: 'cell' | 'row'): HTMLElement {
+        const get = (): HTMLElement | null => kind === 'cell' ? this.editCellEl : this.editRowEl;
+        const set = (el: HTMLElement | null): void => {
+            if (kind === 'cell') this.editCellEl = el;
+            else this.editRowEl = el;
+        };
+        // alphaTab 每次 load 可能重建内部 DOM，覆盖层被移除时重新创建
+        const existing = get();
+        if (existing && !existing.isConnected) set(null);
+        if (!get() && this.container) {
+            const el = document.createElement('div');
+            el.className = kind === 'cell' ? 'at-edit-cell' : 'at-edit-row';
+            el.style.display = 'none';
+            this.container.appendChild(el);
+            set(el);
+        }
+        return get() as HTMLElement;
+    }
+
+    private hideEditCursor(): void {
+        if (this.editCellEl) this.editCellEl.style.display = 'none';
+        if (this.editRowEl) this.editRowEl.style.display = 'none';
+    }
+
+    /** boundsLookup 中按全局小节号找 MasterBarBounds（单轨单谱表） */
+    private findMasterBarBounds(index: number): MasterBarBoundsLike | null {
+        for (const system of this.boundsLookup?.staffSystems ?? []) {
+            for (const mb of system.bars) {
+                if (mb.index === index) return mb;
+            }
+        }
+        return null;
+    }
+
+    /** 取 MasterBar 内的六线谱行：优先按 showTablature 识别，末行排序为兜底（scoretab 下六线谱通常最后） */
+    private findTabBar(mb: MasterBarBoundsLike): BarBoundsLike | null {
+        for (let i = mb.bars.length - 1; i >= 0; i--) {
+            const bar = mb.bars[i];
+            const staff = bar.bar?.staff;
+            if (!staff?.showTablature || !(staff.tuning?.length > 1)) continue;
+            return bar;
+        }
+        return null;
+    }
+
+    // ============================================================
+    // 点击命中
+    // ============================================================
+
+    /**
+     * 客户端坐标 → 六线谱单元（小节 × 拍位 × 弦）。
+     *
+     * 落在五线谱区域、几何不可用或容差外时返回 null，调用方回落到旧的 beat/note 命中。
+     */
+    hitTestTabCell(clientX: number, clientY: number): TabCellHit | null {
+        const lookup = this.boundsLookup;
+        if (!lookup || !this.container) return null;
+        const local = this.toLocal(clientX, clientY);
+        if (!local) return null;
+        const { x, y } = local;
+
+        const system = (lookup.staffSystems ?? []).find(s => {
+            const b = s.realBounds;
+            return b && y >= b.y && y <= b.y + b.h;
+        });
+        if (!system) return null;
+
+        const mb = system.bars.find(b => x >= b.realBounds.x && x <= b.realBounds.x + b.realBounds.w);
+        if (!mb) return null;
+
+        const tabBar = this.findTabBar(mb);
+        if (!tabBar) return null;
+
+        // scoretab 模式下点在五线谱行：不接管，交给旧点击路径
+        const rb = tabBar.realBounds;
+
+        const stringCount = tabBar.bar.staff.tuning.length;
+        if (!Number.isFinite(stringCount) || stringCount < 2) return null;
+
+        // 拟合弦行网格（点击命中与覆盖层共用同一份行距）
+        const grid = makeStaffGrid({
+            anchors: this.collectStaffAnchors(tabBar, stringCount),
+            fallbackTopY: rb.y,
+            fallbackRowSpacing: rb.h / (stringCount - 1),
+            stringCount,
+        });
+
+        // y 范围用拟合网格的行距：首线以上/末线以下各允许半行。
+        // 品位数字字形比谱线高，固定 ±2px 会把数字上半/下半误判成谱外。
+        const halfRow = grid.rowSpacing > 0 ? grid.rowSpacing / 2 : 0;
+        const topLineY = tabRowY(grid, stringCount);
+        const bottomLineY = tabRowY(grid, 1);
+        if (y < topLineY - halfRow || y > bottomLineY + halfRow) return null;
+
+        const beats = tabBar.beats.map(bb => ({ x: bb.realBounds.x, width: bb.realBounds.w }));
+        const slot = resolveSlotIndexAtX(x, beats, { x: rb.x, width: rb.w });
+        if (!slot) return null;
+
+        // 该拍位的模型 beat（小节尾没有 beat）；点击行仍由网格反查
+        const hitBeat = slot.kind === 'slot' ? (tabBar.beats[slot.index]?.beat ?? null) : null;
+        const row = tabRowAtY(grid, y);
+
+        // 先看是否点中该拍位的已有音符（弦号以 note.string 为准，修正行取整误差）。
+        // 品位数字的 noteHeadBounds 很小，点偏一点就会 miss；此时用「拍位 + 点击行」
+        // 直接命中模型音符，保证拾取到的弦品与点到的音符一致。
+        let hitNote: AlphaTabNote | null = null;
+        if (slot.kind === 'slot') {
+            const bb = tabBar.beats[slot.index];
+            if (bb) {
+                hitNote = bb.findNoteAtPos ? bb.findNoteAtPos(x, y) : lookup.getNoteAtPos(bb.beat, x, y);
+                if (!hitNote && row !== null) {
+                    hitNote = (bb.beat.notes ?? []).find(n => n.string === row) ?? null;
+                }
+            }
+        }
+
+        let alphaString: number;
+        if (hitNote && hitNote.string >= 1 && hitNote.string <= stringCount) {
+            alphaString = hitNote.string;
+        } else {
+            if (row === null) return null; // 容差外：不定位弦（旧路径接手）
+            alphaString = row;
+        }
+
+        return {
+            measureIndex: mb.index,
+            beatIndex: slot.kind === 'slot' ? slot.index : null,
+            alphaString,
+            note: hitNote,
+            beat: hitBeat,
+        };
+    }
+
+    /** 客户端坐标 → alphaTab surface 内部坐标 */
+    private toLocal(clientX: number, clientY: number): { x: number; y: number } | null {
+        if (!this.container) return null;
+        const surface = this.container.querySelector('.at-surface') as HTMLElement | null;
+        const el = surface ?? this.container;
+        const rect = el.getBoundingClientRect();
+        return { x: clientX - rect.left, y: clientY - rect.top };
     }
 
     /** 是否已就绪（可渲染） */
@@ -183,6 +480,7 @@ export class AlphaTabRenderer {
         this.unsubscribeRenderFinished = this.api.renderFinished.on(() => {
             this.boundsLookup = this.api?.renderer.boundsLookup ?? null;
             this.applySelectionHighlight();
+            this.applyEditCursor();
         });
         container.addEventListener('click', this.onClickBound);
 
@@ -191,27 +489,28 @@ export class AlphaTabRenderer {
             (window as unknown as Record<string, unknown>).__tabForgeAlphaTabDebug = {
                 hitTest: (clientX: number, clientY: number) =>
                     this.onContainerClick({ clientX, clientY } as MouseEvent),
+                hitTestCell: (clientX: number, clientY: number) =>
+                    this.hitTestTabCell(clientX, clientY),
                 getBounds: () => this.boundsLookup,
             };
         }
     }
 
-    /** 容器点击 → 命中拍/音符 → 交给 scoreEditing */
+    /** 容器点击 → 命中拍/音符 + 六线谱单元 → 交给 scoreEditing */
     private onContainerClick(e: MouseEvent): void {
         if (!this.api || !this.boundsLookup || !this.container) return;
-        const surface = this.container.querySelector('.at-surface') as HTMLElement | null;
-        const el = surface ?? this.container;
-        const rect = el.getBoundingClientRect();
-        const x = e.clientX - rect.left; // 与 alphaTab 内部坐标一致
-        const y = e.clientY - rect.top;
-        const beat = this.boundsLookup.getBeatAtPos(x, y);
-        const note = beat ? this.boundsLookup.getNoteAtPos(beat, x, y) : null;
-        handleScoreClick({ beat, note });
+        const local = this.toLocal(e.clientX, e.clientY);
+        if (!local) return;
+        const beat = this.boundsLookup.getBeatAtPos(local.x, local.y);
+        const note = beat ? this.boundsLookup.getNoteAtPos(beat, local.x, local.y) : null;
+        const cell = this.hitTestTabCell(e.clientX, e.clientY);
+        handleScoreClick({ beat, note, cell });
     }
 
     /** 渲染当前谱面（load 后由 alphaTab 异步渲染） */
     render(score: TabScore): void {
         if (!this.api || !this.mod) return;
+        this.score = score;
         if (score.measures.length === 0) {
             // 空谱（如清空）：隐藏 alphaTab 面（不 remove，避免脱离 DOM 导致后续白屏），显示空状态
             if (!this.emptyStateEl || !this.container?.contains(this.emptyStateEl)) {
@@ -243,6 +542,10 @@ export class AlphaTabRenderer {
         this.mod = null;
         this.mounted = false;
         this.highlightEl = null;
+        this.editCellEl = null;
+        this.editRowEl = null;
+        this.editCursor = null;
+        this.score = null;
         this.selectedMeasure = -1;
         if (this.container) {
             this.container.innerHTML = '';

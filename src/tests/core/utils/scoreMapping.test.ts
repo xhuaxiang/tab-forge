@@ -16,6 +16,8 @@ import { describe, it, expect } from 'vitest';
 import { model } from '@coderline/alphatab';
 import {
     alphaStringToAppString,
+    tabRowToAppString,
+    appStringToTabRow,
     alphaDurationToAppDuration,
     alphaDurationToWholeNote,
     beatOffsetInMeasure,
@@ -37,6 +39,48 @@ function voiceWith(durations: model.Duration[]): model.Voice {
     }
     return voice;
 }
+
+describe('tabRowToAppString / appStringToTabRow', () => {
+    it('六弦与 alphaStringToAppString 完全一致（共用 flipStringNumber）', () => {
+        for (let row = 1; row <= 6; row++) {
+            expect(tabRowToAppString(row, 6)).toBe(alphaStringToAppString(row));
+        }
+        for (let s = 1; s <= 6; s++) {
+            expect(appStringToTabRow(s, 6)).toBe(alphaStringToAppString(s));
+        }
+    });
+
+    it('六弦双向往返', () => {
+        for (let s = 1; s <= 6; s++) {
+            expect(tabRowToAppString(appStringToTabRow(s, 6), 6)).toBe(s);
+        }
+    });
+
+    it('非六弦按 stringCount + 1 - n 推广', () => {
+        expect(tabRowToAppString(1, 7)).toBe(7);
+        expect(tabRowToAppString(7, 7)).toBe(1);
+        expect(appStringToTabRow(1, 7)).toBe(7);
+        expect(appStringToTabRow(7, 7)).toBe(1);
+    });
+
+    it('4 / 7 / 8 弦全表双向往返', () => {
+        for (const count of [4, 7, 8]) {
+            for (let n = 1; n <= count; n++) {
+                expect(tabRowToAppString(n, count), `count=${count} n=${n}`).toBe(count + 1 - n);
+                expect(appStringToTabRow(n, count), `count=${count} n=${n}`).toBe(count + 1 - n);
+                expect(tabRowToAppString(appStringToTabRow(n, count), count)).toBe(n);
+                expect(appStringToTabRow(tabRowToAppString(n, count), count)).toBe(n);
+            }
+        }
+    });
+
+    it('六弦与七弦的差异只在 stringCount：行 1 分别映射到 6 / 7', () => {
+        expect(tabRowToAppString(1, 6)).toBe(6);
+        expect(tabRowToAppString(1, 7)).toBe(7);
+        expect(appStringToTabRow(6, 6)).toBe(1);
+        expect(appStringToTabRow(6, 7)).toBe(2);
+    });
+});
 
 describe('alphaStringToAppString', () => {
     it('六根弦全表：alphaTab 1↔6 反向映射（1=最低弦 → 应用 1=高音 E）', () => {

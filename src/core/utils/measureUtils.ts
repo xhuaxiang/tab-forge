@@ -86,6 +86,71 @@ export function measureTotalBeats(measure: Measure): number {
     return total;
 }
 
+/**
+ * 每个拍位组的起始拍偏移（全音符 = 1）。
+ *
+ * 复用 `forEachSlotGroup` 的分组规则，下标与 `groupNotes` / alphaTab beat 顺序一致。
+ * 空小节返回空数组。
+ */
+export function slotStartOffsets(measure: Measure): number[] {
+    const starts: number[] = [];
+    let acc = 0;
+    forEachSlotGroup(measure, (_start, notes) => {
+        starts.push(acc);
+        acc += notes[0].duration;
+    });
+    return starts;
+}
+
+/**
+ * 光标拍位读数（HUD 用）。
+ *
+ * - 空小节（没有任何 slot）→ `空小节`
+ * - 拍偏移等于/接近内容总拍数（含非有限值）→ `小节尾`
+ * - 落在某个 slot 起点或内部 → `拍位 N`（N 为 slot 序号，1 起）
+ *
+ * 用「拍位」而非「第 N 拍」：时值不均时 slot 序号不等于传统拍号语义，
+ * 这里表达的是「第 N 个拍位」。
+ */
+export function cursorBeatLabel(measure: Measure, beatOffset: number): string {
+    const EPS = 1e-6;
+    const starts = slotStartOffsets(measure);
+    if (starts.length === 0) return '空小节';
+
+    const total = measureTotalBeats(measure);
+    // 非有限偏移无法落位，统一按小节尾处理（保证读数确定）
+    if (!Number.isFinite(beatOffset)) return '小节尾';
+    if (beatOffset >= total - EPS) return '小节尾';
+
+    let index = -1;
+    for (let i = 0; i < starts.length; i++) {
+        if (Math.abs(starts[i] - beatOffset) < EPS) {
+            index = i;
+            break;
+        }
+        if (starts[i] <= beatOffset + EPS) index = i;
+    }
+    if (index < 0) index = 0;
+    return `拍位 ${index + 1}`;
+}
+
+/**
+ * alphaTab beat 下标 → 应用拍偏移（全音符 = 1）。
+ *
+ * - null（小节尾）→ 该小节内容总拍数 `measureTotalBeats`
+ * - 空小节的下标 0 → 0（alphaTab 用全音符休止渲染空小节，与应用 slot 0 对应）
+ * - 合法下标 → 对应 slot 起点
+ * - 其余（负数 / 越界 / 非整数）→ null，调用方不应据此设光标
+ */
+export function beatIndexToOffset(measure: Measure, beatIndex: number | null): number | null {
+    if (beatIndex === null) return measureTotalBeats(measure);
+
+    const starts = slotStartOffsets(measure);
+    if (starts.length === 0) return beatIndex === 0 ? 0 : null;
+    if (!Number.isInteger(beatIndex) || beatIndex < 0 || beatIndex >= starts.length) return null;
+    return starts[beatIndex];
+}
+
 /** 小节容量（以全音符为 1 的拍数），如 4/4 → 1、6/8 → 0.75 */
 export function measureCapacity(measure: Measure): number {
     return measure.timeSignatureNumerator / measure.timeSignatureDenominator;

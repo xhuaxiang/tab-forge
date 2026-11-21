@@ -41,7 +41,8 @@ export function noteNameToMidi(noteName: string): number {
 /**
  * 弦号互换：应用 1=高音E(最顶线)..6=低音E ↔ alphaTab 1=最底弦。
  *
- * 两个方向是**同一个自逆变换**（7 - n），共用这一份实现；
+ * 当前应用按 6 弦吉他建模，所以固定为自逆变换 `7 - n`；多弦支持是另一项扩展。
+ * 两个方向是**同一个自逆变换**，共用这一份实现；
  * 下面两个导出名只是为了在调用处读出方向，别再各写一遍公式。
  */
 export function flipStringNumber(n: number): number {
@@ -53,6 +54,22 @@ export const alphaStringToAppString = flipStringNumber;
 
 /** 应用弦号 → alphaTab 弦号 */
 export const appStringToAlphaString = flipStringNumber;
+
+/**
+ * 六线谱行号（alphaTab 弦号口径：1 = 最底弦）→ 应用弦号。
+ *
+ * 与 `alphaStringToAppString` 是同一自逆换算，只是调用处用「行」命名更贴切。
+ * 通用式 `stringCount + 1 - row` 在 `stringCount === 6` 时与 `flipStringNumber`
+ * 完全等价，因此只保留这一份实现。
+ */
+export function tabRowToAppString(row: number, stringCount: number): number {
+    return stringCount + 1 - row;
+}
+
+/** 应用弦号 → 六线谱行号（alphaTab 弦号口径） */
+export function appStringToTabRow(string: number, stringCount: number): number {
+    return stringCount + 1 - string;
+}
 
 // ============================================================
 // 时值（双向）

@@ -18,6 +18,7 @@ import { $, setStatus, getSearchSelectValue, getSearchSelectValues, writeSearchS
 import { alphaStringToAppString, alphaDurationToAppDuration, beatOffsetInMeasure, detectTechnique, detectArticulations, normalizeHarmonicFret, type DetectedArticulations } from '../../core/utils/scoreMapping.ts';
 import type { AppTechnique } from '../../core/types/index.ts';
 import { durationName } from '../../core/utils/duration.ts';
+import { beatIndexToOffset } from '../../core/utils/measureUtils.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 import { buildNoteGroup, nextChordGroupId, type NoteGroupBase } from '../../core/utils/noteGroup.ts';
 import { followTargetFret, isConnectingTechnique, resolveSoundingFret } from '../../core/utils/technique.ts';
@@ -27,6 +28,23 @@ export type { AppTechnique } from '../../core/types/index.ts';
 export interface ScoreClickHit {
     beat: model.Beat | null;
     note: model.Note | null;
+    /** 渲染器给出的六线谱单元（五线谱区域/几何不可用时为 null） */
+    cell?: TabCellHit | null;
+}
+
+/**
+ * 六线谱单元命中结果（渲染器 → scoreEditing 的结构契约）。
+ *
+ * `beatIndex` 为 alphaTab beat 下标（与应用 slot 顺序一致）；null = 小节尾。
+ * `alphaString` 为 alphaTab 弦号（1 = 最底弦）。
+ */
+export interface TabCellHit {
+    measureIndex: number;
+    beatIndex: number | null;
+    alphaString: number;
+    note: model.Note | null;
+    /** 该拍位的模型 beat（小节尾为 null）；全局 beat 命中失败时用它补时值 */
+    beat?: model.Beat | null;
 }
 
 // ============================================================
@@ -335,6 +353,7 @@ export function applyEditTarget(): void {
         return;
     }
     clearEditTarget();
+    scoreStore.setEditCursor(null);
     setStatus(`已修改: 小节${t.measureIndex + 1} · 第${note.string}弦 ${note.fret}品`, 'success');
 }
 
@@ -351,6 +370,7 @@ export function muteEditTarget(): void {
         return;
     }
     clearEditTarget();
+    scoreStore.setEditCursor(null);
     setStatus(`已删除（休止）: 小节${t.measureIndex + 1} · 第${t.string}弦`, 'success');
 }
 
@@ -386,10 +406,62 @@ function renderEditUI(): void {
 // 点击入口
 // ============================================================
 
+/**
+ * 渲染器命中的六线谱单元 → scoreStore.editCursor。
+ *
+ * 拍偏移取该 slot 的起点；小节尾用 measureTotalBeats。弦号优先取点中音符的
+ * alphaTab 弦号（修正行反查的取整误差），否则用几何反查结果。
+ *
+ * @returns 是否成功设置光标。下标失配（`beatIndexToOffset` 返回 null）或弦号
+ *          不在 1..6 时返回 false，调用方继续走旧的选中/命中路径。
+ */
+function applyCellCursor(cell: TabCellHit): boolean {
+    const measure = scoreStore.score.measures[cell.measureIndex];
+    if (!measure) return false;
+    const beatOffset = beatIndexToOffset(measure, cell.beatIndex);
+    if (beatOffset === null) return false; // 下标与 slot 失配：不猜落点，交给旧路径
+    const alphaString = cell.note?.string ?? cell.alphaString;
+    const string = alphaStringToAppString(alphaString);
+    if (string < 1 || string > 6) return false;
+    scoreStore.setEditCursor({ measureIndex: cell.measureIndex, beatOffset, string });
+    return true;
+}
+
+/**
+ * 空白单元定位成功后，把表单同步为该单元：弦号设为光标弦（单弦语义），
+ * 品归零（空弦）。空白单元没有音符，品没有可同步的来源；归零避免沿用
+ * 上一个音符的品，导致下一次写入误带旧值。targetFret 是 H/P/S 的目标品，
+ * 由技法逻辑维护，此处不动。
+ */
+function syncFormFromCursor(): void {
+    const cursor = scoreStore.editCursor;
+    if (!cursor) return;
+    setSearchSelectValue('stringSelect', cursor.string);
+    setSearchSelectValue('fretSelect', 0);
+}
+
 export function handleScoreClick(hit: ScoreClickHit): void {
-    const { beat, note } = hit;
+    const cell = hit.cell ?? null;
+    // alphaTab 的全局 beat/note 命中依赖光标坐标，音符头很小时会落空。
+    // 单元命中已按几何行反查到模型音符：以它为兜底，保证点到已有音符时
+    // 弦、品与表单完全同步，而不是误判成空白单元把品归零。
+    const beat = hit.beat ?? cell?.beat ?? null;
+    const note = hit.note ?? cell?.note ?? null;
+    // 只读光标是附加能力：先定位，再走原有音符/插入分支。
+    // setEditCursor 会同步 selectedMeasure，后续不要在 cell 路径再 selectMeasure：
+    // 既会重复通知，也可能因小节号不一致把刚设的光标清掉。
+    const cursorApplied = cell ? applyCellCursor(cell) : false;
+
     if (!beat) {
-        // 点完全没有内容的空白处 → 取消选中，并清掉编辑/插入态
+        if (cell) {
+            // 点到小节尾等无 beat 的空白：光标已由 applyCellCursor 尝试定位
+            // （下标失配时不设，保留原状态），这里只收起编辑/插入态。
+            if (cursorApplied) syncFormFromCursor();
+            clearEditTarget();
+            clearInsertTarget();
+            return;
+        }
+        // 点完全没有内容的空白处 → 取消选中；selectMeasure(null) 同时清掉光标
         scoreStore.selectMeasure(null);
         clearEditTarget();
         clearInsertTarget();
@@ -397,8 +469,8 @@ export function handleScoreClick(hit: ScoreClickHit): void {
         return;
     }
     const measureIndex = beat.voice.bar.index;
-    // 点哪个小节就选中哪个小节（供表单追加与高亮联动）
-    scoreStore.selectMeasure(measureIndex);
+    // 没有成功定位光标时才用选中动作兜底（点哪个小节就选中哪个小节）
+    if (!cursorApplied) scoreStore.selectMeasure(measureIndex);
 
     if (note) {
         // 点已有音符 → 载入并进入原位编辑（不自动插入）
@@ -407,10 +479,16 @@ export function handleScoreClick(hit: ScoreClickHit): void {
         setEditTargetFromNote(note, beat, measureIndex);
         return;
     }
-    // 点空白拍 → 仅定位「插入点」，确认后才写入，避免自动沿用上一个音符的数据
+    // 点空白拍 → 仅定位「插入点」，确认后才写入，避免自动沿用上一个音符的数据。
+    // 落点优先取六线谱单元的下标（小节尾 = measureTotalBeats），保证与光标一致；
+    // 没有 cell 时才回落到旧 beat 的拍偏移。
+    const measure = scoreStore.score.measures[measureIndex];
+    const cellOffset = cell && measure ? beatIndexToOffset(measure, cell.beatIndex) : null;
+    // 弦跟随光标所在弦；空白单元没有音符，品归零（空弦）。
+    if (cursorApplied) syncFormFromCursor();
     clearEditTarget();
     clearInsertTarget();
-    armInsertTarget(beat);
+    armInsertTarget(measureIndex, cellOffset ?? beatOffsetInMeasure(beat));
 }
 
 /** 由点中的 alphaTab 音符反查应用数据下标，记录为编辑目标 */
@@ -463,15 +541,19 @@ interface InsertTarget {
 
 let insertTarget: InsertTarget | null = null;
 
-/** 定位插入目标（不写谱） */
-function armInsertTarget(beat: model.Beat): void {
-    const measureIndex = beat.voice.bar.index;
+/**
+ * 定位插入目标（不写谱）。
+ *
+ * `beatOffset` 由调用方给出（cell 下标换算或 beat 拍偏移），小节尾传
+ * `measureTotalBeats`；`insertNotesAt` 对本节尾/已满小节只会安全地拒绝写入。
+ */
+function armInsertTarget(measureIndex: number, beatOffset: number): void {
     const measure = scoreStore.score.measures[measureIndex];
     if (!measure) {
         setStatus('小节不存在', 'error');
         return;
     }
-    insertTarget = { measureIndex, beatOffset: beatOffsetInMeasure(beat) };
+    insertTarget = { measureIndex, beatOffset };
     renderInsertUI();
     setStatus(`已定位插入点: 小节${measureIndex + 1} · 表单设好后点「✓ 写入此拍」`, 'info');
 }
@@ -494,6 +576,7 @@ export function writeInsertTarget(): void {
         return;
     }
     clearInsertTarget();
+    scoreStore.setEditCursor(null);
     const stringList = built.notes.map(n => n.string ?? 1).join(',');
     setStatus(`已写入: 小节${t.measureIndex + 1} · 第${stringList}弦 ${built.notes[0].fret}品`, 'success');
 }

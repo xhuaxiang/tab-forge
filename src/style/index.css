@@ -382,6 +382,27 @@ body {
     background:rgba(247,151,30,0.14); border:1px solid rgba(247,151,30,0.75); border-radius:4px;
 }
 
+/* ===== alphaTab 只读光标（拍位列 + 弦行带） ===== */
+.at-edit-cell {
+    position:absolute; pointer-events:none; z-index:6;
+    background:rgba(96,165,250,0.16);
+    border-left:1px solid rgba(96,165,250,0.75);
+    border-right:1px solid rgba(96,165,250,0.55);
+    border-radius:3px;
+}
+.at-edit-row {
+    position:absolute; pointer-events:none; z-index:7;
+    background:rgba(96,165,250,0.34);
+    border:1px solid rgba(96,165,250,0.85);
+    border-radius:3px;
+}
+.score-edit-hud {
+    margin-top:4px; min-height:16px;
+    font-size:11px; color:var(--text-secondary); font-family:var(--font-mono);
+    transition:color .15s ease;
+}
+.score-edit-hud.active { color:var(--accent-primary); }
+
 /* ===== 原位编辑音符（应用修改/删除该拍）===== */
 .note-edit-bar {
     display:flex; align-items:center; gap:4px; margin-top:6px; flex-wrap:wrap;

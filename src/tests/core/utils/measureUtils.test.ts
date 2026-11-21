@@ -11,6 +11,9 @@ import { forEachSlot, measureTotalBeats, measureCapacity, canAddToMeasure, locat
 import {
     forEachSlotGroup,
     createEmptyMeasure,
+    slotStartOffsets,
+    cursorBeatLabel,
+    beatIndexToOffset,
 } from '../../../core/utils/measureUtils.ts';
 
 function note(partial: Partial<Note> & { duration: Note['duration'] }): Note {
@@ -131,6 +134,159 @@ describe('locateSlotAt', () => {
         const loc = locateSlotAt(m, 0.125 + 0.125);
         expect(loc.kind).toBe('slot');
         if (loc.kind === 'slot') expect(loc.index).toBe(2);
+    });
+});
+
+describe('slotStartOffsets', () => {
+    it('单音逐拍累计', () => {
+        expect(slotStartOffsets(measure(quarters(3)))).toEqual([0, 0.25, 0.5]);
+    });
+
+    it('休止 slot 也占一拍', () => {
+        const m = measure([
+            { isRest: true, duration: 0.25 } as Note,
+            note({ duration: 0.5 }),
+        ]);
+        expect(slotStartOffsets(m)).toEqual([0, 0.25]);
+    });
+
+    it('和弦组只累计一次时值', () => {
+        const m = measure([
+            note({ duration: 0.25, chordGroup: 1 }),
+            note({ duration: 0.25, chordGroup: 1, string: 2 }),
+            note({ duration: 0.25, chordGroup: 2, string: 3 }),
+            note({ duration: 0.25, chordGroup: 2, string: 4 }),
+        ]);
+        expect(slotStartOffsets(m)).toEqual([0, 0.25]);
+    });
+
+    it('空小节返回空数组', () => {
+        expect(slotStartOffsets(measure([]))).toEqual([]);
+    });
+
+    it('时值不均的 slot 序列逐拍累计，末个起点 + 时值 = 总拍数', () => {
+        const m = measure([
+            note({ duration: 0.5 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.25 }),
+        ]);
+        const starts = slotStartOffsets(m);
+        expect(starts).toEqual([0, 0.5, 0.625]);
+        expect(starts[starts.length - 1] + 0.25).toBeCloseTo(measureTotalBeats(m), 10);
+    });
+
+    it('单个 slot → [0]', () => {
+        expect(slotStartOffsets(measure([note({ duration: 1 })]))).toEqual([0]);
+    });
+
+    it('非相邻的同 chordGroup 不合并，各自累计时值', () => {
+        const m = measure([
+            note({ duration: 0.25, chordGroup: 1 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25, chordGroup: 1 }),
+        ]);
+        expect(slotStartOffsets(m)).toEqual([0, 0.25, 0.5]);
+    });
+});
+
+describe('cursorBeatLabel', () => {
+    it('slot 序号 1 起，读数用「拍位」而非传统拍数', () => {
+        const m = measure([note({ duration: 0.5 }), note({ duration: 0.25 })]);
+        expect(cursorBeatLabel(m, 0)).toBe('拍位 1');
+        expect(cursorBeatLabel(m, 0.25)).toBe('拍位 1');
+        expect(cursorBeatLabel(m, 0.5)).toBe('拍位 2');
+    });
+
+    it('小节尾（总拍数处）显示「小节尾」', () => {
+        const m = measure(quarters(4));
+        expect(cursorBeatLabel(m, 1)).toBe('小节尾');
+    });
+
+    it('空小节（无 slot）显示「空小节」', () => {
+        expect(cursorBeatLabel(measure([]), 0)).toBe('空小节');
+    });
+
+    it('负偏移归到第一个拍位', () => {
+        expect(cursorBeatLabel(measure(quarters(2)), -0.1)).toBe('拍位 1');
+    });
+
+    it('超过总拍数、或落在总拍数 EPS 内 → 小节尾', () => {
+        const m = measure(quarters(4)); // 总拍数 1
+        expect(cursorBeatLabel(m, 1.5)).toBe('小节尾');
+        expect(cursorBeatLabel(m, 1 - 0.5e-6)).toBe('小节尾');
+        // 偏离超过 EPS 时仍归到最后一个拍位
+        expect(cursorBeatLabel(m, 1 - 2e-6)).toBe('拍位 4');
+    });
+
+    it('时值不均时，落在跨拍 slot 内部归其起点所在的拍位', () => {
+        const m = measure([
+            note({ duration: 0.5 }),
+            note({ duration: 0.25 }),
+            note({ duration: 0.25 }),
+        ]);
+        expect(cursorBeatLabel(m, 0.25)).toBe('拍位 1');
+        expect(cursorBeatLabel(m, 0.625)).toBe('拍位 2');
+    });
+
+    it('slot 起点附近浮点误差内仍命中该拍位', () => {
+        const m = measure([
+            note({ duration: 0.125 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.25 }),
+        ]);
+        expect(cursorBeatLabel(m, 0.125 + 1e-7)).toBe('拍位 2');
+    });
+
+    it('空小节任意偏移（含非有限值）均为「空小节」', () => {
+        const m = measure([]);
+        expect(cursorBeatLabel(m, 0)).toBe('空小节');
+        expect(cursorBeatLabel(m, 0.5)).toBe('空小节');
+        expect(cursorBeatLabel(m, NaN)).toBe('空小节');
+        expect(cursorBeatLabel(m, Infinity)).toBe('空小节');
+    });
+
+    it('非有限偏移在有内容小节中确定性返回「小节尾」', () => {
+        const m = measure(quarters(4));
+        expect(cursorBeatLabel(m, Infinity)).toBe('小节尾');
+        expect(cursorBeatLabel(m, -Infinity)).toBe('小节尾');
+        expect(cursorBeatLabel(m, NaN)).toBe('小节尾');
+    });
+});
+
+describe('beatIndexToOffset', () => {
+    it('null（小节尾）→ 内容总拍数', () => {
+        expect(beatIndexToOffset(measure(quarters(3)), null)).toBeCloseTo(0.75, 10);
+        expect(beatIndexToOffset(measure([]), null)).toBe(0);
+    });
+
+    it('合法下标 → 对应 slot 起点', () => {
+        const m = measure([
+            note({ duration: 0.5 }),
+            note({ duration: 0.125 }),
+            note({ duration: 0.25 }),
+        ]);
+        expect(beatIndexToOffset(m, 0)).toBe(0);
+        expect(beatIndexToOffset(m, 1)).toBe(0.5);
+        expect(beatIndexToOffset(m, 2)).toBeCloseTo(0.625, 10);
+    });
+
+    it('空小节的下标 0 → 0（alphaTab 的全音符休止对应 slot 0）', () => {
+        expect(beatIndexToOffset(measure([]), 0)).toBe(0);
+    });
+
+    it('空小节的非 0 下标 → null', () => {
+        expect(beatIndexToOffset(measure([]), 1)).toBeNull();
+        expect(beatIndexToOffset(measure([]), -1)).toBeNull();
+    });
+
+    it('越界 / 负数 / 非整数 / 非有限下标 → null', () => {
+        const m = measure(quarters(2));
+        expect(beatIndexToOffset(m, 2)).toBeNull();
+        expect(beatIndexToOffset(m, -1)).toBeNull();
+        expect(beatIndexToOffset(m, 0.5)).toBeNull();
+        expect(beatIndexToOffset(m, NaN)).toBeNull();
+        expect(beatIndexToOffset(m, Infinity)).toBeNull();
+        expect(beatIndexToOffset(m, -Infinity)).toBeNull();
     });
 });
 

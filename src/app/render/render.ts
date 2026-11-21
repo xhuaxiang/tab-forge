@@ -11,6 +11,7 @@ import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { DEFAULT_DISPLAY_MODE, isDisplayMode, type DisplayMode } from '../../core/config.ts';
 import { $ } from '../dom.ts';
 import { syncMeasureNav } from './measureNav.ts';
+import { renderEditHud } from './editHud.ts';
 // 仅类型导入：避免把 alphaTab 核心拖进主 bundle（运行时按需动态 import）
 import type { AlphaTabRenderer } from '../../features/alphaTab/alphaTabRenderer.ts';
 
@@ -47,8 +48,10 @@ export function render(): void {
     renderHighlight();
 }
 
-/** 刷新「选中小节」高亮（alphaTab 覆盖框）；未选中传 -1 隐藏 */
+/** 刷新「选中小节」高亮与只读光标（alphaTab 覆盖层）；未选中传 -1 隐藏 */
 export function renderHighlight(): void {
     alphaTabRenderer?.setSelectedMeasure(scoreStore.selectedMeasure ?? -1);
+    alphaTabRenderer?.setEditCursor(scoreStore.editCursor);
+    renderEditHud(scoreStore.editCursor);
     syncMeasureNav();
 }

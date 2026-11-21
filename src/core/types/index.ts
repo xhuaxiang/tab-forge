@@ -8,6 +8,8 @@
 
 export type { PlaybackState } from './playback/index.ts';
 
+export type { EditCursor } from './edit/index.ts';
+
 export {
     NOTE_DURATIONS,
     APP_HARMONICS,

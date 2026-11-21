@@ -5,7 +5,7 @@
  * 集中管理 TabScore 及相关操作。
  */
 
-import type { TabScore, Measure, Note, Tuning } from '../types/index.ts';
+import type { TabScore, Measure, Note, Tuning, EditCursor } from '../types/index.ts';
 import { locateSlotAt, measureTotalBeats, measureCapacity, canAddToMeasure, createEmptyMeasure, parseTimeSignature } from '../utils/measureUtils.ts';
 import { applyNoteChange, muteNoteGroup } from '../utils/measureEdit.ts';
 import { groupFlatNotes, nextChordGroupId, validateNoteGroup } from '../utils/noteGroup.ts';
@@ -28,6 +28,8 @@ export const scoreStore = {
     selectedMeasure: null as number | null,
     /** 当前选中的弦号 (1-6) */
     selectedString: 1,
+    /** 谱面只读光标（小节 × 拍位 × 弦）；null = 未定位 */
+    editCursor: null as EditCursor | null,
 
     // ============================================================
     // 变更通知（集中触发渲染，eventHandlers 不再手动 render()）
@@ -79,21 +81,30 @@ export const scoreStore = {
         return Math.min(Math.max(this.selectedMeasure, 0), len - 1);
     },
 
-    /** 选中某一小节（null 取消选中）。选中变化走轻量 onSelectChange，不整谱重渲染 */
+    /**
+     * 选中某一小节（null 取消选中）。选中变化走轻量 onSelectChange，不整谱重渲染。
+     *
+     * 光标只跟随同一个小节：改选到别的小节（或取消选中）时清空 `editCursor`，
+     * 避免 HUD/覆盖层还停在上一个小节。同一小节内改选保留光标。
+     * 选中与光标无论是否同时变化，都只通知一次。
+     */
     selectMeasure(index: number | null): number | null {
         const len = this.score.measures.length;
         if (len === 0 || index === null) {
-            if (this.selectedMeasure !== null) {
-                this.selectedMeasure = null;
-                this.onSelectChange?.();
-            }
+            const selectionChanged = this.selectedMeasure !== null;
+            const cursorChanged = this.editCursor !== null;
+            this.selectedMeasure = null;
+            this.editCursor = null;
+            if (selectionChanged || cursorChanged) this.onSelectChange?.();
             return null;
         }
         const clamped = Math.max(0, Math.min(index, len - 1));
-        if (this.selectedMeasure !== clamped) {
-            this.selectedMeasure = clamped;
-            this.onSelectChange?.();
-        }
+        const selectionChanged = this.selectedMeasure !== clamped;
+        // 光标属于另一个小节时随改选清空；同小节保持
+        const cursorChanged = this.editCursor !== null && this.editCursor.measureIndex !== clamped;
+        this.selectedMeasure = clamped;
+        if (cursorChanged) this.editCursor = null;
+        if (selectionChanged || cursorChanged) this.onSelectChange?.();
         return clamped;
     },
 
@@ -118,10 +129,15 @@ export const scoreStore = {
         return i + 1;
     },
 
-    /** 删除最后一个小节（选中越界时取消选中） */
+    /** 删除最后一个小节（选中越界时取消选中；光标随整谱缩短清空） */
     deleteLastMeasure(): boolean {
-        if (this.score.measures.length === 0) return false;
+        if (this.score.measures.length === 0) {
+            // 空谱没有可删的小节，但残留光标同样必须清掉（保持「无小节 = 无光标」）
+            this.editCursor = null;
+            return false;
+        }
         this.score.measures.pop();
+        this.editCursor = null;
         if (this.selectedMeasure !== null && this.selectedMeasure >= this.score.measures.length) {
             this.selectedMeasure = null;
         }
@@ -133,7 +149,46 @@ export const scoreStore = {
     clear(): void {
         this.score.measures = [];
         this.selectedMeasure = null;
+        this.editCursor = null;
         this._notify();
+    },
+
+    /**
+     * 设置谱面只读光标（null = 清空）。
+     *
+     * 只做 clamp + 同步 selectedMeasure，走轻量 onSelectChange，不触发整谱重渲染。
+     * 空谱时忽略光标。
+     */
+    setEditCursor(cursor: EditCursor | null): void {
+        const len = this.score.measures.length;
+        if (cursor === null || len === 0) {
+            if (this.editCursor === null) return;
+            this.editCursor = null;
+            this.onSelectChange?.();
+            return;
+        }
+
+        const rawMeasure = Number.isFinite(cursor.measureIndex) ? Math.round(cursor.measureIndex) : 0;
+        const measureIndex = Math.max(0, Math.min(rawMeasure, len - 1));
+        const measure = this.score.measures[measureIndex];
+        const maxBeat = measureTotalBeats(measure);
+        const rawBeat = Number.isFinite(cursor.beatOffset) ? cursor.beatOffset : 0;
+        const beatOffset = Math.max(0, Math.min(rawBeat, maxBeat));
+        // 当前应用按 6 弦吉他建模（应用弦号固定 1..6）；多弦支持是另一项扩展。
+        const rawString = Number.isFinite(cursor.string) ? Math.round(cursor.string) : 1;
+        const string = Math.max(1, Math.min(rawString, 6));
+
+        const prev = this.editCursor;
+        const unchanged = prev !== null
+            && prev.measureIndex === measureIndex
+            && Math.abs(prev.beatOffset - beatOffset) < 1e-6
+            && prev.string === string
+            && this.selectedMeasure === measureIndex;
+        if (unchanged) return;
+
+        this.editCursor = { measureIndex, beatOffset, string };
+        this.selectedMeasure = measureIndex;
+        this.onSelectChange?.();
     },
 
     /** 添加音符到当前小节（单音/休止符/和弦音符统一走此方法） */
