@@ -56,7 +56,7 @@ export const DISPLAY_MODES = ['tab', 'scoretab'] as const;
 
 export type DisplayMode = (typeof DISPLAY_MODES)[number];
 
-/** 默认显示模式：六线谱（扒谱工具的主视图，且六线上能看到休止符） */
+/** 默认显示模式：六线谱（即兴练习的主视图，且六线上能看到休止符） */
 export const DEFAULT_DISPLAY_MODE: DisplayMode = 'tab';
 
 /** 把 DOM 上取到的字符串收敛成 DisplayMode（不合法时返回 false，调用方决定回落） */

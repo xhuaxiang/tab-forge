@@ -1,7 +1,7 @@
 {
   "name": "tab-forge",
   "version": "1.0.0",
-  "description": "扒谱工具 - Guitar Tablature Transcriber (吉他六线谱转录器)",
+  "description": "即兴练习工具 - Guitar Tab Improviser (吉他六线谱即兴练习器)",
   "main": "src/popup.ts",
   "type": "module",
   "scripts": {
@@ -18,7 +18,7 @@
     "tab",
     "tablature",
     "music",
-    "transcriber"
+    "improviser"
   ],
   "author": "Sean Xie",
   "license": "ISC",

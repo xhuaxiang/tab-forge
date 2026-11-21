@@ -1,8 +1,8 @@
 {
     "extensionName": {
-        "message": "Tab Forge - 吉他扒谱工具"
+        "message": "Tab Forge - 吉他即兴练习工具"
     },
     "extensionDescription": {
-        "message": "用于将音乐转录为吉他六线谱的扒谱工具"
+        "message": "用于生成与练习吉他六线谱即兴乐句的工具"
     }
 }
