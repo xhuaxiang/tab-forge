@@ -2,7 +2,10 @@
  * improvMode — 顶部「本地即兴 / AI 即兴」切换。
  *
  * 只负责两块面板的显隐；生成逻辑仍在各自 form 里。
+ * AI 即兴暂缓上线：选中时只提示并回落到本地，不进入不可用面板。
  */
+
+import { setStatus } from '../dom.ts';
 
 type ImprovMode = 'local' | 'ai';
 
@@ -31,11 +34,19 @@ export function initImprovModeSwitch(): void {
     if (!select) return;
 
     // HTML 的 selected 只是初值；这里按实际 value 统一应用，默认回落本地即兴。
-    const initial = isImprovMode(select.value) ? select.value : 'local';
+    // AI 即兴暂缓上线，初始值也一并回落到本地。
+    const initial = select.value === 'ai' ? 'local' : (isImprovMode(select.value) ? select.value : 'local');
     select.value = initial;
     applyImprovMode(initial);
 
     select.addEventListener('change', () => {
+        if (select.value === 'ai') {
+            // AI 即兴暂缓上线：提示后把下拉复位，本地面板保持可见
+            select.value = 'local';
+            applyImprovMode('local');
+            setStatus('AI 即兴功能更新中，敬请期待', 'info');
+            return;
+        }
         const mode = isImprovMode(select.value) ? select.value : 'local';
         applyImprovMode(mode);
     });
