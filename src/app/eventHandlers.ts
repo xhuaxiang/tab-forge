@@ -5,7 +5,9 @@
  * 不处理 UI 自身逻辑（如和弦网格），只做事件到 store action 的桥接。
  */
 
-import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
+import { exportToAsciiTab } from '../core/utils/tabExport.ts';
+// 未实现文件下载/导入，入口先隐藏（TODO 1.2）
+// import { exportToJson } from '../core/utils/tabExport.ts';
 import { exportToGp, gpExportFileName } from '../features/alphaTab/gpExport.ts';
 import { $, setStatus, downloadBlob } from './dom.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
@@ -110,8 +112,10 @@ function handleExport(): void {
         <div class="modal-content">
             <h3>📤 导出乐谱</h3>
             <div class="modal-actions">
+                <!-- 未实现文件下载/导入，先隐藏（TODO 1.2）
                 <button id="exportAsciiBtn">TAB 文本</button>
                 <button id="exportJsonBtn">JSON</button>
+                -->
                 <button id="exportGpBtn">Guitar Pro (.gp)</button>
                 <button id="copyBtn" class="btn-copy">📋 复制</button>
             </div>
@@ -123,12 +127,13 @@ function handleExport(): void {
     document.body.appendChild(modal);
 
     const ta = modal.querySelector('#exportOutput') as HTMLTextAreaElement;
-    modal.querySelector('#exportAsciiBtn')?.addEventListener('click', () => {
-        ta.value = exportToAsciiTab(scoreStore.score);
-    });
-    modal.querySelector('#exportJsonBtn')?.addEventListener('click', () => {
-        ta.value = exportToJson(scoreStore.score);
-    });
+    // 未实现文件下载/导入，入口先隐藏（TODO 1.2）
+    // modal.querySelector('#exportAsciiBtn')?.addEventListener('click', () => {
+    //     ta.value = exportToAsciiTab(scoreStore.score);
+    // });
+    // modal.querySelector('#exportJsonBtn')?.addEventListener('click', () => {
+    //     ta.value = exportToJson(scoreStore.score);
+    // });
     modal.querySelector('#exportGpBtn')?.addEventListener('click', () => {
         try {
             const bytes = exportToGp(scoreStore.score);
