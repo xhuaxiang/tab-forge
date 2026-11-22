@@ -6,7 +6,8 @@
  */
 
 import { exportToAsciiTab, exportToJson } from '../core/utils/tabExport.ts';
-import { $, setStatus } from './dom.ts';
+import { exportToGp, gpExportFileName } from '../features/alphaTab/gpExport.ts';
+import { $, setStatus, downloadBlob } from './dom.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
 import { initChordGrid } from './input/chordInput.ts';
 import { PLAYBACK_ENGINES, DISPLAY_MODES } from '../core/config.ts';
@@ -111,6 +112,7 @@ function handleExport(): void {
             <div class="modal-actions">
                 <button id="exportAsciiBtn">TAB 文本</button>
                 <button id="exportJsonBtn">JSON</button>
+                <button id="exportGpBtn">Guitar Pro (.gp)</button>
                 <button id="copyBtn" class="btn-copy">📋 复制</button>
             </div>
             <textarea class="modal-textarea" id="exportOutput" readonly>${ascii}</textarea>
@@ -126,6 +128,22 @@ function handleExport(): void {
     });
     modal.querySelector('#exportJsonBtn')?.addEventListener('click', () => {
         ta.value = exportToJson(scoreStore.score);
+    });
+    modal.querySelector('#exportGpBtn')?.addEventListener('click', () => {
+        try {
+            const bytes = exportToGp(scoreStore.score);
+            // 显式拷贝为 ArrayBuffer：新版 TS lib.dom 不接受 Uint8Array<ArrayBufferLike> 作为 BlobPart
+            const buffer = new ArrayBuffer(bytes.byteLength);
+            new Uint8Array(buffer).set(bytes);
+            downloadBlob(
+                gpExportFileName(scoreStore.score),
+                new Blob([buffer], { type: 'application/octet-stream' }),
+            );
+            setStatus('已导出 Guitar Pro', 'success');
+        } catch (e) {
+            console.error('[TabForge] Guitar Pro 导出失败', e);
+            setStatus('Guitar Pro 导出失败', 'error');
+        }
     });
     modal.querySelector('#copyBtn')?.addEventListener('click', () => {
         navigator.clipboard.writeText(ta.value)

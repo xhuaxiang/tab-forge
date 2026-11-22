@@ -19,6 +19,22 @@ export function setStatus(msg: string, type: 'info' | 'success' | 'error' = 'inf
     if (type) statusBar.classList.add(type);
 }
 
+/** 以 Blob 触发浏览器下载（临时 <a>，用完即回收 object URL） */
+export function downloadBlob(filename: string, blob: Blob): void {
+    const url = URL.createObjectURL(blob);
+    try {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    } finally {
+        // 延迟回收：立即 revoke 在部分浏览器会让下载中断
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+}
+
 /** 获取 Search-Select 组件的选中值 */
 export function getSearchSelectValue(id: string): number {
     const val = document.getElementById(id)?.dataset.value;
