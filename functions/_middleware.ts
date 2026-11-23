@@ -52,22 +52,22 @@ export const onRequest = async (
 ): Promise<Response> => {
     const response = await ctx.next();
 
-    const isPageView =
-        ctx.request.method === 'GET' &&
-        (ctx.request.headers.get('Accept') ?? '').includes('text/html');
-
-    if (!isPageView) return response;
-
     const request = ctx.request as RequestWithCf;
     const url = new URL(request.url);
     const cf = request.cf ?? {};
 
-    const ip = ctx.request.headers.get('CF-Connecting-IP') ?? '';
-    const ua = ctx.request.headers.get('User-Agent') ?? '';
-    const referer = ctx.request.headers.get('Referer') ?? '';
+    const isPageView =
+        ctx.request.method === 'GET' &&
+        (ctx.request.headers.get('Accept') ?? '').includes('text/html');
 
-    ctx.waitUntil(
-        (async () => {
+    // 诊断阶段改为同步写入，便于把结果放进响应头；定位后改回 waitUntil。
+    let dbResult = 'skipped';
+
+    if (isPageView) {
+        try {
+            const ip = ctx.request.headers.get('CF-Connecting-IP') ?? '';
+            const ua = ctx.request.headers.get('User-Agent') ?? '';
+            const referer = ctx.request.headers.get('Referer') ?? '';
             const ipHash = await sha256(`${ip}:${ctx.env.IP_SALT}`);
             await ctx.env.DB.prepare(
                 `INSERT INTO visits (ts, ip_hash, ua, path, referer, country, city, asn)
@@ -84,10 +84,23 @@ export const onRequest = async (
                     cf.asn ?? 0,
                 )
                 .run();
-        })().catch(() => {
-            // 埋点失败不影响页面响应
-        }),
+            dbResult = 'ok';
+        } catch (error) {
+            const message =
+                error instanceof Error ? error.message : String(error);
+            dbResult = `error:${message}`;
+        }
+    }
+
+    const res = new Response(response.body, response);
+    res.headers.set('X-Tab-Forge-Middleware', 'on');
+    res.headers.set('X-Tab-Forge-DB', ctx.env.DB ? 'bound' : 'missing');
+    res.headers.set('X-Tab-Forge-Salt', ctx.env.IP_SALT ? 'set' : 'missing');
+    res.headers.set('X-Tab-Forge-Pageview', String(isPageView));
+    res.headers.set(
+        'X-Tab-Forge-DB-Result',
+        dbResult.replace(/[^\x20-\x7e]/g, '?').slice(0, 120),
     );
 
-    return response;
+    return res;
 };
