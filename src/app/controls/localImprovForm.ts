@@ -32,6 +32,7 @@ import {
     progressionEquals,
 } from '../../core/utils/improv/index.ts';
 import { t } from '../../core/i18n/index.ts';
+import { trackImprovGenerated } from '../analytics.ts';
 import { buildImprovSummary } from './improvSummary.ts';
 import { refreshLocalImprovOptions } from './improvRefresh.ts';
 import { clearLocalSummarySnapshot, setLocalSummarySnapshot } from './improvSummaryState.ts';
@@ -191,6 +192,7 @@ function handleLocalGenerate(): void {
         );
         setLocalSummarySnapshot({ result, seed, description, described });
         setStatus(t('improv.localDone', { style: result.options.style }), 'success');
+        trackImprovGenerated();
         if (statusEl) statusEl.textContent = summary;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

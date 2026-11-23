@@ -11,6 +11,24 @@ import type {
     SlotRole,
 } from './types/improv/index.ts';
 
+// ============================================================
+// 埋点（当前只接网页构建）
+// ============================================================
+
+/** 总开关；关闭后 transport 不发任何请求 */
+export const ANALYTICS_ENABLED = true;
+
+/**
+ * 上报地址。
+ *
+ * 网页构建用相对路径（同源 Pages Functions）；扩展内相对路径会解析到
+ * `chrome-extension://`，以后接扩展时改成绝对地址。
+ */
+export const ANALYTICS_ENDPOINT = '/api/hit';
+
+/** 应用版本，构建时从 package.json 注入 */
+export const APP_VERSION = __APP_VERSION__;
+
 /** 乐谱全局默认（调性 / BPM / 调弦 / 拍号） */
 export const SCORE_DEFAULTS = {
     /** 调性 */

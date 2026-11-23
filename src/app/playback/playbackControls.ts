@@ -6,6 +6,7 @@ import { $, setStatusT } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { DEFAULT_PLAYBACK_ENGINE, isPlaybackEngine } from '../../core/config.ts';
 import { t } from '../../core/i18n/index.ts';
+import { markPlaybackStarted, markPlaybackStopped } from '../analytics.ts';
 import type { PlaybackState } from '../../core/types/index.ts';
 
 type AudioStatus =
@@ -84,6 +85,7 @@ export function initPlaybackControls(): void {
             }, 'info'),
             onComplete: () => {
                 setStatusT('playback.status.complete', undefined, 'success');
+                markPlaybackStopped();
                 lastPlaybackState = 'stopped';
                 renderPlayButton();
                 renderStopButton();
@@ -130,6 +132,7 @@ export function initPlaybackControls(): void {
             try {
                 await stopOtherEngine('alphatab');
                 alphaTabPlayer.setCallbacks(callbacks);
+                markPlaybackStarted();
                 await alphaTabPlayer.play(scoreStore.score);
                 return;
             } catch (e) {
@@ -141,6 +144,7 @@ export function initPlaybackControls(): void {
         }
         await stopOtherEngine('karplus');
         currentAudioEngine.setCallbacks(callbacks);
+        markPlaybackStarted();
         await currentAudioEngine.play(scoreStore.score);
     });
 
@@ -149,6 +153,7 @@ export function initPlaybackControls(): void {
         currentAudioEngine.stop();
         const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
         alphaTabPlayer.stop();
+        markPlaybackStopped();
         lastPlaybackState = 'stopped';
         renderPlayButton();
         renderStopButton();

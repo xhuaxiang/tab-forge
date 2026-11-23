@@ -8,6 +8,15 @@
 
 export type { PlaybackState } from './playback/index.ts';
 
+export {
+    ANALYTICS_EVENT_TYPES,
+} from './analytics.ts';
+export type {
+    AnalyticsEventType,
+    AnalyticsPlatform,
+    AnalyticsPayload,
+} from './analytics.ts';
+
 export type { EditCursor } from './edit/index.ts';
 
 export {

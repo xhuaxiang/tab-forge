@@ -11,6 +11,7 @@ import { initRenderer, initDisplayModeControl, render, renderHighlight } from '.
 import { scoreStore } from './core/stores/scoreStore.ts';
 import { initEventListeners } from './app/eventHandlers.ts';
 import { initI18n } from './app/i18n.ts';
+import { initAnalytics } from './app/analytics.ts';
 
 // ============================================================
 // 初始化
@@ -38,6 +39,7 @@ async function init(): Promise<void> {
         initDisplayModeControl();
 
         setStatusT('status.ready');
+        initAnalytics();
     } finally {
         // 语言文案就绪（或回退完成）后再显示页面，避免中文闪现
         document.documentElement.classList.remove('i18n-loading');

@@ -27,6 +27,7 @@ import {
     parseImprovDescription,
 } from '../../core/utils/improv/index.ts';
 import { t } from '../../core/i18n/index.ts';
+import { trackImprovGenerated } from '../analytics.ts';
 import {
     getApiKey,
     saveApiKey,
@@ -179,6 +180,7 @@ async function handleAIGenerate(): Promise<void> {
 
         const { local, notes } = result;
         writeGeneratedScore(notes, local.options);
+        trackImprovGenerated();
 
         // 本地不支持项；AI brief 已翻译掉的 CAGED 提示不再重复展示。
         // 按结构化 code 过滤——旧实现匹配中文前缀，文案一变就静默失效。
