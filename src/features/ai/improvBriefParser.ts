@@ -23,6 +23,7 @@ import {
     SCALE_TYPES,
 } from '../../core/types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
 import { parseKey } from '../../core/utils/improv/pitch.ts';
 import { parseProgressionText } from '../../core/utils/improv/progression.ts';
 import { extractJsonObject } from './jsonExtract.ts';
@@ -171,7 +172,7 @@ export function parseImprovBriefResponse(text: string): ImprovBriefParseResult {
             practice: null,
             unsupported: [],
             rationale: '',
-            error: 'AI 响应不是合法 JSON',
+            error: t('ai.error.invalidJson'),
         };
     }
 
@@ -182,7 +183,7 @@ export function parseImprovBriefResponse(text: string): ImprovBriefParseResult {
             practice: null,
             unsupported: [],
             rationale: '',
-            error: 'AI 返回的 JSON 缺少 options 对象',
+            error: t('ai.error.missingOptions'),
         };
     }
 

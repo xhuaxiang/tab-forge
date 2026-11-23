@@ -17,6 +17,7 @@ import type {
     ResolvedImprovOptions,
 } from '../../core/types/improv/index.ts';
 import { IMPROV_AI_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
 import {
     applyPerformancePatches,
     parseImprovDescription,
@@ -67,31 +68,31 @@ function buildModal(
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="modal-content" style="max-width:820px; max-height:88vh; overflow:auto;">
-            <h3>🧪 AI 即兴 Prompt 调试</h3>
-            <p class="modal-hint">调试只发请求、不自动写谱；表现扩展页可手动写入。</p>
+            <h3>${t('ai.debug.improvTitle')}</h3>
+            <p class="modal-hint">${t('ai.debug.improvHint')}</p>
 
-            <strong style="font-size:12px;">1. 需求解析（brief）</strong>
+            <strong style="font-size:12px;">${t('ai.debug.briefSection')}</strong>
             <textarea class="modal-textarea" id="debugBriefSystem" style="min-height:180px;"></textarea>
             <textarea class="modal-textarea" id="debugBriefUser" readonly style="min-height:120px; margin-top:6px; opacity:.85;"></textarea>
             <div class="modal-footer" style="justify-content:flex-start; margin:6px 0;">
-                <button id="debugBriefRun" class="btn-copy">测试解析</button>
+                <button id="debugBriefRun" class="btn-copy">${t('ai.debug.testBrief')}</button>
                 <span id="debugBriefState" class="modal-hint"></span>
             </div>
             <pre id="debugBriefResult" style="white-space:pre-wrap; font-size:11px; max-height:200px; overflow:auto;"></pre>
 
             <hr style="margin:14px 0; opacity:.2;">
-            <strong style="font-size:12px;">2. 表现扩展（patch）</strong>
+            <strong style="font-size:12px;">${t('ai.debug.patchSection')}</strong>
             <textarea class="modal-textarea" id="debugPatchSystem" style="min-height:180px;"></textarea>
             <textarea class="modal-textarea" id="debugPatchUser" readonly style="min-height:160px; margin-top:6px; opacity:.85;"></textarea>
             <div class="modal-footer" style="justify-content:flex-start; margin:6px 0;">
-                <button id="debugPatchRun" class="btn-copy">测试扩展</button>
-                <button id="debugPatchWrite" class="btn-copy" style="display:none;">写入谱面</button>
+                <button id="debugPatchRun" class="btn-copy">${t('ai.debug.testPatch')}</button>
+                <button id="debugPatchWrite" class="btn-copy" style="display:none;">${t('ai.debug.writeToScore')}</button>
                 <span id="debugPatchState" class="modal-hint"></span>
             </div>
             <pre id="debugPatchResult" style="white-space:pre-wrap; font-size:11px; max-height:200px; overflow:auto;"></pre>
 
             <div class="modal-footer">
-                <button id="debugCloseBtn">关闭</button>
+                <button id="debugCloseBtn">${t('common.close')}</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -129,11 +130,11 @@ function buildModal(
     // ---- 需求解析 ----
     briefBtn.addEventListener('click', async () => {
         if (!apiKey) {
-            briefState.textContent = '未配置 API Key';
+            briefState.textContent = t('ai.debug.noApiKey');
             return;
         }
         briefBtn.disabled = true;
-        briefState.textContent = '请求中...';
+        briefState.textContent = t('ai.debug.requesting');
         briefResult.textContent = '';
         try {
             const response = await callDeepSeek({
@@ -148,12 +149,12 @@ function buildModal(
                 return;
             }
             const parsed = parseImprovBriefResponse(response.content);
-            briefState.textContent = '完成';
+            briefState.textContent = t('ai.debug.done');
             briefResult.textContent = [
-                '## 原始响应',
+                t('ai.debug.rawResponse'),
                 response.content,
                 '',
-                '## 解析结果',
+                t('ai.debug.parseResult'),
                 JSON.stringify(parsed, null, 2),
             ].join('\n');
         } finally {
@@ -169,7 +170,7 @@ function buildModal(
     let localMaxLeap = 0;
 
     const generateLocal = async (): Promise<boolean> => {
-        patchState.textContent = '生成本地底稿...';
+        patchState.textContent = t('ai.debug.generatingLocal');
         const pipeline = await runImprovPipeline({
             score: options.score,
             base: options.base,
@@ -178,7 +179,7 @@ function buildModal(
             seed: 1,
         });
         if (pipeline.fatal || !pipeline.local || !pipeline.notes) {
-            patchState.textContent = pipeline.error ?? '本地生成失败';
+            patchState.textContent = pipeline.error ?? t('ai.pipeline.localFailed');
             return false;
         }
         localNotes = pipeline.notes;
@@ -191,13 +192,13 @@ function buildModal(
             local: pipeline.local,
             extraPrompt: options.extraPrompt,
         });
-        patchState.textContent = '本地底稿已生成';
+        patchState.textContent = t('ai.debug.localDraftReady');
         return true;
     };
 
     patchBtn.addEventListener('click', async () => {
         if (!apiKey) {
-            patchState.textContent = '未配置 API Key';
+            patchState.textContent = t('ai.debug.noApiKey');
             return;
         }
         if (!localNotes || !localOptions || !localHarmony || !localPhrases) {
@@ -205,7 +206,7 @@ function buildModal(
             if (!ok) return;
         }
         patchBtn.disabled = true;
-        patchState.textContent = '请求中...';
+        patchState.textContent = t('ai.debug.requesting');
         patchResult.textContent = '';
         // 上一轮的写谱按钮不能留到本轮：闭包里是旧底稿与旧应用结果
         writeBtn.style.display = 'none';
@@ -227,7 +228,7 @@ function buildModal(
             );
             if (parsed.error) {
                 patchState.textContent = parsed.error;
-                patchResult.textContent = ['## 原始响应', response.content].join('\n');
+                patchResult.textContent = [t('ai.debug.rawResponse'), response.content].join('\n');
                 return;
             }
             if (!localNotes || !localOptions || !localHarmony || !localPhrases) return;
@@ -242,16 +243,19 @@ function buildModal(
                 IMPROV_AI_CONFIG.patch.maxPatches,
             );
             patchState.textContent = applied.reverted
-                ? '应用后复核失败，已回退底稿'
-                : `应用 ${applied.applied} 处，丢弃 ${applied.dropped.length} 条`;
+                ? t('ai.debug.applyRejected')
+                : t('ai.debug.appliedCount', {
+                    applied: applied.applied,
+                    dropped: applied.dropped.length,
+                });
             patchResult.textContent = [
-                '## 原始响应',
+                t('ai.debug.rawResponse'),
                 response.content,
                 '',
-                '## 解析警告',
+                t('ai.debug.parseWarnings'),
                 JSON.stringify(parsed.warnings, null, 2),
                 '',
-                '## 应用统计',
+                t('ai.debug.applyStats'),
                 JSON.stringify({
                     applied: applied.applied,
                     reverted: applied.reverted,
@@ -264,7 +268,7 @@ function buildModal(
                 writeBtn.style.display = '';
                 writeBtn.onclick = (): void => {
                     options.onWriteScore?.(applied.notes, localOptions as ResolvedImprovOptions);
-                    options.onStatus?.('调试结果已写入谱面', 'success');
+                    options.onStatus?.(t('ai.debug.writtenToScore'), 'success');
                 };
             }
         } finally {

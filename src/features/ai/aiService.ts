@@ -11,42 +11,25 @@ import { parseAIResponse } from './responseParser.ts';
 import { getEffectiveSystemPrompt } from './systemPromptEditor.ts';
 import type { TabScore } from '../../core/types/index.ts';
 import { DEEPSEEK_CONFIG, AI_TIMEOUT_MS } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
+import { readStorage, writeStorage } from '../storage.ts';
 
 // ---- API Key 存储（兼容 extension + web）----
 const STORAGE_KEY = 'TabForge_DeepSeekApiKey';
 
-/** 检测是否在 Chrome Extension 环境 */
+/** background 消息通道只在扩展环境存在（存储读写走 features/storage） */
 function isChromeExtension(): boolean {
     return typeof chrome !== 'undefined' && !!chrome.storage;
 }
 
-/** 从 chrome.storage.local 或 localStorage 读取 API Key */
+/** 读取 API Key */
 export async function getApiKey(): Promise<string | null> {
-    if (isChromeExtension()) {
-        try {
-            const result = await chrome.storage.local.get<Record<typeof STORAGE_KEY, string>>(STORAGE_KEY);
-            return result[STORAGE_KEY] || null;
-        } catch {
-            return null;
-        }
-    }
-    // web fallback: localStorage
-    try {
-        return localStorage.getItem(STORAGE_KEY) || null;
-    } catch {
-        return null;
-    }
+    return readStorage(STORAGE_KEY);
 }
 
 /** 保存 API Key */
 export async function saveApiKey(key: string): Promise<void> {
-    if (isChromeExtension()) {
-        await chrome.storage.local.set({ [STORAGE_KEY]: key });
-        return;
-    }
-    try {
-        localStorage.setItem(STORAGE_KEY, key);
-    } catch { /* ignore */ }
+    await writeStorage(STORAGE_KEY, key);
 }
 
 // ---- 核心调用 ----
@@ -107,14 +90,14 @@ export async function callDeepSeek(input: DeepSeekCallInput): Promise<DeepSeekCa
 
         const data = await response.json();
         const content = data?.choices?.[0]?.message?.content;
-        if (!content) return { content: '', error: 'AI 未返回内容' };
+        if (!content) return { content: '', error: t('ai.error.emptyResponse') };
         return { content };
     } catch (e) {
         if (e instanceof Error && e.name === 'TimeoutError') {
-            return { content: '', error: '请求超时（60 秒），请检查网络后重试' };
+            return { content: '', error: t('ai.error.timeout') };
         }
-        const msg = e instanceof Error ? e.message : '网络错误';
-        return { content: '', error: `请求失败: ${msg}` };
+        const msg = e instanceof Error ? e.message : t('ai.error.network');
+        return { content: '', error: t('ai.error.requestFailed', { message: msg }) };
     }
 }
 
@@ -190,7 +173,7 @@ export async function debugGenerate(
 async function describeApiError(response: Response): Promise<string> {
     const body = await response.text().catch(() => '');
     console.error(`[TabForge] DeepSeek API ${response.status} 原文:`, body);
-    const head = `API 请求失败 (HTTP ${response.status})`;
+    const head = t('ai.error.httpFailed', { status: response.status });
     try {
         const json = JSON.parse(body);
         const detail = [json?.error?.message, json?.error?.type, json?.error?.code]
@@ -211,7 +194,7 @@ export async function generateViaBackground(
     options: GenerationOptions,
 ): Promise<AIGenerationResult> {
     if (!isChromeExtension()) {
-        return { notes: [], error: '此功能仅在 Chrome 扩展中可用' };
+        return { notes: [], error: t('ai.error.extensionOnly') };
     }
     return new Promise((resolve) => {
         chrome.runtime.sendMessage(
@@ -225,7 +208,7 @@ export async function generateViaBackground(
                     resolve({ notes: [], error: chrome.runtime.lastError.message });
                     return;
                 }
-                resolve(response?.result ?? { notes: [], error: '无响应' });
+                resolve(response?.result ?? { notes: [], error: t('ai.error.noResponse') });
             },
         );
     });

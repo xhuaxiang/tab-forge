@@ -1,14 +1,14 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN" class="i18n-loading">
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>Tab Forge - 即兴练习工具</title>
-        <meta name="description" content="在浏览器里生成吉他六线谱，循环、变速跟练，支持合成器与 SoundFont 两种音色。" />
+        <title data-i18n="meta.title">Tab Forge</title>
+        <meta name="description" content="在浏览器里生成吉他六线谱，循环、变速跟练，支持合成器与 SoundFont 两种音色。" data-i18n-content="meta.description" />
         <!-- TODO: 绑定自定义域名后，把 canonical / og:url 替换为正式域名 -->
         <link rel="canonical" href="https://tab-forge.pages.dev/" />
-        <meta property="og:title" content="Tab Forge - 吉他六线谱即兴练习器" />
-        <meta property="og:description" content="浏览器内生成六线谱并循环变速跟练。" />
+        <meta property="og:title" content="Tab Forge - 吉他六线谱即兴练习器" data-i18n-content="meta.ogTitle" />
+        <meta property="og:description" content="浏览器内生成六线谱并循环变速跟练。" data-i18n-content="meta.ogDescription" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://tab-forge.pages.dev/" />
         <script type="application/ld+json">
@@ -28,45 +28,49 @@
             <div class="header">
                 <div>
                     <h1>🎸 Tab Forge</h1>
-                    <span class="subtitle">吉他六线谱即兴练习工具</span>
+                    <span class="subtitle" data-i18n="header.subtitle">吉他六线谱即兴练习工具</span>
                 </div>
                 <div class="header-actions">
-                    <button id="exportTopBtn" class="btn btn-sm" title="导出乐谱">📤 导出</button>
+                    <select id="uiLanguageSelect" class="compact-select" data-i18n-title="header.languageTitle" title="界面语言 / UI language">
+                        <option value="zh-CN">中文</option>
+                        <option value="en">English</option>
+                    </select>
+                    <button id="exportTopBtn" class="btn btn-sm" data-i18n-title="header.exportTitle" title="导出乐谱" data-i18n="header.export">📤 导出</button>
                 </div>
             </div>
 
 
             <!-- Toolbar -->
             <div class="toolbar">
-                <button id="addMeasure" title="添加小节">+ 小节</button>
-                <button id="deleteMeasure" title="删除最后一个小节">− 小节</button>
+                <button id="addMeasure" data-i18n-title="toolbar.addMeasureTitle" title="添加小节" data-i18n="toolbar.addMeasure">+ 小节</button>
+                <button id="deleteMeasure" data-i18n-title="toolbar.removeMeasureTitle" title="删除最后一个小节" data-i18n="toolbar.removeMeasure">− 小节</button>
                 <span class="toolbar-sep"></span>
-                <button id="playBtn" title="播放">▶ 播放</button>
-                <button id="stopBtn" title="停止播放" disabled>⏹ 停止</button>
+                <button id="playBtn" data-i18n-title="toolbar.playTitle" title="播放" data-i18n="toolbar.play">▶ 播放</button>
+                <button id="stopBtn" data-i18n-title="toolbar.stopTitle" title="停止播放" data-i18n="toolbar.stop" disabled>⏹ 停止</button>
                 <span class="toolbar-sep"></span>
-                <select id="engineSelect" title="播放引擎">
-                    <option value="ks" selected>合成器</option>
+                <select id="engineSelect" data-i18n-title="toolbar.engineTitle" title="播放引擎">
+                    <option value="ks" selected data-i18n="toolbar.engine">合成器</option>
                     <option value="alphatab">SoundFont</option>
                 </select>
                 <span class="toolbar-sep"></span>
-                <select id="displayModeSelect" title="谱面显示模式（六线谱模式才显示休止符和时值）">
-                    <option value="tab" selected>六线谱</option>
-                    <option value="scoretab">五线+六线</option>
+                <select id="displayModeSelect" data-i18n-title="toolbar.displayModeTitle" title="谱面显示模式（六线谱模式才显示休止符和时值）">
+                    <option value="tab" selected data-i18n="toolbar.displayTab">六线谱</option>
+                    <option value="scoretab" data-i18n="toolbar.displayScoreTab">五线+六线</option>
                 </select>
                 <span class="toolbar-sep"></span>
-                <select id="improvModeSelect" title="选择即兴生成方式">
-                    <option value="local" selected>🎸 本地即兴</option>
-                    <option value="ai">🤖 AI 即兴</option>
+                <select id="improvModeSelect" data-i18n-title="toolbar.improvModeTitle" title="选择即兴生成方式">
+                    <option value="local" selected data-i18n="toolbar.improvLocal">🎸 本地即兴</option>
+                    <option value="ai" data-i18n="toolbar.improvAi">🤖 AI 即兴</option>
                 </select>
-                <button id="clearBtn" title="清空乐谱" class="btn-ghost">🗑 清空</button>
+                <button id="clearBtn" class="btn-ghost" data-i18n-title="toolbar.clearTitle" title="清空乐谱" data-i18n="toolbar.clear">🗑 清空</button>
             </div>
 
             <!-- 小节导航（选中小节，chips 由 JS 填充） -->
             <div class="measure-nav" id="measureNav" style="display:none;">
-                <button id="navMeasurePrev" class="measure-nav-btn" title="上一小节" disabled>‹</button>
-                <span class="measure-nav-label" id="navMeasureLabel">小节 —</span>
+                <button id="navMeasurePrev" class="measure-nav-btn" data-i18n-title="measureNav.prevTitle" title="上一小节" disabled>‹</button>
+                <span class="measure-nav-label" id="navMeasureLabel" data-i18n="measureNav.labelEmpty">小节 —</span>
                 <div class="measure-nav-chips" id="navMeasureChips"></div>
-                <button id="navMeasureNext" class="measure-nav-btn" title="下一小节" disabled>›</button>
+                <button id="navMeasureNext" class="measure-nav-btn" data-i18n-title="measureNav.nextTitle" title="下一小节" disabled>›</button>
             </div>
 
             <!-- Tab Display -->
@@ -77,67 +81,67 @@
 
             <!-- 折叠面板：音符 + 和弦（默认收起） -->
             <details class="collapse-section">
-                <summary>🎸 音符 &amp; 和弦</summary>
+                <summary data-i18n="section.notesChords">🎸 音符 &amp; 和弦</summary>
                 <div class="collapse-content">
                 <div class="controls">
                 <!-- 全宽：奏法（右手多弦奏法，与左侧单弦技法分开） -->
                 <div class="control-group full-width">
                     <div class="cg-header">
-                        <h4>🎛 奏法</h4>
+                        <h4 data-i18n="articulation.title">🎛 奏法</h4>
                     </div>
                     <div class="articulation-bar">
-                        <button class="artic-btn" data-artic="palmMute" title="手掌闷音 (PM)">PM</button>
-                        <button class="artic-btn" data-artic="deadNote" title="制音/死音 (X)">X</button>
-                        <button class="artic-btn" data-artic="letRing" title="自由延音 (Let Ring)">LR</button>
-                        <button class="artic-btn" data-artic="staccato" title="断音 (Staccato)">ST</button>
+                        <button class="artic-btn" data-artic="palmMute" data-i18n-title="articulation.palmMuteTitle" title="手掌闷音 (PM)">PM</button>
+                        <button class="artic-btn" data-artic="deadNote" data-i18n-title="articulation.deadNoteTitle" title="制音/死音 (X)">X</button>
+                        <button class="artic-btn" data-artic="letRing" data-i18n-title="articulation.letRingTitle" title="自由延音 (Let Ring)">LR</button>
+                        <button class="artic-btn" data-artic="staccato" data-i18n-title="articulation.staccatoTitle" title="断音 (Staccato)">ST</button>
                         <span class="tech-sep"></span>
-                        <select id="harmonicSelect" class="compact-select mini harmonic-select" title="泛音类型">
-                            <option value="">泛音:无</option>
-                            <option value="natural">自然泛音</option>
-                            <option value="artificial">人工泛音</option>
-                            <option value="pinch">捏弦泛音</option>
+                        <select id="harmonicSelect" class="compact-select mini harmonic-select" data-i18n-title="harmonic.title" title="泛音类型">
+                            <option value="" data-i18n="harmonic.none">泛音:无</option>
+                            <option value="natural" data-i18n="harmonic.natural">自然泛音</option>
+                            <option value="artificial" data-i18n="harmonic.artificial">人工泛音</option>
+                            <option value="pinch" data-i18n="harmonic.pinch">捏弦泛音</option>
                         </select>
-                        <input type="number" id="harmonicFret" class="compact-input mini harmonic-fret" min="1" max="24" title="人工/捏弦泛音的触弦点：相对按弦位置的品位差（12 = 高八度）" style="display:none;">
+                        <input type="number" id="harmonicFret" class="compact-input mini harmonic-fret" min="1" max="24" data-i18n-title="harmonic.fretTitle" title="人工/捏弦泛音的触弦点：相对按弦位置的品位差（12 = 高八度）" style="display:none;">
                     </div>
                 </div>
 
                 <!-- 左列：音符编辑（单音/多弦同品 + 单弦技法） -->
                 <div class="control-group">
                     <div class="cg-header">
-                        <h4>✏️ 音符</h4>
+                        <h4 data-i18n="note.title">✏️ 音符</h4>
                     </div>
 
                     <!-- 弦号 + 品位（一行） -->
                     <div class="input-row">
                         <div class="input-group flex-1">
-                            <label>弦</label>
-                            <div class="search-select compact" id="stringSelect" data-value="1" data-multi="true" title="可多选；击/勾/滑弦时只能选一根">
+                            <label data-i18n="note.string">弦</label>
+                            <div class="search-select compact" id="stringSelect" data-value="1" data-multi="true" data-i18n-title="note.stringSelectTitle" title="可多选；击/勾/滑弦时只能选一根">
                                 <div class="search-select-trigger">
-                                    <span class="trigger-label">弦 <span class="trigger-value">1</span></span>
+                                    <span class="trigger-label"><span data-i18n="note.string">弦</span> <span class="trigger-value">1</span></span>
                                     <span class="trigger-arrow">▾</span>
                                 </div>
                                 <div class="search-select-dropdown">
-                                    <input type="text" class="search-input" placeholder="搜索...">
+                                    <input type="text" class="search-input" data-i18n-placeholder="note.searchPlaceholder" placeholder="搜索...">
                                     <div class="options-list">
-                                        <div class="option selected" data-value="1">第 1 弦 <span class="option-note">高音E</span></div>
-                                        <div class="option" data-value="2">第 2 弦 <span class="option-note">B</span></div>
-                                        <div class="option" data-value="3">第 3 弦 <span class="option-note">G</span></div>
-                                        <div class="option" data-value="4">第 4 弦 <span class="option-note">D</span></div>
-                                        <div class="option" data-value="5">第 5 弦 <span class="option-note">A</span></div>
-                                        <div class="option" data-value="6">第 6 弦 <span class="option-note">低音E</span></div>
+                                        <div class="option selected" data-value="1"><span data-i18n="note.stringOption1">第 1 弦</span> <span class="option-note" data-i18n="note.stringNoteHighE">高音E</span></div>
+                                        <div class="option" data-value="2"><span data-i18n="note.stringOption2">第 2 弦</span> <span class="option-note">B</span></div>
+                                        <div class="option" data-value="3"><span data-i18n="note.stringOption3">第 3 弦</span> <span class="option-note">G</span></div>
+                                        <div class="option" data-value="4"><span data-i18n="note.stringOption4">第 4 弦</span> <span class="option-note">D</span></div>
+                                        <div class="option" data-value="5"><span data-i18n="note.stringOption5">第 5 弦</span> <span class="option-note">A</span></div>
+                                        <div class="option" data-value="6"><span data-i18n="note.stringOption6">第 6 弦</span> <span class="option-note" data-i18n="note.stringNoteLowE">低音E</span></div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="input-group flex-1">
-                            <label>品</label>
+                            <label data-i18n="note.fret">品</label>
                             <div class="search-select compact" id="fretSelect" data-value="0">
                                 <div class="search-select-trigger">
-                                    <span class="trigger-label">品 <span class="trigger-value">0</span></span>
+                                    <span class="trigger-label"><span data-i18n="note.fret">品</span> <span class="trigger-value">0</span></span>
                                     <span class="trigger-arrow">▾</span>
                                 </div>
                                 <div class="search-select-dropdown">
-                                    <input type="text" class="search-input" placeholder="搜索...">
+                                    <input type="text" class="search-input" data-i18n-placeholder="note.searchPlaceholder" placeholder="搜索...">
                                     <div class="options-list">
                                         <!-- 0~24 品由 JS 动态生成 -->
                                     </div>
@@ -149,88 +153,88 @@
                     <!-- 时值 -->
                     <div class="input-row">
                         <div class="input-group flex-1">
-                            <label>时值</label>
+                            <label data-i18n="note.duration">时值</label>
                             <select id="inputDuration" class="compact-select">
-                                <option value="1">全音符</option>
-                                <option value="0.5">二分音符</option>
-                                <option value="0.25" selected>四分音符</option>
-                                <option value="0.125">八分音符</option>
-                                <option value="0.0625">十六分</option>
-                                <option value="0.03125">三十二分</option>
+                                <option value="1" data-i18n="note.durationWhole">全音符</option>
+                                <option value="0.5" data-i18n="note.durationHalf">二分音符</option>
+                                <option value="0.25" selected data-i18n="note.durationQuarter">四分音符</option>
+                                <option value="0.125" data-i18n="note.durationEighth">八分音符</option>
+                                <option value="0.0625" data-i18n="note.durationSixteenth">十六分</option>
+                                <option value="0.03125" data-i18n="note.durationThirtySecond">三十二分</option>
                             </select>
                         </div>
                         <div class="input-group flex-1" style="max-width:60px;">
-                            <label>目标品</label>
-                            <input type="number" id="targetFret" class="compact-input" value="0" min="0" max="24" title="击/勾/滑的目标品位">
+                            <label data-i18n="note.targetFret">目标品</label>
+                            <input type="number" id="targetFret" class="compact-input" value="0" min="0" max="24" data-i18n-title="note.targetFretTitle" title="击/勾/滑的目标品位">
                         </div>
                     </div>
 
                     <!-- 技法按钮栏 -->
                     <div class="technique-bar">
-                        <button class="tech-btn active" data-tech="none" title="普通拨弦">🎸</button>
-                        <button class="tech-btn" data-tech="hammerOn" title="击弦 (H)">H</button>
-                        <button class="tech-btn" data-tech="pullOff" title="勾弦 (P)">P</button>
-                        <button class="tech-btn" data-tech="slide" title="滑弦 (S)">S</button>
-                        <button class="tech-btn" data-tech="bend" title="推弦 (B)">B</button>
-                        <button class="tech-btn" data-tech="vibrato" title="揉弦 (~)">~</button>
+                        <button class="tech-btn active" data-tech="none" data-i18n-title="tech.normalTitle" title="普通拨弦">🎸</button>
+                        <button class="tech-btn" data-tech="hammerOn" data-i18n-title="tech.hammerOnTitle" title="击弦 (H)">H</button>
+                        <button class="tech-btn" data-tech="pullOff" data-i18n-title="tech.pullOffTitle" title="勾弦 (P)">P</button>
+                        <button class="tech-btn" data-tech="slide" data-i18n-title="tech.slideTitle" title="滑弦 (S)">S</button>
+                        <button class="tech-btn" data-tech="bend" data-i18n-title="tech.bendTitle" title="推弦 (B)">B</button>
+                        <button class="tech-btn" data-tech="vibrato" data-i18n-title="tech.vibratoTitle" title="揉弦 (~)">~</button>
                         <span class="tech-sep"></span>
-                        <button class="tech-btn" data-tech="tie" title="延音（延续上一拍同弦音符）">⌒</button>
+                        <button class="tech-btn" data-tech="tie" data-i18n-title="tech.tieTitle" title="延音（延续上一拍同弦音符）">⌒</button>
                     </div>
 
                     <!-- 推弦选项（选择 B 技法时显示） -->
                     <div class="bend-options" id="bendOptions" style="display:none;">
-                        <span class="bend-label">幅度:</span>
+                        <span class="bend-label" data-i18n="bend.amount">幅度:</span>
                         <button class="bend-amount-btn active" data-bend-amount="1">Full</button>
                         <button class="bend-amount-btn" data-bend-amount="0.5">1/2</button>
                         <button class="bend-amount-btn" data-bend-amount="0.25">1/4</button>
                         <span class="tech-sep"></span>
-                        <button class="bend-release-btn" id="bendReleaseToggle" title="推弦后释放回来">↩ 释放</button>
+                        <button class="bend-release-btn" id="bendReleaseToggle" data-i18n-title="bend.releaseTitle" title="推弦后释放回来" data-i18n="bend.release">↩ 释放</button>
                     </div>
 
                     <!-- 操作按钮 -->
                     <div class="action-bar">
-                        <button id="addNoteBtn" class="btn btn-primary" style="flex:2;">添加</button>
-                        <button id="addRestBtn" class="btn" style="flex:1;">𝄽 休止</button>
+                        <button id="addNoteBtn" class="btn btn-primary" style="flex:2;" data-i18n="note.add">添加</button>
+                        <button id="addRestBtn" class="btn" style="flex:1;" data-i18n="note.addRest">𝄽 休止</button>
                     </div>
 
                     <!-- 原位编辑已有音符（点击谱面音符后出现） -->
                     <div class="note-edit-bar" id="noteEditBar" style="display:none;">
                         <span class="note-edit-hint" id="noteEditHint"></span>
-                        <button id="applyNoteEditBtn" class="btn btn-primary btn-sm">✓ 应用修改</button>
-                        <button id="muteNoteBtn" class="btn btn-sm" title="把该拍静音为休止符">🗑 删除该拍</button>
-                        <button id="cancelNoteEditBtn" class="btn btn-sm" title="取消">✕</button>
+                        <button id="applyNoteEditBtn" class="btn btn-primary btn-sm" data-i18n="note.applyEdit">✓ 应用修改</button>
+                        <button id="muteNoteBtn" class="btn btn-sm" data-i18n-title="note.deleteBeatTitle" title="把该拍静音为休止符" data-i18n="note.deleteBeat">🗑 删除该拍</button>
+                        <button id="cancelNoteEditBtn" class="btn btn-sm" data-i18n-title="common.cancelTitle" title="取消">✕</button>
                     </div>
 
                     <!-- 点击空白拍 → 仅定位插入点，确认后才写入（不自动填旧数据） -->
                     <div class="note-edit-bar" id="noteInsertBar" style="display:none;">
                         <span class="note-edit-hint" id="noteInsertHint"></span>
-                        <button id="writeInsertBtn" class="btn btn-primary btn-sm">✓ 写入此拍</button>
-                        <button id="cancelInsertBtn" class="btn btn-sm" title="取消">✕</button>
+                        <button id="writeInsertBtn" class="btn btn-primary btn-sm" data-i18n="note.writeBeat">✓ 写入此拍</button>
+                        <button id="cancelInsertBtn" class="btn btn-sm" data-i18n-title="common.cancelTitle" title="取消">✕</button>
                     </div>
                 </div>
 
                 <!-- 右列：和弦输入 -->
                 <div class="control-group">
                     <div class="cg-header">
-                        <h4>🎸 和弦</h4>
+                        <h4 data-i18n="chord.title">🎸 和弦</h4>
                         <div class="chord-controls-row">
-                            <button id="arpeggioToggle" class="btn btn-sm" data-arpeggio="" title="琶音 (从低到高依次拨弦)">𝆃 琶音</button>
-                            <button id="strumToggle" class="btn btn-sm" title="扫弦 (快速扫过琴弦)">⤵ 扫弦</button>
+                            <button id="arpeggioToggle" class="btn btn-sm" data-arpeggio="" data-i18n-title="chord.arpeggioTitle" title="琶音 (从低到高依次拨弦)" data-i18n="chord.arpeggio">𝆃 琶音</button>
+                            <button id="strumToggle" class="btn btn-sm" data-i18n-title="chord.strumTitle" title="扫弦 (快速扫过琴弦)" data-i18n="chord.strum">⤵ 扫弦</button>
                             <select id="chordDuration" class="compact-select" style="width:auto;">
-                                <option value="1">全</option>
-                                <option value="0.5">二分</option>
-                                <option value="0.25" selected>四分</option>
-                                <option value="0.125">八分</option>
-                                <option value="0.0625">十六分</option>
-                                <option value="0.03125">三十二分</option>
+                                <option value="1" data-i18n="chord.durationWhole">全</option>
+                                <option value="0.5" data-i18n="chord.durationHalf">二分</option>
+                                <option value="0.25" selected data-i18n="chord.durationQuarter">四分</option>
+                                <option value="0.125" data-i18n="chord.durationEighth">八分</option>
+                                <option value="0.0625" data-i18n="chord.durationSixteenth">十六分</option>
+                                <option value="0.03125" data-i18n="chord.durationThirtySecond">三十二分</option>
                             </select>
-                            <button id="addChordBtn" class="btn btn-primary btn-sm">添加</button>
+                            <button id="addChordBtn" class="btn btn-primary btn-sm" data-i18n="chord.add">添加</button>
                         </div>
                     </div>
 
                     <!-- 和弦预设 -->
                     <div class="chord-presets">
-                        
+
                     </div>
 
                     <!-- 指法网格 -->
@@ -254,48 +258,49 @@
 
             <!-- 折叠面板：本地即兴（规则引擎 + 把位 DP + 风格化，无网络） -->
             <details class="collapse-section" id="localImprovPanel" open>
-                <summary>🎸 本地即兴生成</summary>
+                <summary data-i18n="localImprov.summary">🎸 本地即兴生成</summary>
                 <div class="collapse-content">
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>小节数</label>
+                            <label data-i18n="improv.numMeasures">小节数</label>
                             <select id="localNumMeasures" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 从 LOCAL_IMPROV_CONFIG 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>风格</label>
+                            <label data-i18n="improv.style">风格</label>
                             <select id="localStyle" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>音阶类型</label>
+                            <label data-i18n="improv.scaleType">音阶类型</label>
                             <select id="localScaleType" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>音符密度</label>
+                            <label data-i18n="improv.density">音符密度</label>
                             <select id="localDensity" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
                         </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>和弦进行</label>
+                            <label data-i18n="improv.progression">和弦进行</label>
                             <select id="localProgression" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 从 LOCAL_PROGRESSIONS 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>每小节和弦数</label>
+                            <label data-i18n="improv.chordsPerMeasure">每小节和弦数</label>
                             <select id="localChordsPerMeasure" class="compact-select mini" style="width:100%;"><!-- 由 initLocalImprovForm 填充 --></select>
                         </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>描述（可选）</label>
+                            <label data-i18n="improv.descriptionOptional">描述（可选）</label>
                             <textarea id="localImprovDescription" class="compact-input" rows="3"
+                                data-i18n-placeholder="improv.localPlaceholder"
                                 placeholder="如：爵士、16 小节、高密度、7/8、D 大调、7-10品、| C G | Am F |"
                                 style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" data-i18n="improv.localHelp">
                         描述里写到的项优先；只写调性时自动配大/小调音阶；可识别 7-10品 这类把位范围、Mi/Sol/La/Si/Re 指型（如「C 的 La 指型」）与熟悉指板/找音感等练习意图；和弦可写 | C G | Am F | 或「和弦进行：C G Am F」。CAGED 的 E 型/A 型命名与自然音限制暂不支持，会在结果里提示。推弦、滑弦等技法描述暂不解析。
                     </div>
-                    <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;">🎸 生成即兴谱</button>
+                    <button id="localImprovBtn" class="btn btn-primary" style="width:100%; margin-top:6px;" data-i18n="improv.generateLocal">🎸 生成即兴谱</button>
                     <div id="localImprovStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px;"></div>
                 </div>
             </details>
@@ -303,7 +308,7 @@
             <!-- 折叠面板：AI 即兴设置 -->
             <details class="collapse-section" id="aiSettingsPanel" open style="display:none;">
                 <summary style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                    <span>🤖 AI 即兴（本地底稿 + 加花）</span>
+                    <span data-i18n="ai.summary">🤖 AI 即兴（本地底稿 + 加花）</span>
                     <span id="aiApiKeyWrap" style="display:flex; align-items:center; gap:4px;">
                         <span style="font-size:11px; color:var(--text-muted);">API Key</span>
                         <input type="password" id="aiApiKey" class="compact-input" placeholder="sk-..." title="DeepSeek API Key" style="width:200px;">
@@ -312,63 +317,63 @@
                 <div class="collapse-content">
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>小节数</label>
+                            <label data-i18n="improv.numMeasures">小节数</label>
                             <select id="aiNumMeasures" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 从 IMPROV_CONFIG 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>风格</label>
+                            <label data-i18n="improv.style">风格</label>
                             <select id="aiStyle" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>音阶类型</label>
+                            <label data-i18n="improv.scaleType">音阶类型</label>
                             <select id="aiScaleType" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>音符密度</label>
+                            <label data-i18n="improv.density">音符密度</label>
                             <select id="aiDensity" class="compact-select mini" style="width:100%;"><!-- 由 initImprovConfig 填充 --></select>
                         </div>
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>额外需求（可选）</label>
-                            <textarea id="aiExtraPrompt" class="compact-input" rows="5" placeholder="如：主要在 C 的 La 指型上做即兴，目的在于熟悉指板寻找音感；结尾渐慢..." style="width:100%; resize:vertical;"></textarea>
+                            <label data-i18n="ai.extraOptional">额外需求（可选）</label>
+                            <textarea id="aiExtraPrompt" class="compact-input" rows="5" data-i18n-placeholder="ai.placeholder" placeholder="如：主要在 C 的 La 指型上做即兴，目的在于熟悉指板寻找音感；结尾渐慢..." style="width:100%; resize:vertical;"></textarea>
                         </div>
                     </div>
-                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;">
+                    <div style="font-size:11px; color:var(--text-muted); margin-top:2px;" data-i18n="ai.help">
                         本地先生成合法底稿；AI 只解析额外要求，并在底稿上增加奏法与表情（不改音高/节奏）。未配置 API Key 时直接出本地底稿。
                     </div>
-                    <button id="aiGenerateBtn" class="btn btn-primary" style="width:100%; margin-top:4px;">🤖 生成即兴谱</button>
+                    <button id="aiGenerateBtn" class="btn btn-primary" style="width:100%; margin-top:4px;" data-i18n="ai.generate">🤖 生成即兴谱</button>
                     <div id="aiGenStatus" style="font-size:11px; color:var(--text-muted); margin-top:4px; min-height:16px; white-space:pre-wrap;"></div>
-                    <button id="aiPromptDebugBtn" class="btn btn-sm" style="margin-top:6px; width:100%;" title="调试 AI 即兴两段提示词（需求解析 / 表现扩展）">🧪 调试 Prompt</button>
+                    <button id="aiPromptDebugBtn" class="btn btn-sm" style="margin-top:6px; width:100%;" data-i18n-title="ai.debugPromptTitle" title="调试 AI 即兴两段提示词（需求解析 / 表现扩展）" data-i18n="ai.debugPrompt">🧪 调试 Prompt</button>
                 </div>
             </details>
 
             <!-- 折叠面板：调弦 + 录音 -->
             <details class="collapse-section" style="display: none">
-                <summary>⚙️ 调弦 &amp; 调性 &amp; 录音</summary>
+                <summary data-i18n="settings.summary">⚙️ 调弦 &amp; 调性 &amp; 录音</summary>
                 <div class="collapse-content">
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>调性 (Key)</label>
+                            <label data-i18n="settings.key">调性 (Key)</label>
                             <select id="keySelect" class="compact-select" style="width:100%;">
-                                <optgroup label="大调">
-                                    <option value="C">C (无升降)</option>
-                                    <option value="G">G (1升)</option>
-                                    <option value="D">D (2升)</option>
-                                    <option value="A">A (3升)</option>
-                                    <option value="E">E (4升)</option>
-                                    <option value="B">B (5升)</option>
-                                    <option value="F#">F# (6升)</option>
-                                    <option value="C#">C# (7升)</option>
-                                    <option value="F">F (1降)</option>
-                                    <option value="Bb">Bb (2降)</option>
-                                    <option value="Eb">Eb (3降)</option>
-                                    <option value="Ab">Ab (4降)</option>
-                                    <option value="Db">Db (5降)</option>
-                                    <option value="Gb">Gb (6降)</option>
-                                    <option value="Cb">Cb (7降)</option>
+                                <optgroup label="大调" data-i18n-label="settings.major">
+                                    <option value="C" data-i18n="key.C">C (无升降)</option>
+                                    <option value="G" data-i18n="key.G">G (1升)</option>
+                                    <option value="D" data-i18n="key.D">D (2升)</option>
+                                    <option value="A" data-i18n="key.A">A (3升)</option>
+                                    <option value="E" data-i18n="key.E">E (4升)</option>
+                                    <option value="B" data-i18n="key.B">B (5升)</option>
+                                    <option value="F#" data-i18n="key.FSharp">F# (6升)</option>
+                                    <option value="C#" data-i18n="key.CSharp">C# (7升)</option>
+                                    <option value="F" data-i18n="key.F">F (1降)</option>
+                                    <option value="Bb" data-i18n="key.BFlat">Bb (2降)</option>
+                                    <option value="Eb" data-i18n="key.EFlat">Eb (3降)</option>
+                                    <option value="Ab" data-i18n="key.AFlat">Ab (4降)</option>
+                                    <option value="Db" data-i18n="key.DFlat">Db (5降)</option>
+                                    <option value="Gb" data-i18n="key.GFlat">Gb (6降)</option>
+                                    <option value="Cb" data-i18n="key.CFlat">Cb (7降)</option>
                                 </optgroup>
-                                <optgroup label="小调">
+                                <optgroup label="小调" data-i18n-label="settings.minor">
                                     <option value="Am">Am</option>
                                     <option value="Em">Em</option>
                                     <option value="Bm">Bm</option>
@@ -388,7 +393,7 @@
                             </select>
                         </div>
                         <div class="input-group" style="flex:1;">
-                            <label>拍号</label>
+                            <label data-i18n="settings.timeSignature">拍号</label>
                             <select id="timeSigSelect" class="compact-select" style="width:100%;">
                                 <option value="2/2">2/2</option>
                                 <option value="2/4">2/4</option>
@@ -404,18 +409,18 @@
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>调弦预设</label>
+                            <label data-i18n="settings.tuningPreset">调弦预设</label>
                             <select id="tuningPreset" class="compact-select" style="width:100%;">
                                 <option value="standard">Standard (EADGBE)</option>
                                 <option value="dropD">Drop D (DADGBE)</option>
                                 <option value="openG">Open G (DGDGBD)</option>
                                 <option value="openD">Open D (DADF#AD)</option>
-                                <option value="halfStepDown">半音降 (EbAbDbGbBbEb)</option>
-                                <option value="fullStepDown">全音降 (DGCFAD)</option>
+                                <option value="halfStepDown" data-i18n="tuning.halfStepDown">半音降 (EbAbDbGbBbEb)</option>
+                                <option value="fullStepDown" data-i18n="tuning.fullStepDown">全音降 (DGCFAD)</option>
                             </select>
                         </div>
                         <div class="input-group" style="flex:2;">
-                            <label>自定义调弦</label>
+                            <label data-i18n="settings.customTuning">自定义调弦</label>
                             <div class="tuning-inputs">
                                 <span>1</span><input type="text" id="tuning1" value="E4">
                                 <span>2</span><input type="text" id="tuning2" value="B3">
@@ -428,10 +433,10 @@
                     </div>
                     <div class="collapse-row">
                         <div class="input-group" style="flex:1;">
-                            <label>录音</label>
+                            <label data-i18n="settings.record">录音</label>
                             <div class="audio-controls">
-                                <button id="recordBtn" class="btn btn-sm">⏺ 录音</button>
-                                <span class="audio-status" id="audioStatus">就绪</span>
+                                <button id="recordBtn" class="btn btn-sm" data-i18n="record.start">⏺ 录音</button>
+                                <span class="audio-status" id="audioStatus" data-i18n="audio.ready">就绪</span>
                             </div>
                         </div>
                         <div class="input-group" style="flex:1;">
@@ -447,7 +452,7 @@
             </details>
 
             <!-- Status Bar -->
-            <div class="status-bar" id="statusBar">就绪</div>
+            <div class="status-bar" id="statusBar" data-i18n="status.readyShort">就绪</div>
         </div>
 
         <script type="module" src="./src/popup.ts"></script>

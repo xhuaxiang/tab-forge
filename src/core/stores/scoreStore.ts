@@ -10,6 +10,7 @@ import { locateSlotAt, measureTotalBeats, measureCapacity, canAddToMeasure, crea
 import { applyNoteChange, muteNoteGroup } from '../utils/measureEdit.ts';
 import { groupFlatNotes, nextChordGroupId, validateNoteGroup } from '../utils/noteGroup.ts';
 import { SCORE_DEFAULTS } from '../config.ts';
+import { t } from '../i18n/index.ts';
 
 export const scoreStore = {
     /** 乐谱数据 */
@@ -281,7 +282,7 @@ export const scoreStore = {
         const error = validateNoteGroup(notes);
         if (error) return { ok: false, reason: error };
         const measure = this.score.measures[measureIndex];
-        if (!measure) return { ok: false, reason: '小节不存在' };
+        if (!measure) return { ok: false, reason: t('core.measureMissing') };
 
         const all = measure.notes;
         const loc = locateSlotAt(measure, beatOffset);
@@ -295,7 +296,7 @@ export const scoreStore = {
                 const cap = measureCapacity(measure);
                 const total = measureTotalBeats(measure);
                 if (total - first.duration + notes[0].duration > cap + 0.001) {
-                    return { ok: false, reason: '时值超出小节容量' };
+                    return { ok: false, reason: t('core.slotOverflow') };
                 }
                 const group = notes.length > 1 ? nextChordGroupId(this.score.measures) : undefined;
                 all.splice(replaceIndex, 1, ...normalizeGroup(notes, group));
@@ -305,7 +306,7 @@ export const scoreStore = {
 
             // 已有音符 → 合并进该 slot（单音变和弦 / 和弦追加）
             if (notes.some(n => slot.some(s => s.string === n.string))) {
-                return { ok: false, reason: '该弦已有音符' };
+                return { ok: false, reason: t('core.stringOccupied') };
             }
             const group = slot[0].chordGroup ?? nextChordGroupId(this.score.measures);
             for (const s of slot) s.chordGroup = group;
@@ -317,7 +318,7 @@ export const scoreStore = {
         }
 
         // 超出所有内容（空小节隐式全音符休止 / 尾部）
-        if (!canAddToMeasure(measure, notes[0].duration)) return { ok: false, reason: '节拍已满' };
+        if (!canAddToMeasure(measure, notes[0].duration)) return { ok: false, reason: t('core.beatFull') };
         const group = notes.length > 1 ? nextChordGroupId(this.score.measures) : undefined;
         all.push(...normalizeGroup(notes, group));
         this._notify();
@@ -327,9 +328,9 @@ export const scoreStore = {
     /** 原位修改某小节的音符（单音拍整拍替换 / 和弦内单弦替换，保留原拍时值） */
     updateNoteAt(measureIndex: number, noteIndex: number, note: Note): { ok: boolean; reason?: string } {
         const measure = this.score.measures[measureIndex];
-        if (!measure) return { ok: false, reason: '小节不存在' };
+        if (!measure) return { ok: false, reason: t('core.measureMissing') };
         const r = applyNoteChange(measure, noteIndex, note);
-        if (!r.ok || !r.notes) return { ok: false, reason: r.reason ?? '修改失败' };
+        if (!r.ok || !r.notes) return { ok: false, reason: r.reason ?? t('core.updateFailed') };
         measure.notes = r.notes;
         this._notify();
         return { ok: true };
@@ -338,9 +339,9 @@ export const scoreStore = {
     /** 把某小节的整拍（单音/和弦）静音为休止符，保留时值 */
     muteNoteAt(measureIndex: number, noteIndex: number): { ok: boolean; reason?: string } {
         const measure = this.score.measures[measureIndex];
-        if (!measure) return { ok: false, reason: '小节不存在' };
+        if (!measure) return { ok: false, reason: t('core.measureMissing') };
         const r = muteNoteGroup(measure, noteIndex);
-        if (!r.ok || !r.notes) return { ok: false, reason: r.reason ?? '删除失败' };
+        if (!r.ok || !r.notes) return { ok: false, reason: r.reason ?? t('core.deleteFailed') };
         measure.notes = r.notes;
         this._notify();
         return { ok: true };

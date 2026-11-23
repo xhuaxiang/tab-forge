@@ -16,6 +16,7 @@ import type {
     ResolvedImprovOptions,
     StyleProfile,
 } from '../../types/improv/index.ts';
+import { t } from '../../i18n/index.ts';
 import { pickWeighted, randInt } from './random.ts';
 
 /** 轮廓偏置：每一步优先朝轮廓方向走的级数 */
@@ -252,42 +253,56 @@ export function validatePhrasePlan(
     options: ResolvedImprovOptions,
 ): string[] {
     const errors: string[] = [];
-    if (phrases.length === 0) return ['乐句计划为空'];
+    if (phrases.length === 0) return [t('improv.phrase.empty')];
 
     let expectedStart = 0;
     phrases.forEach((phrase, index) => {
+        const phraseNumber = index + 1;
         if (phrase.index !== index) {
-            errors.push(`第 ${index + 1} 句 index 应为 ${index}`);
+            errors.push(t('improv.phrase.index', {
+                phrase: phraseNumber,
+                index,
+            }));
         }
         if (phrase.startMeasure !== expectedStart) {
-            errors.push(`第 ${index + 1} 句应从第 ${expectedStart + 1} 小节开始`);
+            errors.push(t('improv.phrase.startMeasure', {
+                phrase: phraseNumber,
+                measure: expectedStart + 1,
+            }));
         }
         if (phrase.endMeasure <= phrase.startMeasure) {
-            errors.push(`第 ${index + 1} 句没有小节`);
+            errors.push(t('improv.phrase.noMeasures', { phrase: phraseNumber }));
         }
         if (phrase.steps.length === 0) {
-            errors.push(`第 ${index + 1} 句没有级数步`);
+            errors.push(t('improv.phrase.noDegreeSteps', { phrase: phraseNumber }));
         }
         if (phrase.fretMin < 0 || phrase.fretMax > 24
             || phrase.fretMin > phrase.fretMax) {
-            errors.push(`第 ${index + 1} 句把位窗口非法: ${phrase.fretMin}-${phrase.fretMax}`);
+            errors.push(t('improv.phrase.fretWindowInvalid', {
+                phrase: phraseNumber,
+                min: phrase.fretMin,
+                max: phrase.fretMax,
+            }));
         }
         if (index === 0 && phrase.role !== 'statement') {
-            errors.push('第一句必须是 statement');
+            errors.push(t('improv.phrase.firstMustBeStatement'));
         }
         if (phrases.length > 1 && index === phrases.length - 1
             && phrase.role !== 'cadence') {
-            errors.push('最后一句必须是 cadence');
+            errors.push(t('improv.phrase.lastMustBeCadence'));
         }
         if (phrase.sourcePhrase !== null
             && (phrase.sourcePhrase < 0 || phrase.sourcePhrase >= index)) {
-            errors.push(`第 ${index + 1} 句的动机来源非法`);
+            errors.push(t('improv.phrase.motifSourceInvalid', { phrase: phraseNumber }));
         }
         expectedStart = phrase.endMeasure;
     });
 
     if (expectedStart !== options.numMeasures) {
-        errors.push(`乐句覆盖 ${expectedStart} 小节，期望 ${options.numMeasures}`);
+        errors.push(t('improv.phrase.coverageMismatch', {
+            actual: expectedStart,
+            expected: options.numMeasures,
+        }));
     }
     return errors;
 }

@@ -5,7 +5,7 @@
  * AI 即兴暂缓上线：选中时只提示并回落到本地，不进入不可用面板。
  */
 
-import { setStatus } from '../dom.ts';
+import { setStatusT } from '../dom.ts';
 
 type ImprovMode = 'local' | 'ai';
 
@@ -44,7 +44,7 @@ export function initImprovModeSwitch(): void {
             // AI 即兴暂缓上线：提示后把下拉复位，本地面板保持可见
             select.value = 'local';
             applyImprovMode('local');
-            setStatus('AI 即兴功能更新中，敬请期待', 'info');
+            setStatusT('improv.aiSoon', undefined, 'info');
             return;
         }
         const mode = isImprovMode(select.value) ? select.value : 'local';

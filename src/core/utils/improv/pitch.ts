@@ -9,6 +9,7 @@ import type { Tuning } from '../../types/index.ts';
 import type { FretPosition, ScaleType } from '../../types/improv/index.ts';
 import { SCALE_INTERVALS } from '../../types/improv/index.ts';
 import { noteNameToMidi } from '../scoreMapping.ts';
+import { t } from '../../i18n/index.ts';
 
 /** 音高 class（0-11），对负数也安全 */
 export function pitchClassOf(midi: number): number {
@@ -75,7 +76,7 @@ export function openStringMidis(tuning: Tuning): Record<number, number> {
     const result: Record<number, number> = {};
     names.forEach((name, index) => {
         const midi = noteNameToMidi(name);
-        if (midi <= 0) throw new Error(`无效调弦音名: ${name}`);
+        if (midi <= 0) throw new Error(t('improv.pitch.invalidTuningName', { name }));
         result[index + 1] = midi;
     });
     return result;
@@ -84,7 +85,7 @@ export function openStringMidis(tuning: Tuning): Record<number, number> {
 /** 某弦某品的 MIDI 音号 */
 export function fretToMidi(tuning: Tuning, string: number, fret: number): number {
     const open = openStringMidis(tuning)[string];
-    if (open === undefined) throw new Error(`无效弦号: ${string}`);
+    if (open === undefined) throw new Error(t('improv.pitch.invalidString', { string }));
     return open + fret;
 }
 

@@ -18,6 +18,7 @@ import type {
 } from '../../types/improv/index.ts';
 import { FINGERING_PATTERNS } from '../../types/improv/index.ts';
 import { LOCAL_IMPROV_CONFIG } from '../../config.ts';
+import { t, type MessageKey } from '../../i18n/index.ts';
 import { parseKey } from './pitch.ts';
 import {
     parseProgressionText,
@@ -196,26 +197,36 @@ function parsePracticeFocus(text: string): PracticeFocus | undefined {
     return undefined;
 }
 
+export type UnsupportedDescriptionCode = 'caged' | 'naturalNotes';
+
+export interface UnsupportedDescriptionItem {
+    code: UnsupportedDescriptionCode;
+    key: MessageKey;
+}
+
 /**
- * 识别当前本地引擎不支持、但用户明确写出来的需求。
+ * 识别当前本地引擎不支持、但用户明确写出来的需求（结构化）。
  *
- * 只用于 UI 提示，不参与生成。五型指法现已支持；CAGED 的
- * C / A / G / E / D 型命名本地不做映射，交给 AI 需求解析。
+ * 调用方若要按 code 过滤（如 AI 已翻译 CAGED 后不再重复提示），用这个；
+ * 只展示文案时用 detectUnsupportedDescription。
  */
-export function detectUnsupportedDescription(text: string): string[] {
-    const unsupported: string[] = [];
+export function detectUnsupportedDescriptionItems(text: string): UnsupportedDescriptionItem[] {
+    const unsupported: UnsupportedDescriptionItem[] = [];
 
     // 前置边界：避免把五型里的 `Re型` 当成 CAGED 的 E 型
     if (/(?:^|[^A-Za-z])[A-EG]\s*型|CAGED/i.test(text)) {
-        unsupported.push(
-            'C/A/G/E/D 型（CAGED）命名不由本地映射，交给 AI 需求解析（本地支持 Mi/Sol/La/Si/Re）',
-        );
+        unsupported.push({ code: 'caged', key: 'improv.unsupported.caged' });
     }
     if (/自然音(?!阶)|只用白键|不要\s*[A-G][#b]|不要[^。；;\n]{0,6}[升降]|落在\s*[A-G]\s*[-–]\s*[A-G]\s*(?:这些|之间|范围|内|上)/i.test(text)) {
-        unsupported.push('自然音/升降音限制暂未支持，生成仍按音阶与和弦音池');
+        unsupported.push({ code: 'naturalNotes', key: 'improv.unsupported.naturalNotes' });
     }
 
     return unsupported;
+}
+
+/** 识别不支持项并按当前界面语言返回文案（默认 zh-CN 与旧输出逐字一致） */
+export function detectUnsupportedDescription(text: string): string[] {
+    return detectUnsupportedDescriptionItems(text).map(item => t(item.key));
 }
 
 /** 散文片段：含中文，或全小写英文（如 then / and then）。 */

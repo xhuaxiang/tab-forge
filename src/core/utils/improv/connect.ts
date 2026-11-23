@@ -9,6 +9,7 @@ import type { Note } from '../../types/index.ts';
 import type { PlayabilityRules } from '../../types/improv/index.ts';
 import type { ConnectingTechnique } from '../technique.ts';
 import { canSourceTechnique } from '../technique.ts';
+import { t } from '../../i18n/index.ts';
 
 /**
  * 所有连接技法共有的前提。
@@ -22,34 +23,34 @@ function baseIssue(
     playability: PlayabilityRules,
 ): string | undefined {
     if (!previous || previous.isRest) {
-        return '连接技法缺少紧邻的同弦前音';
+        return t('improv.connect.missingPrevious');
     }
     if (previous.string === undefined || note.string === undefined
         || previous.string !== note.string) {
-        return '连接技法必须与前音同弦';
+        return t('improv.connect.differentString');
     }
     if (previous.fret === undefined || note.fret === undefined) {
-        return '连接技法缺少品位';
+        return t('improv.connect.missingFret');
     }
     if (!canSourceTechnique(previous)) {
-        return '连接技法的前音是闷音/制音/断音，不能作为发声源';
+        return t('improv.connect.previousMuted');
     }
     // 泛音要重新拨弦且是另一套音色，不能复用它的缓冲区做连接源。
     if (previous.harmonic !== undefined) {
-        return '连接技法的前音是泛音，不能作为发声源';
+        return t('improv.connect.previousHarmonic');
     }
     if (previous.technique === 'bend' || previous.technique === 'vibrato') {
-        return '连接技法的前音带推/揉弦，不能复用';
+        return t('improv.connect.previousBendVibrato');
     }
     if (note.duration < playability.minConnectDuration) {
-        return '连接技法时值过短';
+        return t('improv.connect.tooShort');
     }
     // 目标音不重新拨弦；带独立奏法的目标与连接语义冲突。
-    if (note.deadNote) return '连接技法不能用于制音';
-    if (note.harmonic !== undefined) return '连接技法不能用于泛音';
-    if (note.staccato) return '连接技法不能用于断音';
-    if (note.letRing) return '连接技法不能用于延音';
-    if (note.palmMute) return '连接技法不能用于闷音';
+    if (note.deadNote) return t('improv.connect.targetDead');
+    if (note.harmonic !== undefined) return t('improv.connect.targetHarmonic');
+    if (note.staccato) return t('improv.connect.targetStaccato');
+    if (note.letRing) return t('improv.connect.targetLetRing');
+    if (note.palmMute) return t('improv.connect.targetPalmMute');
     return undefined;
 }
 
@@ -64,20 +65,20 @@ function spanIssue(
 
     if (technique === 'slide') {
         // 空弦没有按弦手指可移动，滑入/滑出空弦都不可演奏。
-        if (previousFret < 1 || fret < 1) return '滑弦两端都不能是空弦';
-        if (span < 1) return '滑弦需要品位变化';
+        if (previousFret < 1 || fret < 1) return t('improv.connect.slideOpenString');
+        if (span < 1) return t('improv.connect.slideNeedsFretChange');
         if (span > playability.maxSlideFrets) {
-            return `滑弦品位跨度过大: ${span}`;
+            return t('improv.connect.slideSpanTooLarge', { span });
         }
         return undefined;
     }
 
-    if (span < 1) return '击/勾弦需要品位变化';
+    if (span < 1) return t('improv.connect.hammerNeedsFretChange');
     if (span > playability.maxHammerPullFrets) {
-        return `击/勾弦品位跨度过大: ${span}`;
+        return t('improv.connect.hammerSpanTooLarge', { span });
     }
-    if (technique === 'hammerOn' && diff < 0) return '击弦目标品位应高于前音';
-    if (technique === 'pullOff' && diff > 0) return '勾弦目标品位应低于前音';
+    if (technique === 'hammerOn' && diff < 0) return t('improv.connect.hammerTargetHigher');
+    if (technique === 'pullOff' && diff > 0) return t('improv.connect.pullTargetLower');
     return undefined;
 }
 

@@ -9,6 +9,7 @@ import type { Note, NoteDuration } from '../../core/types/index.ts';
 import { NOTE_DURATIONS } from '../../core/types/index.ts';
 import { DEFAULT_HARMONIC_FRET, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
 import { normalizeHarmonicFret } from '../../core/utils/scoreMapping.ts';
+import { t } from '../../core/i18n/index.ts';
 import {
     isAIBendAmount,
     isAIDynamics,
@@ -205,7 +206,7 @@ export function parseAIResponse(rawText: string): { notes: Note[]; error?: strin
         const parsed: RawResponse = JSON.parse(jsonText);
 
         if (!parsed.measures || !Array.isArray(parsed.measures)) {
-            return { notes: [], error: 'AI 返回的 JSON 中缺少 measures 数组' };
+            return { notes: [], error: t('ai.error.missingMeasures') };
         }
 
         const allNotes: Note[] = [];
@@ -218,12 +219,12 @@ export function parseAIResponse(rawText: string): { notes: Note[]; error?: strin
         }
 
         if (allNotes.length === 0) {
-            return { notes: [], error: 'AI 返回的 measures 中没有有效音符' };
+            return { notes: [], error: t('ai.error.noValidNotes') };
         }
 
         return { notes: allNotes };
     } catch (e) {
-        const msg = e instanceof Error ? e.message : 'JSON 解析失败';
-        return { notes: [], error: `AI 响应解析错误: ${msg}` };
+        const msg = e instanceof Error ? e.message : t('ai.error.parseFailed');
+        return { notes: [], error: t('ai.error.parseError', { message: msg }) };
     }
 }

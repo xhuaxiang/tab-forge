@@ -13,6 +13,8 @@
  */
 
 import { composeSystemPrompt, stripContract, DEFAULT_EXPERT_PROMPT } from './promptBuilder.ts';
+import { t } from '../../core/i18n/index.ts';
+import { readStorage, writeStorage } from '../storage.ts';
 import { setStatus } from '../../app/dom.ts';
 import { TRIGGER_EXTRA_PROMPT, isSystemPromptTrigger } from './promptTriggers.ts';
 
@@ -21,27 +23,9 @@ export { TRIGGER_EXTRA_PROMPT, isSystemPromptTrigger };
 /** 本地存储键（与 api-key 同一套 chrome.storage/localStorage 逻辑） */
 const STORAGE_KEY = 'TabForge_CustomSystemPrompt';
 
-/** 检测是否在 Chrome Extension 环境 */
-function isChromeExtension(): boolean {
-    return typeof chrome !== 'undefined' && !!chrome.storage;
-}
-
 /** 读取本地存的专业性描述原文（未设置返回 null） */
 async function readStoredPrompt(): Promise<string | null> {
-    if (isChromeExtension()) {
-        try {
-            const result = await chrome.storage.local.get<Record<typeof STORAGE_KEY, string>>(STORAGE_KEY);
-            return result[STORAGE_KEY] || null;
-        } catch {
-            return null;
-        }
-    }
-    // web fallback: localStorage
-    try {
-        return localStorage.getItem(STORAGE_KEY) || null;
-    } catch {
-        return null;
-    }
+    return readStorage(STORAGE_KEY);
 }
 
 /**
@@ -55,13 +39,7 @@ export async function getCustomSystemPrompt(): Promise<string | null> {
 
 /** 保存自定义专业性描述（不含数据结构） */
 export async function saveCustomSystemPrompt(prompt: string): Promise<void> {
-    if (isChromeExtension()) {
-        await chrome.storage.local.set({ [STORAGE_KEY]: prompt });
-        return;
-    }
-    try {
-        localStorage.setItem(STORAGE_KEY, prompt);
-    } catch { /* ignore */ }
+    await writeStorage(STORAGE_KEY, prompt);
 }
 
 /** 当前生效的可编辑部分（专业性描述，不含数据结构）：自定义优先，未设置用默认 */
@@ -91,12 +69,12 @@ function buildModal(initial: string): void {
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="modal-content">
-            <h3>✏️ 修改系统提示词</h3>
-            <p class="modal-hint">编辑 AI 即兴生成的系统提示词（system prompt），保存后对后续生成生效。</p>
+            <h3>${t('ai.editor.systemTitle')}</h3>
+            <p class="modal-hint">${t('ai.editor.systemHint')}</p>
             <textarea class="modal-textarea" id="systemPromptTextarea" style="min-height:280px;"></textarea>
             <div class="modal-footer">
-                <button id="systemPromptCancelBtn">取消</button>
-                <button id="systemPromptSaveBtn" class="btn-copy">保存</button>
+                <button id="systemPromptCancelBtn">${t('common.cancelTitle')}</button>
+                <button id="systemPromptSaveBtn" class="btn-copy">${t('common.save')}</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -111,7 +89,7 @@ function buildModal(initial: string): void {
     modal.querySelector('#systemPromptSaveBtn')?.addEventListener('click', async () => {
         await saveCustomSystemPrompt(textarea.value);
         close();
-        setStatus('系统提示词已保存，对后续生成生效', 'success');
+        setStatus(t('ai.debug.systemPromptSaved'), 'success');
     });
     modal.addEventListener('click', (e) => {
         if (e.target === modal) close();

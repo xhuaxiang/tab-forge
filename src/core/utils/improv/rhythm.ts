@@ -20,6 +20,7 @@ import type {
     StyleProfile,
 } from '../../types/improv/index.ts';
 import { parseTimeSignature, capacityFromTimeSignature } from '../measureUtils.ts';
+import { t } from '../../i18n/index.ts';
 import { pickWeighted } from './random.ts';
 
 /** 全音符 = 32 个 1/32 单位 */
@@ -166,7 +167,7 @@ function ensureMinimumSlots(slots: RhythmSlot[], minNotes: number): void {
             }
         }
         if (longestIndex < 0) {
-            throw new Error(`无法把节奏拆到至少 ${minNotes} 个拍位`);
+            throw new Error(t('improv.rhythm.splitFailed', { min: minNotes }));
         }
 
         const source = slots[longestIndex];
@@ -230,7 +231,7 @@ function buildMeasureSlots(
             candidate.units <= remainingUnits
             && canFillUnits(remainingUnits - candidate.units, candidates));
         if (feasible.length === 0) {
-            throw new Error(`节奏无法闭合: 剩余 ${remainingUnits}/32`);
+            throw new Error(t('improv.rhythm.notClosed', { remaining: remainingUnits }));
         }
 
         const chosen = pickWeighted(
@@ -406,16 +407,20 @@ export function buildRhythmPlan(
 ): RhythmMeasure[] {
     const capacity = capacityFromTimeSignature(options.timeSignature);
     if (!Number.isFinite(capacity) || capacity <= 0) {
-        throw new Error(`无效拍号: ${options.timeSignature}`);
+        throw new Error(t('improv.common.invalidTimeSignature', {
+            signature: options.timeSignature,
+        }));
     }
     const capacityUnits = Math.round(capacity * UNITS_PER_WHOLE);
     if (capacityUnits % 2 !== 0) {
-        throw new Error(`拍号容量无法用当前时值精确闭合: ${options.timeSignature}`);
+        throw new Error(t('improv.rhythm.capacityNotClosed', {
+            signature: options.timeSignature,
+        }));
     }
 
     const candidates = buildDurationCandidates(density, style);
     if (candidates.length === 0) {
-        throw new Error('没有可用的节奏时值');
+        throw new Error(t('improv.rhythm.noDurations'));
     }
 
     if (phrases === undefined || phrases.length === 0) {

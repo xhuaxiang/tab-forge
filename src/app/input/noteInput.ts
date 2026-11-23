@@ -12,7 +12,21 @@ import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { uiStore } from '../../core/stores/uiStore.ts';
 import { CHORD_PRESETS, updateStrumButton, updateArpeggioButton } from './chordInput.ts';
 import { BEND_AMOUNT_LABELS, HARMONIC_FRET_MIN, HARMONIC_FRET_MAX } from '../../core/config.ts';
-import { buildNotesFromForm, updateTechniqueUI, initTargetFretFollow, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, ARTICULATION_LABELS, HARMONIC_LABELS, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
+import { t, type MessageKey } from '../../core/i18n/index.ts';
+import { buildNotesFromForm, updateTechniqueUI, initTargetFretFollow, isTieActive, applyEditTarget, muteEditTarget, clearEditTarget, writeInsertTarget, cancelInsertTarget, clearInsertTarget, getArticulationFields, updateHarmonicUI, formatArticulationSuffix, articulationLabel, harmonicLabel, type AppTechnique } from '../../features/alphaTab/scoreEditing.ts';
+
+/** 技法简写（状态栏后缀）文案 key；'none' 不产生后缀 */
+const TECH_SUFFIX_KEYS: Record<Exclude<AppTechnique, 'none'>, MessageKey> = {
+    hammerOn: 'note.tech.hammerOn',
+    pullOff: 'note.tech.pullOff',
+    slide: 'note.tech.slide',
+    bend: 'note.tech.bend',
+    vibrato: 'note.tech.vibrato',
+};
+
+function techSuffixLabel(tech: AppTechnique): string {
+    return tech === 'none' ? tech : t(TECH_SUFFIX_KEYS[tech]);
+}
 
 export function initNoteInput(): void {
     // ============================================================
@@ -54,7 +68,10 @@ export function initNoteInput(): void {
                 if (sel) sel.value = '';
                 updateHarmonicUI();
             }
-            setStatus(`${ARTICULATION_LABELS[name]}: ${active ? '开' : '关'}`, 'info');
+            setStatus(t('note.status.articulation', {
+                name: articulationLabel(name),
+                state: t(active ? 'common.on' : 'common.off'),
+            }), 'info');
         });
     });
 
@@ -70,7 +87,9 @@ export function initNoteInput(): void {
             uiStore.setArticulation('deadNote', false);
         }
         updateHarmonicUI();
-        setStatus(harmonic ? `泛音: ${HARMONIC_LABELS[harmonic]}` : '泛音: 关闭', 'info');
+        setStatus(harmonic
+            ? t('note.status.harmonic', { name: harmonicLabel(harmonic) })
+            : t('note.status.harmonicOff'), 'info');
     });
 
     const harmonicFretInput = $('harmonicFret') as HTMLInputElement | null;
@@ -95,12 +114,15 @@ export function initNoteInput(): void {
         const durSel = $('inputDuration') as HTMLSelectElement | null;
         const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
         if (!canAddToMeasure(measure, duration)) {
-            setStatus(`节拍已满（${measure.timeSignatureNumerator}/${measure.timeSignatureDenominator}）`, 'error');
+            setStatus(t('note.status.beatFullWithTime', {
+                numerator: measure.timeSignatureNumerator,
+                denominator: measure.timeSignatureDenominator,
+            }), 'error');
             return;
         }
         const built = buildNotesFromForm(true);
         if (built.notes.length === 0) {
-            setStatus(built.error ?? '表单值无效', 'error');
+            setStatus(built.error ?? t('note.status.invalidForm'), 'error');
             return;
         }
         const notes = built.notes;
@@ -114,27 +136,32 @@ export function initNoteInput(): void {
         // 多弦整组一次写入，只触发一次渲染
         const added = scoreStore.addNotes(notes);
         if (!added.ok) {
-            setStatus(added.reason ?? '添加失败', 'error');
+            setStatus(added.reason ?? t('note.status.addFailed'), 'error');
             return;
         }
 
         let suffix = '';
-        if (isTie) suffix = ' (延音)';
+        if (isTie) suffix = t('note.suffix.tie');
         if (hasTech) {
-            const labels: Record<string, string> = { hammerOn: '击弦H', pullOff: '勾弦P', slide: '滑弦S', bend: '推弦B', vibrato: '揉弦~' };
-            suffix += ` (${labels[tech] || tech})`;
+            suffix += t('note.suffix.tech', { name: techSuffixLabel(tech) });
             if (tech === 'bend') {
-                suffix += ` ${BEND_AMOUNT_LABELS[uiStore.bendAmount] || uiStore.bendAmount}`;
-                if (uiStore.bendRelease) suffix += ' 释放';
+                suffix += t('note.suffix.bendAmount', { amount: BEND_AMOUNT_LABELS[uiStore.bendAmount] || uiStore.bendAmount });
+                if (uiStore.bendRelease) suffix += t('note.suffix.release');
             } else if (first.targetFret !== undefined) {
-                suffix += ` →${first.targetFret}品`;
+                suffix += t('note.suffix.targetFret', { fret: first.targetFret });
             }
         }
 
         const artLabels = formatArticulationSuffix(first);
         if (artLabels) suffix += ` (${artLabels})`;
 
-        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · 第${stringList}弦 ${fret}品 ${durationName(first.duration)}${suffix}`, 'success');
+        setStatus(t('note.status.added', {
+            measure: scoreStore.activeMeasureIndex() + 1,
+            strings: stringList,
+            fret,
+            duration: durationName(first.duration),
+            suffix,
+        }), 'success');
     });
 
     // --- 休止符 ---
@@ -143,14 +170,17 @@ export function initNoteInput(): void {
         clearInsertTarget();
         const durSel = $('inputDuration') as HTMLSelectElement;
         const duration = parseFloat(durSel?.value || '0.25');
-        if (duration <= 0) { setStatus('无效时值', 'error'); return; }
+        if (duration <= 0) { setStatus(t('note.status.invalidDuration'), 'error'); return; }
         const measure = scoreStore.getActiveMeasure();
         if (!canAddToMeasure(measure, duration)) {
-            setStatus('节拍已满', 'error');
+            setStatus(t('note.status.beatFull'), 'error');
             return;
         }
         scoreStore.addRest(duration);
-        setStatus(`已添加: 小节${scoreStore.activeMeasureIndex() + 1} · ${durationName(duration)} 休止符`, 'success');
+        setStatus(t('note.status.restAdded', {
+            measure: scoreStore.activeMeasureIndex() + 1,
+            duration: durationName(duration),
+        }), 'success');
     });
 
     // --- 原位编辑已有音符（点谱面音符后出现） ---
@@ -185,11 +215,11 @@ export function initNoteInput(): void {
         uiStore.cycleArpeggio();
         updateArpeggioButton();
         if (uiStore.currentArpeggio === 'up') {
-            setStatus('琶音: 从低到高', 'info');
+            setStatus(t('note.status.arpeggioUp'), 'info');
         } else if (uiStore.currentArpeggio === 'down') {
-            setStatus('琶音: 从高到低', 'info');
+            setStatus(t('note.status.arpeggioDown'), 'info');
         } else {
-            setStatus('琶音: 关闭', 'info');
+            setStatus(t('note.status.arpeggioOff'), 'info');
         }
     });
 
@@ -199,11 +229,11 @@ export function initNoteInput(): void {
         uiStore.toggleStrum();
         updateStrumButton();
         if (uiStore.currentStrum === 'down') {
-            setStatus('扫弦: 下扫 (低→高)', 'info');
+            setStatus(t('note.status.strumDown'), 'info');
         } else if (uiStore.currentStrum === 'up') {
-            setStatus('扫弦: 上扫 (高→低)', 'info');
+            setStatus(t('note.status.strumUp'), 'info');
         } else {
-            setStatus('扫弦: 关闭', 'info');
+            setStatus(t('note.status.strumOff'), 'info');
         }
     });
 
@@ -235,7 +265,7 @@ export function initNoteInput(): void {
         clearInsertTarget();
         const durSel = document.getElementById('chordDuration') as HTMLSelectElement;
         const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
-        if (duration <= 0) { setStatus('无效时值', 'error'); return; }
+        if (duration <= 0) { setStatus(t('note.status.invalidDuration'), 'error'); return; }
 
         const active: NoteGroupMember[] = [];
         for (let s = 0; s < 6; s++) {
@@ -243,11 +273,11 @@ export function initNoteInput(): void {
                 active.push({ string: s + 1, fret: uiStore.currentChordFrets[s] });
             }
         }
-        if (active.length === 0) { setStatus('请选择至少一根弦的品位', 'error'); return; }
+        if (active.length === 0) { setStatus(t('note.status.needChordString'), 'error'); return; }
 
         const measure = scoreStore.getActiveMeasure();
         if (!canAddToMeasure(measure, duration)) {
-            setStatus('节拍已满', 'error');
+            setStatus(t('note.status.beatFull'), 'error');
             return;
         }
 
@@ -272,7 +302,7 @@ export function initNoteInput(): void {
         );
         const added = scoreStore.addNotes(notes); // 整组一次写入，只触发一次渲染
         if (!added.ok) {
-            setStatus(added.reason ?? '添加和弦失败', 'error');
+            setStatus(added.reason ?? t('note.status.addChordFailed'), 'error');
             return;
         }
 
@@ -286,6 +316,11 @@ export function initNoteInput(): void {
         updateArpeggioButton();
         updateStrumButton();
 
-        setStatus(`已添加和弦: 小节${scoreStore.activeMeasureIndex() + 1} ${chordName ? '(' + chordName + ') ' : ''}${active.length}弦${hadArpeggio ? ' 琶音' : ''}`, 'success');
+        setStatus(t('note.status.chordAdded', {
+            measure: scoreStore.activeMeasureIndex() + 1,
+            chord: chordName ? `(${chordName}) ` : '',
+            strings: active.length,
+            arpeggio: hadArpeggio ? t('note.suffix.arpeggio') : '',
+        }), 'success');
     });
 }

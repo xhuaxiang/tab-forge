@@ -65,6 +65,14 @@ body {
 
 .container { padding: 8px 10px; }
 
+/* ===== i18n 启动遮罩：语言加载完成前隐藏，避免中文闪一下 ===== */
+html.i18n-loading body {
+    visibility: hidden;
+    /* JS 未执行/抛错时的兜底：2 秒后强制显示，避免白屏 */
+    animation: i18n-reveal 0s 2s forwards;
+}
+@keyframes i18n-reveal { to { visibility: visible; } }
+
 /* ===== Header ===== */
 .header {
     display:flex; align-items:center; justify-content:space-between;

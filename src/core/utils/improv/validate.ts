@@ -23,6 +23,7 @@ import {
     HARMONIC_FRET_MIN,
 } from '../../config.ts';
 import { isConnectingTechnique } from '../technique.ts';
+import { t } from '../../i18n/index.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { groupFlatNotes } from '../noteGroup.ts';
 import { connectIssue } from './connect.ts';
@@ -57,43 +58,62 @@ export function validatePlan(
     const capacity = capacityFromTimeSignature(options.timeSignature);
 
     if (!Number.isFinite(capacity) || capacity <= 0) {
-        return [`无效拍号: ${options.timeSignature}`];
+        return [t('improv.common.invalidTimeSignature', { signature: options.timeSignature })];
     }
     if (plan.length !== options.numMeasures) {
-        errors.push(`小节数不匹配: 计划 ${plan.length}，期望 ${options.numMeasures}`);
+        errors.push(t('improv.validate.plan.measureCountMismatch', {
+            actual: plan.length,
+            expected: options.numMeasures,
+        }));
     }
 
     plan.forEach((measure, measureIndex) => {
+        const measureNumber = measureIndex + 1;
         if (measure.index !== measureIndex) {
-            errors.push(`第 ${measureIndex + 1} 小节 index 应为 ${measureIndex}`);
+            errors.push(t('improv.validate.plan.measureIndex', {
+                measure: measureNumber,
+                index: measureIndex,
+            }));
         }
         if (Math.abs(measure.capacity - capacity) > TOLERANCE) {
-            errors.push(`第 ${measureIndex + 1} 小节容量 ${measure.capacity} 与拍号 ${capacity} 不符`);
+            errors.push(t('improv.validate.plan.capacityMismatch', {
+                measure: measureNumber,
+                capacity: measure.capacity,
+                expected: capacity,
+            }));
         }
         if (measure.slots.length === 0) {
-            errors.push(`第 ${measureIndex + 1} 小节没有拍位`);
+            errors.push(t('improv.validate.plan.noSlots', { measure: measureNumber }));
             return;
         }
 
         let total = 0;
         for (const slot of measure.slots) {
             if (!isDurationValid(slot.duration) || slot.duration <= 0) {
-                errors.push(`第 ${measureIndex + 1} 小节含非法时值 ${slot.duration}`);
+                errors.push(t('improv.validate.plan.invalidSlotDuration', {
+                    measure: measureNumber,
+                    duration: slot.duration,
+                }));
             }
             total += slot.duration;
         }
         if (Math.abs(total - capacity) > TOLERANCE) {
-            errors.push(`第 ${measureIndex + 1} 小节时值之和 ${total} 未闭合到 ${capacity}`);
+            errors.push(t('improv.validate.plan.slotTotalNotClosed', {
+                measure: measureNumber,
+                total,
+                capacity,
+            }));
         }
         if (measure.slots.every(slot => slot.isRest)) {
-            errors.push(`第 ${measureIndex + 1} 小节全是休止符`);
+            errors.push(t('improv.validate.plan.allRests', { measure: measureNumber }));
         }
         const sounding = measure.slots.filter(slot => !slot.isRest).length;
         if (sounding < minNotesPerMeasure) {
-            errors.push(
-                `第 ${measureIndex + 1} 小节只有 ${sounding} 个发音，`
-                + `少于密度下限 ${minNotesPerMeasure}`,
-            );
+            errors.push(t('improv.validate.plan.tooFewSounding', {
+                measure: measureNumber,
+                sounding,
+                min: minNotesPerMeasure,
+            }));
         }
     });
 
@@ -109,12 +129,15 @@ function validateNoteFields(
     allowedPitchClasses?: ReadonlySet<number>,
 ): string[] {
     const errors: string[] = [];
-    const prefix = `第 ${index + 1} 个音符`;
+    const noteNumber = index + 1;
     const fretMin = options.fretRange?.min ?? playability.fretMin;
     const fretMax = options.fretRange?.max ?? playability.fretMax;
 
     if (!isDurationValid(note.duration) || note.duration <= 0) {
-        errors.push(`${prefix}时值非法: ${note.duration}`);
+        errors.push(t('improv.validate.note.durationInvalid', {
+            index: noteNumber,
+            duration: note.duration,
+        }));
     }
 
     if (note.isRest) {
@@ -128,18 +151,24 @@ function validateNoteFields(
             || note.tieToNext !== undefined || note.chordGroup !== undefined
             || note.chordName !== undefined || note.arpeggio !== undefined
             || note.strum !== undefined) {
-            errors.push(`${prefix}是休止符，却带了演奏字段`);
+            errors.push(t('improv.validate.note.restHasFields', { index: noteNumber }));
         }
         return errors;
     }
 
     if (note.string === undefined || !Number.isInteger(note.string)
         || note.string < 1 || note.string > 6) {
-        errors.push(`${prefix}弦号非法: ${note.string}`);
+        errors.push(t('improv.validate.note.stringInvalid', {
+            index: noteNumber,
+            string: String(note.string),
+        }));
     }
     if (note.fret === undefined || !Number.isInteger(note.fret)
         || note.fret < fretMin || note.fret > fretMax) {
-        errors.push(`${prefix}品位非法: ${note.fret}`);
+        errors.push(t('improv.validate.note.fretInvalid', {
+            index: noteNumber,
+            fret: String(note.fret),
+        }));
     }
 
     if (note.string !== undefined && note.fret !== undefined
@@ -152,42 +181,54 @@ function validateNoteFields(
                 ? allowedPitchClasses.has(pitchClass)
                 : isInScale(midi, options.tonicPitchClass, options.scaleType);
             if (!inAllowedPool) {
-                errors.push(allowedPitchClasses
-                    ? `${prefix}不在当前和声可用音池: MIDI ${midi}`
-                    : `${prefix}不在调内: MIDI ${midi}`);
+                errors.push(t(
+                    allowedPitchClasses
+                        ? 'improv.validate.note.outsideHarmonyPool'
+                        : 'improv.validate.note.outsideScale',
+                    { index: noteNumber, midi },
+                ));
             }
         } catch (error) {
-            errors.push(`${prefix}无法换算音高: ${error instanceof Error ? error.message : String(error)}`);
+            errors.push(t('improv.validate.note.pitchConversionFailed', {
+                index: noteNumber,
+                error: error instanceof Error ? error.message : String(error),
+            }));
         }
     }
 
     if (note.technique !== undefined
         && note.technique !== 'bend' && note.technique !== 'vibrato'
         && !isConnectingTechnique(note.technique)) {
-        errors.push(`${prefix}含本地不支持的技法: ${note.technique}`);
+        errors.push(t('improv.validate.note.unsupportedTechnique', {
+            index: noteNumber,
+            technique: note.technique,
+        }));
     }
     if (note.technique === 'bend') {
         if (note.bendAmount === undefined || !VALID_BEND_AMOUNTS.has(note.bendAmount)) {
-            errors.push(`${prefix}推弦幅度非法: ${note.bendAmount}`);
+            errors.push(t('improv.validate.note.bendAmountInvalid', {
+                index: noteNumber,
+                amount: String(note.bendAmount),
+            }));
         }
         if (note.duration < playability.minBendDuration) {
-            errors.push(`${prefix}推弦时值过短`);
+            errors.push(t('improv.validate.note.bendTooShort', { index: noteNumber }));
         }
         if (note.fret !== undefined && note.fret <= 0) {
-            errors.push(`${prefix}空弦不能推弦`);
+            errors.push(t('improv.validate.note.bendOnOpenString', { index: noteNumber }));
         }
         if (note.bendRelease && note.duration < playability.minBendReleaseDuration) {
-            errors.push(`${prefix}推弦释放时值过短`);
+            errors.push(t('improv.validate.note.bendReleaseTooShort', { index: noteNumber }));
         }
     } else if (note.bendAmount !== undefined || note.bendRelease !== undefined) {
-        errors.push(`${prefix}没有 bend 技法却带推弦字段`);
+        errors.push(t('improv.validate.note.bendFieldsWithoutTechnique', { index: noteNumber }));
     }
     if (note.technique === 'vibrato') {
         if (note.duration < playability.minVibratoDuration) {
-            errors.push(`${prefix}揉弦时值过短`);
+            errors.push(t('improv.validate.note.vibratoTooShort', { index: noteNumber }));
         }
         if (note.fret !== undefined && note.fret <= 0) {
-            errors.push(`${prefix}空弦不能揉弦`);
+            errors.push(t('improv.validate.note.vibratoOnOpenString', { index: noteNumber }));
         }
     }
 
@@ -195,128 +236,155 @@ function validateNoteFields(
         if (note.string === undefined
             || note.string < playability.deadNoteStrings[0]
             || note.string > playability.deadNoteStrings[1]) {
-            errors.push(`${prefix}制音只能用在低音弦`);
+            errors.push(t('improv.validate.note.deadNoteStringRange', { index: noteNumber }));
         }
         if (note.duration < playability.minDeadNoteDuration) {
-            errors.push(`${prefix}制音时值过短`);
+            errors.push(t('improv.validate.note.deadNoteTooShort', { index: noteNumber }));
         }
         if (note.technique !== undefined) {
-            errors.push(`${prefix}制音不能与技法叠加`);
+            errors.push(t('improv.validate.note.deadNoteWithTechnique', { index: noteNumber }));
         }
         if (note.harmonic !== undefined || note.letRing || note.staccato
             || note.palmMute) {
-            errors.push(`${prefix}制音不能与其他奏法叠加`);
+            errors.push(t('improv.validate.note.deadNoteWithArticulation', { index: noteNumber }));
         }
     }
 
     if (note.staccato) {
         if (note.duration < playability.minStaccatoDuration) {
-            errors.push(`${prefix}断音时值过短`);
+            errors.push(t('improv.validate.note.staccatoTooShort', { index: noteNumber }));
         }
         if (note.technique !== undefined) {
-            errors.push(`${prefix}断音不能与技法叠加`);
+            errors.push(t('improv.validate.note.staccatoWithTechnique', { index: noteNumber }));
         }
     }
 
     if (note.letRing) {
         // 断音优先缩短发声，letRing 的最短时值只在没有 staccato 时生效。
         if (!note.staccato && note.duration < playability.minLetRingDuration) {
-            errors.push(`${prefix}延音时值过短`);
+            errors.push(t('improv.validate.note.letRingTooShort', { index: noteNumber }));
         }
         if (note.technique !== undefined) {
-            errors.push(`${prefix}延音不能与技法叠加`);
+            errors.push(t('improv.validate.note.letRingWithTechnique', { index: noteNumber }));
         }
         if (note.deadNote || note.palmMute) {
-            errors.push(`${prefix}延音不能与制音/闷音叠加`);
+            errors.push(t('improv.validate.note.letRingWithMute', { index: noteNumber }));
         }
     }
 
     if (note.harmonic !== undefined) {
         if (!VALID_HARMONICS.has(note.harmonic)) {
-            errors.push(`${prefix}泛音类型非法: ${note.harmonic}`);
+            errors.push(t('improv.validate.note.harmonicTypeInvalid', {
+                index: noteNumber,
+                harmonic: note.harmonic,
+            }));
         }
         if (note.duration < playability.minHarmonicDuration) {
-            errors.push(`${prefix}泛音时值过短`);
+            errors.push(t('improv.validate.note.harmonicTooShort', { index: noteNumber }));
         }
         if (note.technique !== undefined) {
-            errors.push(`${prefix}泛音不能与技法叠加`);
+            errors.push(t('improv.validate.note.harmonicWithTechnique', { index: noteNumber }));
         }
         if (note.deadNote || note.palmMute) {
-            errors.push(`${prefix}泛音不能与制音/闷音叠加`);
+            errors.push(t('improv.validate.note.harmonicWithMute', { index: noteNumber }));
         }
         if (note.harmonic === 'natural') {
             if (note.harmonicFret !== undefined) {
-                errors.push(`${prefix}自然泛音不应带 harmonicFret`);
+                errors.push(t('improv.validate.note.naturalHarmonicWithFret', { index: noteNumber }));
             }
             if (note.fret === undefined
                 || !playability.naturalHarmonicFrets.includes(note.fret)) {
-                errors.push(`${prefix}自然泛音节点非法: ${note.fret}`);
+                errors.push(t('improv.validate.note.naturalHarmonicFretInvalid', {
+                    index: noteNumber,
+                    fret: String(note.fret),
+                }));
             }
         } else {
             if (note.fret === undefined || note.fret <= 0) {
-                errors.push(`${prefix}人工/捏弦泛音必须有按弦品位`);
+                errors.push(t('improv.validate.note.harmonicNeedsFingeredFret', { index: noteNumber }));
             }
             if (note.harmonicFret !== undefined
                 && (!Number.isInteger(note.harmonicFret)
                     || note.harmonicFret < HARMONIC_FRET_MIN
                     || note.harmonicFret > HARMONIC_FRET_MAX
                     || !playability.harmonicFrets.includes(note.harmonicFret))) {
-                errors.push(`${prefix}泛音触弦品位非法: ${note.harmonicFret}`);
+                errors.push(t('improv.validate.note.harmonicTouchFretInvalid', {
+                    index: noteNumber,
+                    fret: note.harmonicFret,
+                }));
             }
             if (note.harmonic === 'pinch'
                 && (note.string === undefined
                     || note.string < playability.pinchHarmonicStrings[0]
                     || note.string > playability.pinchHarmonicStrings[1])) {
-                errors.push(`${prefix}捏弦泛音只能用在低音弦`);
+                errors.push(t('improv.validate.note.pinchHarmonicStringRange', { index: noteNumber }));
             }
         }
     } else if (note.harmonicFret !== undefined) {
-        errors.push(`${prefix}没有泛音却带 harmonicFret`);
+        errors.push(t('improv.validate.note.harmonicFretWithoutHarmonic', { index: noteNumber }));
     }
 
     if (note.palmMute) {
         if (note.string === undefined
             || note.string < playability.palmMuteStrings[0]
             || note.string > playability.palmMuteStrings[1]) {
-            errors.push(`${prefix}手掌闷音只能用在低音弦`);
+            errors.push(t('improv.validate.note.palmMuteStringRange', { index: noteNumber }));
         }
         if (note.duration < playability.minPalmMuteDuration) {
-            errors.push(`${prefix}手掌闷音时值过短`);
+            errors.push(t('improv.validate.note.palmMuteTooShort', { index: noteNumber }));
         }
         if (note.technique !== undefined) {
-            errors.push(`${prefix}手掌闷音不能与技法叠加`);
+            errors.push(t('improv.validate.note.palmMuteWithTechnique', { index: noteNumber }));
         }
         if (note.deadNote || note.harmonic !== undefined || note.letRing) {
-            errors.push(`${prefix}手掌闷音不能与制音/泛音/延音叠加`);
+            errors.push(t('improv.validate.note.palmMuteWithArticulation', { index: noteNumber }));
         }
     }
 
     if (note.dynamics !== undefined
         && note.dynamics !== 'soft' && note.dynamics !== 'accent') {
-        errors.push(`${prefix}力度非法: ${note.dynamics}`);
+        errors.push(t('improv.validate.note.dynamicsInvalid', {
+            index: noteNumber,
+            dynamics: note.dynamics,
+        }));
     }
 
     if (note.chordGroup !== undefined
         && (!Number.isInteger(note.chordGroup) || note.chordGroup <= 0)) {
-        errors.push(`${prefix}和弦组 id 必须是正整数: ${note.chordGroup}`);
+        errors.push(t('improv.validate.note.chordGroupIdInvalid', {
+            index: noteNumber,
+            group: note.chordGroup,
+        }));
     }
     if (note.arpeggio !== undefined
         && note.arpeggio !== 'up' && note.arpeggio !== 'down') {
-        errors.push(`${prefix}琶音方向非法: ${note.arpeggio}`);
+        errors.push(t('improv.validate.note.arpeggioInvalid', {
+            index: noteNumber,
+            arpeggio: note.arpeggio,
+        }));
     }
     if (note.strum !== undefined
         && note.strum !== 'up' && note.strum !== 'down') {
-        errors.push(`${prefix}扫弦方向非法: ${note.strum}`);
+        errors.push(t('improv.validate.note.strumInvalid', {
+            index: noteNumber,
+            strum: note.strum,
+        }));
     }
 
     // 连接技法的目标品直接写在 fret 上；targetFret 只属于表单/编辑器，
     // 生成结果带它说明上游仍按旧契约写入。
-    if (note.targetFret !== undefined) errors.push(`${prefix}不应带 targetFret`);
+    if (note.targetFret !== undefined) {
+        errors.push(t('improv.validate.note.unexpectedTargetFret', { index: noteNumber }));
+    }
     // tieToNext 暂不生成：Karplus 会跳过标记拍、SoundFont 按到达音处理，
     // 两引擎语义未统一前放行会得到静音拍。
-    if (note.tieToNext) errors.push(`${prefix}含本地生成不支持的延音`);
+    if (note.tieToNext) {
+        errors.push(t('improv.validate.note.unsupportedTie', { index: noteNumber }));
+    }
     // chordName 是标签不是奏法，本地生成不产出。
-    if (note.chordName !== undefined) errors.push(`${prefix}含本地生成不支持的和弦名`);
+    if (note.chordName !== undefined) {
+        errors.push(t('improv.validate.note.unsupportedChordName', { index: noteNumber }));
+    }
 
     return errors;
 }
@@ -334,47 +402,49 @@ function validateGroupFields(
     playability: PlayabilityRules,
 ): string[] {
     const errors: string[] = [];
-    const prefix = `第 ${groupStart + 1} 组`;
+    const groupNumber = groupStart + 1;
     const first = group[0];
 
     if (group.length === 1) {
         if (first.isRest) return errors;
         if (first.chordGroup !== undefined) {
-            errors.push(`${prefix}是单音，不应带和弦组`);
+            errors.push(t('improv.validate.group.singleWithChordGroup', { index: groupNumber }));
         }
         if (first.arpeggio !== undefined) {
-            errors.push(`${prefix}是单音，琶音只能用于和弦组`);
+            errors.push(t('improv.validate.group.singleWithArpeggio', { index: groupNumber }));
         }
         if (first.strum !== undefined) {
-            errors.push(`${prefix}是单音，扫弦只能用于和弦组`);
+            errors.push(t('improv.validate.group.singleWithStrum', { index: groupNumber }));
         }
         return errors;
     }
 
     if (first.chordGroup === undefined) {
-        errors.push(`${prefix}是多音组，必须带 chordGroup`);
+        errors.push(t('improv.validate.group.multiWithoutChordGroup', { index: groupNumber }));
     }
     if (group.length > playability.maxChordVoices) {
-        errors.push(
-            `${prefix}和弦声部过多: ${group.length} > ${playability.maxChordVoices}`,
-        );
+        errors.push(t('improv.validate.group.tooManyVoices', {
+            index: groupNumber,
+            actual: group.length,
+            max: playability.maxChordVoices,
+        }));
     }
 
     group.forEach(note => {
         if (note.isRest) {
-            errors.push(`${prefix}和弦组不能包含休止符`);
+            errors.push(t('improv.validate.group.containsRest', { index: groupNumber }));
         }
         if (note.duration !== first.duration) {
-            errors.push(`${prefix}和弦组内时值不一致`);
+            errors.push(t('improv.validate.group.durationMismatch', { index: groupNumber }));
         }
         if (note.dynamics !== first.dynamics) {
-            errors.push(`${prefix}和弦组内力度不一致`);
+            errors.push(t('improv.validate.group.dynamicsMismatch', { index: groupNumber }));
         }
         if (note.technique !== undefined
             || note.palmMute || note.deadNote || note.letRing
             || note.staccato || note.harmonic !== undefined
             || note.harmonicFret !== undefined) {
-            errors.push(`${prefix}和弦组内不能叠加单音奏法`);
+            errors.push(t('improv.validate.group.withSingleArticulation', { index: groupNumber }));
         }
     });
 
@@ -382,14 +452,16 @@ function validateGroupFields(
         .map(note => note.string)
         .filter((value): value is number => value !== undefined);
     if (new Set(strings).size !== strings.length) {
-        errors.push(`${prefix}和弦组内同一根弦出现多次`);
+        errors.push(t('improv.validate.group.duplicateString', { index: groupNumber }));
     }
     if (strings.length === group.length) {
         const span = Math.max(...strings) - Math.min(...strings);
         if (span > playability.maxChordStringSpan) {
-            errors.push(
-                `${prefix}和弦弦号跨度过大: ${span} > ${playability.maxChordStringSpan}`,
-            );
+            errors.push(t('improv.validate.group.stringSpanTooLarge', {
+                index: groupNumber,
+                span,
+                max: playability.maxChordStringSpan,
+            }));
         }
     }
 
@@ -399,9 +471,11 @@ function validateGroupFields(
     if (frets.length === group.length) {
         const span = Math.max(...frets) - Math.min(...frets);
         if (span > playability.maxChordSpanFrets) {
-            errors.push(
-                `${prefix}和弦品位跨度过大: ${span} > ${playability.maxChordSpanFrets}`,
-            );
+            errors.push(t('improv.validate.group.fretSpanTooLarge', {
+                index: groupNumber,
+                span,
+                max: playability.maxChordSpanFrets,
+            }));
         }
     }
 
@@ -417,20 +491,20 @@ function validateGroupFields(
         }
     });
     if (new Set(pitchClasses).size !== pitchClasses.length) {
-        errors.push(`${prefix}和弦组内出现重复音级`);
+        errors.push(t('improv.validate.group.duplicatePitchClass', { index: groupNumber }));
     }
 
     group.forEach((note, index) => {
         if (index === 0) return;
         if (note.arpeggio !== undefined) {
-            errors.push(`${prefix}琶音只能写在和弦组组首`);
+            errors.push(t('improv.validate.group.arpeggioNotOnHead', { index: groupNumber }));
         }
         if (note.strum !== undefined) {
-            errors.push(`${prefix}扫弦只能写在和弦组组首`);
+            errors.push(t('improv.validate.group.strumNotOnHead', { index: groupNumber }));
         }
     });
     if (first.arpeggio !== undefined && first.strum !== undefined) {
-        errors.push(`${prefix}琶音与扫弦不能同时使用`);
+        errors.push(t('improv.validate.group.arpeggioAndStrum', { index: groupNumber }));
     }
 
     return errors;
@@ -459,12 +533,12 @@ export function validateNotes(
     harmony?: readonly HarmonyMeasure[],
     phrases?: readonly PhrasePlan[],
 ): string[] {
-    if (notes.length === 0) return ['没有音符'];
+    if (notes.length === 0) return [t('improv.validate.notes.empty')];
 
     const errors: string[] = [];
     const capacity = capacityFromTimeSignature(options.timeSignature);
     if (!Number.isFinite(capacity) || capacity <= 0) {
-        return [`无效拍号: ${options.timeSignature}`];
+        return [t('improv.common.invalidTimeSignature', { signature: options.timeSignature })];
     }
 
     const groups = groupFlatNotes(notes);
@@ -564,9 +638,10 @@ export function validateNotes(
 
         if (group.length > 1 && first.chordGroup !== undefined) {
             if (chordGroupIds.has(first.chordGroup)) {
-                errors.push(
-                    `第 ${groupStart + 1} 个音符的和弦组 id ${first.chordGroup} 重复`,
-                );
+                errors.push(t('improv.validate.notes.duplicateChordGroupId', {
+                    index: groupStart + 1,
+                    group: first.chordGroup,
+                }));
             } else {
                 chordGroupIds.add(first.chordGroup);
             }
@@ -576,7 +651,9 @@ export function validateNotes(
         if (Number.isFinite(first.duration) && first.duration > 0) {
             total += first.duration;
             if (total > measureBoundary + TOLERANCE) {
-                errors.push(`第 ${groupStart + 1} 个音符跨过了小节容量边界`);
+                errors.push(t('improv.validate.notes.crossesMeasureBoundary', {
+                    index: groupStart + 1,
+                }));
                 while (total > measureBoundary + TOLERANCE) measureBoundary += capacity;
             } else if (Math.abs(total - measureBoundary) <= TOLERANCE) {
                 measureBoundary += capacity;
@@ -649,14 +726,20 @@ export function validateNotes(
                 const noteIndex = groupStart + memberIndex;
                 if (isFirstSoundingOfSegment && chordToneReachable
                     && !segment.pool.chordPitchClasses.includes(memberPitchClass)) {
-                    errors.push(`第 ${noteIndex + 1} 个音符是换和弦后的首音却不在新和弦音`);
+                    errors.push(t('improv.validate.notes.segmentFirstNotChordTone', {
+                        index: noteIndex + 1,
+                    }));
                 } else if (role === 'strong' && chordToneReachable
                     && !segment.pool.chordPitchClasses.includes(memberPitchClass)) {
-                    errors.push(`第 ${noteIndex + 1} 个音符在强拍但不在当前和弦音`);
+                    errors.push(t('improv.validate.notes.strongBeatNotChordTone', {
+                        index: noteIndex + 1,
+                    }));
                 } else if (role !== 'passing' && weakTargetReachable
                     && segment.pool.avoidPitchClasses.includes(memberPitchClass)
                     && !segment.pool.chordPitchClasses.includes(memberPitchClass)) {
-                    errors.push(`第 ${noteIndex + 1} 个音符是长音 avoid note`);
+                    errors.push(t('improv.validate.notes.longNoteAvoid', {
+                        index: noteIndex + 1,
+                    }));
                 }
             });
         }
@@ -680,10 +763,10 @@ export function validateNotes(
             && isConnectingTechnique(group[0].technique);
         if (!isConnectingGroup && previousMidi !== null
             && Math.abs(representativeMidi - previousMidi) > leapLimit) {
-            errors.push(
-                `第 ${groupStart + 1} 个音符跳进 `
-                + `${Math.abs(representativeMidi - previousMidi)} 超过上限`,
-            );
+            errors.push(t('improv.validate.notes.leapTooLarge', {
+                index: groupStart + 1,
+                semitones: Math.abs(representativeMidi - previousMidi),
+            }));
         }
         previousMidi = representativeMidi;
     });
@@ -699,20 +782,28 @@ export function validateNotes(
         const previousGroup = groups[groupIndex - 1];
         // 和弦组作为前音时，播放层没有单一缓冲可复用。
         if (previousGroup && previousGroup.length > 1) {
-            errors.push(`第 ${noteIndex} 个音符连接技法的前一组必须是单音`);
+            errors.push(t('improv.validate.notes.connectingPreviousNotSingle', {
+                index: noteIndex,
+            }));
             return;
         }
         const issue = connectIssue(
             note.technique, previousGroup?.[0], note, playability,
         );
         if (issue !== undefined) {
-            errors.push(`第 ${noteIndex} 个音符${issue}`);
+            errors.push(t('improv.validate.notes.connection', {
+                index: noteIndex,
+                issue,
+            }));
         }
     });
 
     const expected = capacity * options.numMeasures;
     if (Math.abs(total - expected) > TOLERANCE) {
-        errors.push(`总时值 ${total} 与期望 ${expected} 不符`);
+        errors.push(t('improv.validate.notes.totalMismatch', {
+            total,
+            expected,
+        }));
     }
 
     return errors;

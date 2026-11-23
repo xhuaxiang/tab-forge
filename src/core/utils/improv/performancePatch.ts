@@ -25,6 +25,7 @@ import {
 } from '../../config.ts';
 import { groupFlatNotes } from '../noteGroup.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
+import { t } from '../../i18n/index.ts';
 import { classifySlotRole } from './rhythm.ts';
 import { validateNotes } from './validate.ts';
 
@@ -75,7 +76,12 @@ export function indexImprovSlots(
 ): SlotIndex {
     const capacity = capacityFromTimeSignature(options.timeSignature);
     if (!Number.isFinite(capacity) || capacity <= 0) {
-        return { slots: [], errors: [`无效拍号: ${options.timeSignature}`] };
+        return {
+            slots: [],
+            errors: [t('improv.common.invalidTimeSignature', {
+                signature: options.timeSignature,
+            })],
+        };
     }
 
     const groups = groupFlatNotes(notes);
@@ -91,7 +97,10 @@ export function indexImprovSlots(
         const head = group[0];
         const duration = head.duration;
         if (!Number.isFinite(duration) || duration <= 0) {
-            errors.push(`第 ${slots.length + 1} 个拍位时值非法: ${duration}`);
+            errors.push(t('improv.patch.slotDurationInvalid', {
+                slot: slots.length + 1,
+                duration,
+            }));
             break;
         }
 
@@ -101,7 +110,7 @@ export function indexImprovSlots(
             beatsInMeasure = 0;
         }
         if (measureIndex >= options.numMeasures) {
-            errors.push(`拍位超出 ${options.numMeasures} 小节容量`);
+            errors.push(t('improv.patch.slotBeyondCapacity', { measures: options.numMeasures }));
             break;
         }
 
@@ -219,30 +228,30 @@ function applySingleNote(
 ): string | null {
     if (patch.dynamics !== undefined && patch.dynamics !== null
         && !VALID_DYNAMICS.has(patch.dynamics)) {
-        return `力度非法: ${patch.dynamics}`;
+        return t('improv.patch.dynamicsInvalid', { dynamics: patch.dynamics });
     }
     if (patch.technique !== undefined && patch.technique !== null
         && !isTechnique(patch.technique)) {
-        return `技法非法: ${patch.technique}`;
+        return t('improv.patch.techniqueInvalid', { technique: patch.technique });
     }
     if (patch.bendAmount !== undefined
         && !VALID_BEND_AMOUNTS.includes(patch.bendAmount)) {
-        return `推弦幅度非法: ${patch.bendAmount}`;
+        return t('improv.patch.bendAmountInvalid', { amount: patch.bendAmount });
     }
     if (patch.harmonic !== undefined && patch.harmonic !== null
         && !isHarmonic(patch.harmonic)) {
-        return `泛音类型非法: ${patch.harmonic}`;
+        return t('improv.patch.harmonicInvalid', { harmonic: patch.harmonic });
     }
     if (patch.harmonicFret !== undefined
         && (!Number.isInteger(patch.harmonicFret)
             || patch.harmonicFret < HARMONIC_FRET_MIN
             || patch.harmonicFret > HARMONIC_FRET_MAX)) {
-        return `泛音触弦品位非法: ${patch.harmonicFret}`;
+        return t('improv.patch.harmonicFretInvalid', { fret: patch.harmonicFret });
     }
     for (const field of ['palmMute', 'deadNote', 'letRing', 'staccato'] as const) {
         const value = patch[field];
         if (value !== undefined && value !== null && typeof value !== 'boolean') {
-            return `${field} 必须是布尔值`;
+            return t('improv.patch.fieldNotBoolean', { field });
         }
     }
 
@@ -253,7 +262,7 @@ function applySingleNote(
         || patch.bendRelease !== undefined;
     if (technique !== 'bend' && hasBendFields) {
         // 允许在既有 bend 上只改幅度：此时 technique 解析结果仍是 bend
-        return '非 bend 技法不能带推弦字段';
+        return t('improv.patch.bendFieldsWithoutTechnique');
     }
 
     const harmonic = patch.harmonic === undefined
@@ -261,7 +270,7 @@ function applySingleNote(
         : (patch.harmonic ?? undefined);
     if (harmonic === undefined && patch.harmonicFret !== undefined
         && patch.harmonic !== null) {
-        return '没有泛音却带 harmonicFret';
+        return t('improv.patch.harmonicFretWithoutHarmonic');
     }
 
     const deadNote = patch.deadNote === undefined ? note.deadNote === true : patch.deadNote === true;
@@ -426,7 +435,7 @@ export function applyPerformancePatches(
     for (const patch of sorted.slice(limit)) {
         dropped.push({
             patch,
-            reason: `超出单次最多 ${limit} 处扩展`,
+            reason: t('improv.patch.tooManyExtensions', { limit }),
         });
     }
 
@@ -434,21 +443,27 @@ export function applyPerformancePatches(
     for (const patch of sorted.slice(0, limit)) {
         if (!Number.isInteger(patch.measureIndex) || !Number.isInteger(patch.slotIndex)
             || patch.measureIndex < 0 || patch.slotIndex < 0) {
-            dropped.push({ patch, reason: '拍位索引非法' });
+            dropped.push({ patch, reason: t('improv.patch.slotIndexInvalid') });
             continue;
         }
         if (!hasAnyField(patch)) {
-            dropped.push({ patch, reason: '补丁没有任何表现字段' });
+            dropped.push({ patch, reason: t('improv.patch.noFields') });
             continue;
         }
 
         const slot = slotByKey.get(`${patch.measureIndex}:${patch.slotIndex}`);
         if (!slot) {
-            dropped.push({ patch, reason: `找不到第 ${patch.measureIndex + 1} 小节第 ${patch.slotIndex + 1} 个拍位` });
+            dropped.push({
+                patch,
+                reason: t('improv.patch.slotNotFound', {
+                    measure: patch.measureIndex + 1,
+                    slot: patch.slotIndex + 1,
+                }),
+            });
             continue;
         }
         if (slot.isRest) {
-            dropped.push({ patch, reason: '目标是休止符' });
+            dropped.push({ patch, reason: t('improv.patch.targetIsRest') });
             continue;
         }
 
@@ -461,16 +476,16 @@ export function applyPerformancePatches(
 
         if (isChord) {
             if (isForbiddenChordPatch(patch)) {
-                reason = '和弦组只允许改力度/琶音/扫弦';
+                reason = t('improv.patch.chordGroupLimited');
             } else if (patch.dynamics !== undefined && patch.dynamics !== null
                 && !VALID_DYNAMICS.has(patch.dynamics)) {
-                reason = `力度非法: ${patch.dynamics}`;
+                reason = t('improv.patch.dynamicsInvalid', { dynamics: patch.dynamics });
             } else if (patch.arpeggio !== undefined && patch.arpeggio !== null
                 && patch.arpeggio !== 'up' && patch.arpeggio !== 'down') {
-                reason = `琶音方向非法: ${patch.arpeggio}`;
+                reason = t('improv.patch.arpeggioInvalid', { arpeggio: patch.arpeggio });
             } else if (patch.strum !== undefined && patch.strum !== null
                 && patch.strum !== 'up' && patch.strum !== 'down') {
-                reason = `扫弦方向非法: ${patch.strum}`;
+                reason = t('improv.patch.strumInvalid', { strum: patch.strum });
             } else {
                 if (patch.dynamics === null) {
                     for (const note of cloned) delete note.dynamics;
@@ -494,7 +509,7 @@ export function applyPerformancePatches(
         } else {
             if (patch.arpeggio === 'up' || patch.arpeggio === 'down'
                 || patch.strum === 'up' || patch.strum === 'down') {
-                reason = '单音不能加琶音/扫弦';
+                reason = t('improv.patch.singleNoArpeggio');
             } else {
                 reason = applySingleNote(cloned[0], patch);
             }
@@ -505,12 +520,12 @@ export function applyPerformancePatches(
             && lastSoundingSlot !== undefined
             && lastSoundingSlot.measureIndex === slot.measureIndex
             && lastSoundingSlot.slotIndex === slot.slotIndex) {
-            reason = '最后一个发音拍位不能加制音';
+            reason = t('improv.patch.lastNoteMute');
         }
 
         // 例如 `{ arpeggio: null }` 落在单音上：合法但没有实际改动
         if (reason === null && isNoopGroup(group, cloned)) {
-            reason = '补丁没有产生实际变化';
+            reason = t('improv.patch.noChange');
         }
 
         if (reason === null) {

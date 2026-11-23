@@ -13,6 +13,7 @@
 
 import type { Measure, Note } from '../types/index.ts';
 import { forEachSlotGroup } from './measureUtils.ts';
+import { t } from '../i18n/index.ts';
 
 /** 拍位组信息：组成员在 measure.notes 中的起始下标 + 组成员 */
 export interface GroupInfo {
@@ -45,7 +46,7 @@ export function locateGroup(measure: Measure, noteIndex: number): GroupInfo | nu
  */
 export function applyNoteChange(measure: Measure, noteIndex: number, note: Note): EditResult {
     const g = locateGroup(measure, noteIndex);
-    if (!g) return { ok: false, reason: '目标音符不存在' };
+    if (!g) return { ok: false, reason: t('core.noteMissing') };
     const notes = measure.notes;
 
     if (g.notes.length === 1) {
@@ -59,7 +60,7 @@ export function applyNoteChange(measure: Measure, noteIndex: number, note: Note)
     const oldMember = g.notes[memberIdx];
     const newString = note.string;
     const conflict = g.notes.some((n, idx) => idx !== memberIdx && n.string !== undefined && n.string === newString);
-    if (conflict) return { ok: false, reason: '和弦内该弦已有音符' };
+    if (conflict) return { ok: false, reason: t('core.stringInChord') };
 
     const member: Note = {
         ...oldMember,
@@ -75,7 +76,7 @@ export function applyNoteChange(measure: Measure, noteIndex: number, note: Note)
 /** 把整拍（单音或和弦）静音为休止符，保留该拍时值；本身就是休止拍则原样返回 */
 export function muteNoteGroup(measure: Measure, noteIndex: number): EditResult {
     const g = locateGroup(measure, noteIndex);
-    if (!g) return { ok: false, reason: '目标音符不存在' };
+    if (!g) return { ok: false, reason: t('core.noteMissing') };
     const notes = measure.notes;
     if (g.notes.length === 1 && g.notes[0].isRest) return { ok: true, notes: notes.slice() };
 

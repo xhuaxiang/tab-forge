@@ -13,6 +13,7 @@ import {
     HARMONIC_FRET_MIN,
     LOCAL_IMPROV_CONFIG,
 } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
 import {
     isAIBendAmount,
     isAIDynamics,
@@ -96,7 +97,7 @@ function sanitizePatch(
     warnings: string[],
 ): PerformancePatch | null {
     if (!isRecord(raw)) {
-        warnings.push(`第 ${index + 1} 条补丁不是对象，已丢弃`);
+        warnings.push(t('ai.warn.patchNotObject', { index: index + 1 }));
         return null;
     }
 
@@ -107,37 +108,43 @@ function sanitizePatch(
         || measureIndex < 0
         || typeof slotIndex !== 'number' || !Number.isInteger(slotIndex)
         || slotIndex < 0) {
-        warnings.push(`第 ${index + 1} 条补丁的 measureIndex/slotIndex 非法，已丢弃`);
+        warnings.push(t('ai.warn.patchIndexInvalid', { index: index + 1 }));
         return null;
     }
 
     const patch: PerformancePatch = { measureIndex, slotIndex };
-    const label = `第 ${index + 1} 条补丁`;
+    const label = t('ai.warn.patchLabel', { index: index + 1 });
 
     if (source.dynamics !== undefined) {
         if (source.dynamics === null) patch.dynamics = null;
         else if (isAIDynamics(source.dynamics)) patch.dynamics = source.dynamics;
-        else warnings.push(`${label}: 力度 "${String(source.dynamics)}" 非法，已忽略该字段`);
+        else warnings.push(t('ai.warn.dynamicsInvalid', {
+            label,
+            value: String(source.dynamics),
+        }));
     }
     if (source.technique !== undefined) {
         if (source.technique === null) patch.technique = null;
         else if (isAITechnique(source.technique)) patch.technique = source.technique;
-        else warnings.push(`${label}: 技法 "${String(source.technique)}" 非法，已忽略该字段`);
+        else warnings.push(t('ai.warn.techniqueInvalid', {
+            label,
+            value: String(source.technique),
+        }));
     }
     if (source.bendAmount !== undefined) {
         if (isAIBendAmount(source.bendAmount)) patch.bendAmount = source.bendAmount;
-        else warnings.push(`${label}: 推弦幅度非法，已忽略该字段`);
+        else warnings.push(t('ai.warn.bendAmountInvalid', { label }));
     }
     if (source.bendRelease !== undefined) {
         if (typeof source.bendRelease === 'boolean') patch.bendRelease = source.bendRelease;
-        else warnings.push(`${label}: bendRelease 必须是布尔值，已忽略该字段`);
+        else warnings.push(t('ai.warn.bendReleaseNotBoolean', { label }));
     }
 
     for (const field of ['palmMute', 'deadNote', 'letRing', 'staccato'] as const) {
         const value = pickBoolean(source[field]);
         if (value === undefined) {
             if (source[field] !== undefined) {
-                warnings.push(`${label}: ${field} 必须是布尔值或 null，已忽略该字段`);
+                warnings.push(t('ai.warn.fieldNotBooleanOrNull', { label, field }));
             }
         } else {
             patch[field] = value;
@@ -147,7 +154,10 @@ function sanitizePatch(
     if (source.harmonic !== undefined) {
         if (source.harmonic === null) patch.harmonic = null;
         else if (isAIHarmonic(source.harmonic)) patch.harmonic = source.harmonic;
-        else warnings.push(`${label}: 泛音类型 "${String(source.harmonic)}" 非法，已忽略该字段`);
+        else warnings.push(t('ai.warn.harmonicInvalid', {
+            label,
+            value: String(source.harmonic),
+        }));
     }
     if (source.harmonicFret !== undefined) {
         const fret = source.harmonicFret;
@@ -159,30 +169,31 @@ function sanitizePatch(
             if (LOCAL_IMPROV_CONFIG.playability.harmonicFrets.includes(normalized)) {
                 patch.harmonicFret = normalized;
             } else {
-                warnings.push(
-                    `${label}: 泛音触弦品位 ${fret} 不在支持范围（`
-                    + `${LOCAL_IMPROV_CONFIG.playability.harmonicFrets.join(' / ')}），已忽略该字段`,
-                );
+                warnings.push(t('ai.warn.harmonicFretOutOfRange', {
+                    label,
+                    fret,
+                    frets: LOCAL_IMPROV_CONFIG.playability.harmonicFrets.join(' / '),
+                }));
             }
         } else {
-            warnings.push(`${label}: 泛音触弦品位非法，已忽略该字段`);
+            warnings.push(t('ai.warn.harmonicFretInvalid', { label }));
         }
     }
 
     if (source.arpeggio !== undefined) {
         const value = pickDirection(source.arpeggio);
-        if (value === undefined) warnings.push(`${label}: 琶音方向非法，已忽略该字段`);
+        if (value === undefined) warnings.push(t('ai.warn.arpeggioInvalid', { label }));
         else patch.arpeggio = value;
     }
     if (source.strum !== undefined) {
         const value = pickDirection(source.strum);
-        if (value === undefined) warnings.push(`${label}: 扫弦方向非法，已忽略该字段`);
+        if (value === undefined) warnings.push(t('ai.warn.strumInvalid', { label }));
         else patch.strum = value;
     }
 
     // targetFret 是旧契约遗留：应用器没有落点，提示一次即可
     if ('targetFret' in raw) {
-        warnings.push(`${label}: targetFret 已忽略——连接技法的目标就是该音自身的 fret`);
+        warnings.push(t('ai.warn.targetFretIgnored', { label }));
     }
 
     return patch;
@@ -202,7 +213,7 @@ export function parseImprovPatchesResponse(
         return {
             patches: [],
             warnings: [],
-            error: 'AI 响应缺少 patches 数组或不是合法 JSON',
+            error: t('ai.error.missingPatches'),
         };
     }
 
@@ -218,7 +229,7 @@ export function parseImprovPatchesResponse(
     }
     const limit = Math.floor(maxPatches);
     if (patches.length > limit) {
-        warnings.push(`补丁超过上限 ${limit} 条，其余已忽略`);
+        warnings.push(t('ai.warn.tooManyPatches', { limit }));
         return { patches: patches.slice(0, limit), warnings };
     }
     return { patches, warnings };

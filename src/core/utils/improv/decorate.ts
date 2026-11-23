@@ -13,6 +13,7 @@ import type {
     StyleProfile,
 } from '../../types/improv/index.ts';
 import { BEND_AMOUNT_LABELS } from '../../config.ts';
+import { t } from '../../i18n/index.ts';
 import type {
     NoteGroupBase,
     NoteGroupMeta,
@@ -215,23 +216,23 @@ function checkPositionContract(
     const { skeleton, positions } = item;
     if (skeleton.isRest) {
         if (skeleton.midis.length !== 0) {
-            throw new Error('休止 slot 不应有音高');
+            throw new Error(t('improv.decorate.restHasPitch'));
         }
         if (positions.length !== 0) {
-            throw new Error('休止 slot 不应有把位');
+            throw new Error(t('improv.decorate.restHasPosition'));
         }
         return;
     }
-    if (positions.length === 0) throw new Error('发音 slot 缺少把位');
+    if (positions.length === 0) throw new Error(t('improv.decorate.soundingMissingPosition'));
     if (positions.length !== skeleton.midis.length) {
-        throw new Error('把位数量与音高数量不一致');
+        throw new Error(t('improv.decorate.positionCountMismatch'));
     }
     if (positions.length > playability.maxChordVoices) {
-        throw new Error('和弦声部过多');
+        throw new Error(t('improv.decorate.tooManyVoices'));
     }
     positions.forEach((position, index) => {
         if (position.midi !== skeleton.midis[index]) {
-            throw new Error('把位音高与骨架音高不一致');
+            throw new Error(t('improv.decorate.positionPitchMismatch'));
         }
     });
 }

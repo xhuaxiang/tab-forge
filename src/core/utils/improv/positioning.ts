@@ -16,6 +16,7 @@ import type {
     SkeletonSlot,
     StyleProfile,
 } from '../../types/improv/index.ts';
+import { t } from '../../i18n/index.ts';
 import { voicingCandidatesForMidis } from './voicing.ts';
 
 interface State {
@@ -127,21 +128,23 @@ export function choosePositions(
     skeleton.forEach((slot, index) => {
         if (slot.isRest) {
             if (slot.midis.length !== 0) {
-                throw new Error(`休止 slot ${index} 不应有音高`);
+                throw new Error(t('improv.positioning.restHasPitch', { index }));
             }
             return;
         }
         if (slot.midis.length === 0) {
-            throw new Error(`发音 slot ${index} 缺少音高`);
+            throw new Error(t('improv.positioning.soundingMissingPitch', { index }));
         }
         if (slot.midis.length > playability.maxChordVoices) {
-            throw new Error(
-                `slot ${index} 声部过多: ${slot.midis.length} > ${playability.maxChordVoices}`,
-            );
+            throw new Error(t('improv.positioning.tooManyVoices', {
+                index,
+                actual: slot.midis.length,
+                max: playability.maxChordVoices,
+            }));
         }
         for (let i = 1; i < slot.midis.length; i++) {
             if (slot.midis[i] <= slot.midis[i - 1]) {
-                throw new Error(`slot ${index} 的音高必须按升序排列`);
+                throw new Error(t('improv.positioning.pitchOrder', { index }));
             }
         }
 
@@ -154,11 +157,13 @@ export function choosePositions(
         );
         if (candidates.length === 0) {
             if (slot.midis.length === 1) {
-                throw new Error(`MIDI ${slot.midis[0]} 在指板上没有可用位置`);
+                throw new Error(t('improv.positioning.midiUnplayable', {
+                    midi: slot.midis[0],
+                }));
             }
-            throw new Error(
-                `MIDI [${slot.midis.join(', ')}] 在指板上无法同时按出`,
-            );
+            throw new Error(t('improv.positioning.midiChordUnplayable', {
+                midis: slot.midis.join(', '),
+            }));
         }
         noteIndices.push(index);
         noteCandidates.push(candidates);

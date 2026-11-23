@@ -2,26 +2,91 @@
  * playbackControls — 播放 / 停止 / 录音
  */
 
-import { $, setStatus } from '../dom.ts';
+import { $, setStatusT } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { DEFAULT_PLAYBACK_ENGINE, isPlaybackEngine } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
+import type { PlaybackState } from '../../core/types/index.ts';
+
+type AudioStatus =
+    | { kind: 'ready' }
+    | { kind: 'recording' }
+    | { kind: 'complete'; kb: string }
+    | { kind: 'stopped' }
+    | { kind: 'failed' };
+
+/** 播放/录音的最近状态：语言切换时按它重建按钮文案（不打断播放与录音） */
+let lastPlaybackState: PlaybackState = 'stopped';
+let lastRecording = false;
+let audioStatus: AudioStatus = { kind: 'ready' };
+
+function renderPlayButton(): void {
+    const btn = $('playBtn');
+    if (!btn) return;
+    btn.textContent = lastPlaybackState === 'playing'
+        ? t('playback.pause')
+        : lastPlaybackState === 'paused' ? t('playback.resume') : t('toolbar.play');
+}
+
+function renderStopButton(): void {
+    $('stopBtn')?.toggleAttribute('disabled', lastPlaybackState === 'stopped');
+}
+
+function renderRecordButton(): void {
+    const btn = $('recordBtn');
+    if (!btn) return;
+    btn.textContent = lastRecording ? t('toolbar.stop') : t('record.start');
+    btn.classList.toggle('recording', lastRecording);
+}
+
+function renderAudioStatus(): void {
+    const el = $('audioStatus');
+    if (!el) return;
+    switch (audioStatus.kind) {
+        case 'recording':
+            el.textContent = t('record.status.recording');
+            break;
+        case 'complete':
+            el.textContent = t('record.status.complete', { kb: audioStatus.kb });
+            break;
+        case 'stopped':
+            el.textContent = t('common.stopped');
+            break;
+        case 'failed':
+            el.textContent = t('record.status.startFailed');
+            break;
+        default:
+            el.textContent = t('audio.ready');
+    }
+}
+
+/** 语言切换后就地更新播放/录音文案（保留播放与录音本身） */
+export function refreshPlaybackLabels(): void {
+    renderPlayButton();
+    renderStopButton();
+    renderRecordButton();
+    renderAudioStatus();
+}
 
 export function initPlaybackControls(): void {
     // --- 播放 ---
     $('playBtn')?.addEventListener('click', async () => {
-        if (scoreStore.score.measures.length === 0) { setStatus('无内容', 'error'); return; }
-        const playBtn = $('playBtn')!;
-        const stopBtn = $('stopBtn')!;
+        if (scoreStore.score.measures.length === 0) { setStatusT('playback.status.empty', undefined, 'error'); return; }
         const callbacks: import('../../features/playback/index.ts').PlaybackCallbacks = {
             onStateChange: (s) => {
-                playBtn.textContent = s === 'playing' ? '⏸ 暂停' : (s === 'paused' ? '▶ 继续' : '▶ 播放');
-                stopBtn.toggleAttribute('disabled', s === 'stopped');
+                lastPlaybackState = s;
+                renderPlayButton();
+                renderStopButton();
             },
-            onPositionChange: (mi) => setStatus(`播放: 小节 ${mi + 1}/${scoreStore.score.measures.length}`, 'info'),
+            onPositionChange: (mi) => setStatusT('playback.status.position', {
+                measure: mi + 1,
+                total: scoreStore.score.measures.length,
+            }, 'info'),
             onComplete: () => {
-                setStatus('播放完成', 'success');
-                playBtn.textContent = '▶ 播放';
-                stopBtn.setAttribute('disabled', '');
+                setStatusT('playback.status.complete', undefined, 'success');
+                lastPlaybackState = 'stopped';
+                renderPlayButton();
+                renderStopButton();
             },
         };
         // 取值不合法（HTML 与 PLAYBACK_ENGINES 漂了）就回落到默认引擎，而不是静默变成别的
@@ -69,7 +134,7 @@ export function initPlaybackControls(): void {
                 return;
             } catch (e) {
                 console.error('alphaTab 播放失败，回退 Karplus-Strong', e);
-                setStatus('SoundFont 播放失败，已回退合成器', 'error');
+                setStatusT('playback.status.fallback', undefined, 'error');
                 // 下拉框同步到实际发声的引擎，否则下次点击仍会先尝试已失败的 SoundFont
                 if (engineSelect) engineSelect.value = 'ks';
             }
@@ -84,30 +149,34 @@ export function initPlaybackControls(): void {
         currentAudioEngine.stop();
         const { alphaTabPlayer } = await import('../../features/playback/soundfont/index.ts');
         alphaTabPlayer.stop();
-        setStatus('已停止', 'info');
+        lastPlaybackState = 'stopped';
+        renderPlayButton();
+        renderStopButton();
+        setStatusT('common.stopped', undefined, 'info');
     });
 
     // --- 录音 ---
     $('recordBtn')?.addEventListener('click', async () => {
-        const btn = $('recordBtn')!;
-        const st = $('audioStatus')!;
         const { currentAudioRecorder } = await import('./recorder.ts');
         if (currentAudioRecorder.getIsRecording()) {
             const blob = currentAudioRecorder.stopRecording();
-            btn.textContent = '⏺ 录音';
-            btn.classList.remove('recording');
-            st.textContent = blob ? `完成: ${(blob.size / 1024).toFixed(1)} KB` : '已停止';
-            setStatus(blob ? '录音完成' : '已停止', blob ? 'success' : 'info');
+            lastRecording = false;
+            audioStatus = blob ? { kind: 'complete', kb: (blob.size / 1024).toFixed(1) } : { kind: 'stopped' };
+            renderRecordButton();
+            renderAudioStatus();
+            setStatusT(blob ? 'record.status.completeStatus' : 'common.stopped', undefined, blob ? 'success' : 'info');
         } else {
             const ok = await currentAudioRecorder.startRecording();
             if (ok) {
-                btn.textContent = '⏹ 停止';
-                btn.classList.add('recording');
-                st.textContent = '🔴 录音中...';
-                setStatus('录音中', 'info');
+                lastRecording = true;
+                audioStatus = { kind: 'recording' };
+                renderRecordButton();
+                renderAudioStatus();
+                setStatusT('record.status.active', undefined, 'info');
             } else {
-                st.textContent = '启动失败';
-                setStatus('麦克风权限被拒', 'error');
+                audioStatus = { kind: 'failed' };
+                renderAudioStatus();
+                setStatusT('record.status.micDenied', undefined, 'error');
             }
         }
     });

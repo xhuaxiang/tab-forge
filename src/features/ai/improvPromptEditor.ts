@@ -10,6 +10,8 @@
  * 本文件不 import `app/dom.ts`：状态展示通过 `onStatus` 回调由 app 层传入。
  */
 
+import { t } from '../../core/i18n/index.ts';
+import { readStorage, writeStorage } from '../storage.ts';
 import { DEFAULT_BRIEF_PROMPT, composeBriefSystemPrompt, stripBriefContract } from './improvBriefPrompt.ts';
 import { DEFAULT_PATCH_PROMPT, composePatchSystemPrompt, stripPatchContract } from './improvPatchPrompt.ts';
 
@@ -18,54 +20,24 @@ const PATCH_STORAGE_KEY = 'TabForge_CustomImprovPatchPrompt';
 /** 旧「从零生成」提示词键：只检测，不读取生效 */
 const LEGACY_STORAGE_KEY = 'TabForge_CustomSystemPrompt';
 
-function isChromeExtension(): boolean {
-    return typeof chrome !== 'undefined' && !!chrome.storage;
-}
-
-async function readStored(key: string): Promise<string | null> {
-    if (isChromeExtension()) {
-        try {
-            const result = await chrome.storage.local.get<Record<string, string>>(key);
-            return result[key] || null;
-        } catch {
-            return null;
-        }
-    }
-    try {
-        return localStorage.getItem(key) || null;
-    } catch {
-        return null;
-    }
-}
-
-async function writeStored(key: string, value: string): Promise<void> {
-    if (isChromeExtension()) {
-        await chrome.storage.local.set({ [key]: value });
-        return;
-    }
-    try {
-        localStorage.setItem(key, value);
-    } catch { /* ignore */ }
-}
-
 /** 自定义 brief 描述（已剥掉内嵌契约）；未设置为 null */
 export async function getCustomBriefPrompt(): Promise<string | null> {
-    const raw = await readStored(BRIEF_STORAGE_KEY);
+    const raw = await readStorage(BRIEF_STORAGE_KEY);
     return raw ? stripBriefContract(raw) : null;
 }
 
 /** 自定义 patch 描述（已剥掉内嵌契约）；未设置为 null */
 export async function getCustomPatchPrompt(): Promise<string | null> {
-    const raw = await readStored(PATCH_STORAGE_KEY);
+    const raw = await readStorage(PATCH_STORAGE_KEY);
     return raw ? stripPatchContract(raw) : null;
 }
 
 export async function saveCustomBriefPrompt(prompt: string): Promise<void> {
-    await writeStored(BRIEF_STORAGE_KEY, prompt);
+    await writeStorage(BRIEF_STORAGE_KEY, prompt);
 }
 
 export async function saveCustomPatchPrompt(prompt: string): Promise<void> {
-    await writeStored(PATCH_STORAGE_KEY, prompt);
+    await writeStorage(PATCH_STORAGE_KEY, prompt);
 }
 
 /** 编辑器预填值：自定义优先，否则默认描述 */
@@ -99,7 +71,7 @@ export function openImprovPromptEditor(options: ImprovPromptEditorOptions = {}):
         const [brief, patch, legacy] = await Promise.all([
             getEditableBriefPrompt(),
             getEditablePatchPrompt(),
-            readStored(LEGACY_STORAGE_KEY),
+            readStorage(LEGACY_STORAGE_KEY),
         ]);
         buildModal(brief, patch, legacy !== null && legacy.trim() !== '', options);
     })();
@@ -115,24 +87,24 @@ function buildModal(
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="modal-content">
-            <h3>✏️ 修改 AI 即兴提示词</h3>
-            <p class="modal-hint">本地负责出合法底稿，AI 只做两件事：解析额外要求、在底稿上加奏法与表情。机器契约由程序追加，不在此编辑。</p>
+            <h3>${t('ai.editor.improvTitle')}</h3>
+            <p class="modal-hint">${t('ai.editor.improvHint')}</p>
             <div class="modal-footer" style="justify-content:flex-start; gap:6px; margin:0 0 4px;">
-                <strong style="font-size:12px;">1. 需求解析（brief）</strong>
-                <button id="improvBriefRestore" class="btn-copy" style="margin-left:auto;">恢复默认</button>
+                <strong style="font-size:12px;">${t('ai.editor.briefHeading')}</strong>
+                <button id="improvBriefRestore" class="btn-copy" style="margin-left:auto;">${t('common.restoreDefault')}</button>
             </div>
             <textarea class="modal-textarea" id="improvBriefTextarea" style="min-height:160px;"></textarea>
             <div class="modal-footer" style="justify-content:flex-start; gap:6px; margin:10px 0 4px;">
-                <strong style="font-size:12px;">2. 表现扩展（patch）</strong>
-                <button id="improvPatchRestore" class="btn-copy" style="margin-left:auto;">恢复默认</button>
+                <strong style="font-size:12px;">${t('ai.editor.patchHeading')}</strong>
+                <button id="improvPatchRestore" class="btn-copy" style="margin-left:auto;">${t('common.restoreDefault')}</button>
             </div>
             <textarea class="modal-textarea" id="improvPatchTextarea" style="min-height:200px;"></textarea>
             <p class="modal-hint" id="improvLegacyNotice" style="display:${hasLegacy ? 'block' : 'none'};">
-                检测到旧版「从零生成」提示词（TabForge_CustomSystemPrompt），已保留但未启用；可手动复制到上方文本框。
+                ${t('ai.editor.legacyPromptWarning')}
             </p>
             <div class="modal-footer">
-                <button id="improvPromptCancelBtn">取消</button>
-                <button id="improvPromptSaveBtn" class="btn-copy">保存</button>
+                <button id="improvPromptCancelBtn">${t('common.cancelTitle')}</button>
+                <button id="improvPromptSaveBtn" class="btn-copy">${t('common.save')}</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -157,7 +129,7 @@ function buildModal(
         await saveCustomBriefPrompt(briefArea.value);
         await saveCustomPatchPrompt(patchArea.value);
         close();
-        options.onStatus?.('AI 即兴提示词已保存，对后续生成生效', 'success');
+        options.onStatus?.(t('ai.debug.promptSaved'), 'success');
     });
     modal.addEventListener('click', (e) => {
         if (e.target === modal) close();

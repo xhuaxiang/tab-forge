@@ -22,6 +22,7 @@ import { beatIndexToOffset } from '../../core/utils/measureUtils.ts';
 import { findNoteAtBeat } from '../../core/utils/measureEdit.ts';
 import { buildNoteGroup, nextChordGroupId, type NoteGroupBase } from '../../core/utils/noteGroup.ts';
 import { followTargetFret, isConnectingTechnique, resolveSoundingFret } from '../../core/utils/technique.ts';
+import { t, type MessageKey } from '../../core/i18n/index.ts';
 
 export type { AppTechnique } from '../../core/types/index.ts';
 
@@ -161,19 +162,28 @@ export function setFormTechnique(tech: AppTechnique, opts: { targetFret?: number
     uiStore.setTie(!!opts.tie);
 }
 
-/** 奏法按钮/状态栏用的中文名（noteInput 复用，避免两处各写一份） */
-export const ARTICULATION_LABELS: Record<NoteArticulation, string> = {
-    palmMute: '手掌闷音',
-    deadNote: '制音',
-    letRing: '自由延音',
-    staccato: '断音',
+/** 奏法/泛音显示名的文案 key（noteInput 复用，避免两处各写一份） */
+const ARTICULATION_LABEL_KEYS: Record<NoteArticulation, MessageKey> = {
+    palmMute: 'articulation.palmMute',
+    deadNote: 'articulation.deadNote',
+    letRing: 'articulation.letRing',
+    staccato: 'articulation.staccato',
 };
 
-export const HARMONIC_LABELS: Record<AppHarmonic, string> = {
-    natural: '自然泛音',
-    artificial: '人工泛音',
-    pinch: '捏弦泛音',
+const HARMONIC_LABEL_KEYS: Record<AppHarmonic, MessageKey> = {
+    natural: 'harmonic.natural',
+    artificial: 'harmonic.artificial',
+    pinch: 'harmonic.pinch',
 };
+
+/** 奏法显示名（按当前界面语言；不要在模块级缓存结果） */
+export function articulationLabel(name: NoteArticulation): string {
+    return t(ARTICULATION_LABEL_KEYS[name]);
+}
+
+export function harmonicLabel(name: AppHarmonic): string {
+    return t(HARMONIC_LABEL_KEYS[name]);
+}
 
 /** 音符状态栏的奏法简写：PM / X / LR / ST / 泛音:人工泛音@12品 */
 export function formatArticulationSuffix(a: {
@@ -190,7 +200,12 @@ export function formatArticulationSuffix(a: {
         a.letRing ? 'LR' : '',
         a.staccato ? 'ST' : '',
         a.harmonic
-            ? `泛音:${HARMONIC_LABELS[a.harmonic]}${a.harmonic !== 'natural' && a.harmonicFret ? `@${a.harmonicFret}品` : ''}`
+            ? t('scoreEdit.harmonicSuffix', {
+                name: harmonicLabel(a.harmonic)
+                    + (a.harmonic !== 'natural' && a.harmonicFret
+                        ? t('scoreEdit.harmonicFretTag', { fret: a.harmonicFret })
+                        : ''),
+            })
             : '',
     ].filter(Boolean).join(' ');
 }
@@ -259,10 +274,10 @@ export function buildNotesFromForm(prevFretCheck = true): { notes: Note[]; error
     const fret = getSearchSelectValue('fretSelect');
     const durSel = $('inputDuration') as HTMLSelectElement | null;
     const duration = parseFloat(durSel?.value || '0.25') as Note['duration'];
-    if (strings.length === 0) return { notes: [], error: '请选择至少一根弦' };
-    if (strings.some(s => s < 1 || s > 6)) return { notes: [], error: '弦号 1-6' };
-    if (fret < 0 || fret > 24) return { notes: [], error: '品位 0-24' };
-    if (duration <= 0) return { notes: [], error: '无效时值' };
+    if (strings.length === 0) return { notes: [], error: t('scoreEdit.needString') };
+    if (strings.some(s => s < 1 || s > 6)) return { notes: [], error: t('scoreEdit.stringRange') };
+    if (fret < 0 || fret > 24) return { notes: [], error: t('scoreEdit.fretRange') };
+    if (duration <= 0) return { notes: [], error: t('note.status.invalidDuration') };
 
     const isTie = isTieActive();
     const tech = uiStore.currentTechnique;
@@ -271,18 +286,18 @@ export function buildNotesFromForm(prevFretCheck = true): { notes: Note[]; error
 
     // 防御：H/P/S 是双音过渡技法，一对弦只能有一个目标弦
     if (isConnectingTechnique(tech) && strings.length > 1) {
-        return { notes: [], error: '击/勾/滑弦只能选一根弦' };
+        return { notes: [], error: t('scoreEdit.singleStringTech') };
     }
     // 到达品是连接类技法唯一的音高来源，缺失时不能回退成「无位移连接」
     if (isConnectingTechnique(tech) && targetFret === undefined) {
-        return { notes: [], error: '请选择目标品（0-24）' };
+        return { notes: [], error: t('scoreEdit.needTargetFretRange') };
     }
 
     if (prevFretCheck && !isTie && isConnectingTechnique(tech)) {
         const measure = scoreStore.getActiveMeasure();
         const prev = measure.notes[measure.notes.length - 1];
         const prevFret = prev?.targetFret || prev?.fret;
-        if (targetFret === prevFret) return { notes: [], error: '请选择目标品' };
+        if (targetFret === prevFret) return { notes: [], error: t('scoreEdit.needTargetFret') };
     }
 
     // 推弦/揉弦是单音符技法，不需要 tieToNext（H/P/S 才是双音符过渡技法）
@@ -334,53 +349,68 @@ export function clearEditTarget(): void {
 
 /** 用表单当前值覆盖编辑目标音符（保留该拍时值；和弦内只换单弦） */
 export function applyEditTarget(): void {
-    const t = editTarget;
-    if (!t) {
-        setStatus('请先在谱面点击一个已有音符', 'info');
+    const target = editTarget;
+    if (!target) {
+        setStatus(t('scoreEdit.selectFirst'), 'info');
         return;
     }
     const built = buildNotesFromForm(false);
     if (built.notes.length === 0) {
-        setStatus(built.error ?? '表单值无效', 'error');
+        setStatus(built.error ?? t('note.status.invalidForm'), 'error');
         return;
     }
     // 原位编辑只改被点中的那根弦：多选时取目标弦，未包含则沿用表单值强制落到目标弦
-    const note = built.notes.find(n => n.string === t.string)
-        ?? { ...built.notes[0], string: t.string };
-    const r = scoreStore.updateNoteAt(t.measureIndex, t.noteIndex, note);
+    const note = built.notes.find(n => n.string === target.string)
+        ?? { ...built.notes[0], string: target.string };
+    const r = scoreStore.updateNoteAt(target.measureIndex, target.noteIndex, note);
     if (!r.ok) {
-        setStatus(r.reason ?? '修改失败', 'error');
+        setStatus(r.reason ?? t('scoreEdit.updateFailed'), 'error');
         return;
     }
     clearEditTarget();
     scoreStore.setEditCursor(null);
-    setStatus(`已修改: 小节${t.measureIndex + 1} · 第${note.string}弦 ${note.fret}品`, 'success');
+    setStatus(t('scoreEdit.updated', {
+        measure: target.measureIndex + 1,
+        string: note.string ?? target.string,
+        fret: note.fret ?? 0,
+    }), 'success');
 }
 
 /** 把编辑目标整拍（单音/和弦）静音为休止符 */
 export function muteEditTarget(): void {
-    const t = editTarget;
-    if (!t) {
-        setStatus('请先在谱面点击一个已有音符', 'info');
+    const target = editTarget;
+    if (!target) {
+        setStatus(t('scoreEdit.selectFirst'), 'info');
         return;
     }
-    const r = scoreStore.muteNoteAt(t.measureIndex, t.noteIndex);
+    const r = scoreStore.muteNoteAt(target.measureIndex, target.noteIndex);
     if (!r.ok) {
-        setStatus(r.reason ?? '删除失败', 'error');
+        setStatus(r.reason ?? t('scoreEdit.deleteFailed'), 'error');
         return;
     }
     clearEditTarget();
     scoreStore.setEditCursor(null);
-    setStatus(`已删除（休止）: 小节${t.measureIndex + 1} · 第${t.string}弦`, 'success');
+    setStatus(t('scoreEdit.muted', {
+        measure: target.measureIndex + 1,
+        string: target.string,
+    }), 'success');
 }
 
 /**
- * 编辑/插入操作条显隐（text=null 隐藏；否则展开所在面板并滚动到可见）
+ * 编辑/插入操作条显隐（text=null 隐藏；否则展开所在面板）
  * @param barId  操作条元素 id
  * @param hintId 提示文本元素 id
  * @param text   提示文本（null = 隐藏）
+ * @param opts.scroll 是否滚动到可见（语言切换刷新时传 false）
+ * @param opts.expand 是否展开所在折叠面板（语言切换刷新时传 false，尊重用户收起状态）
  */
-function setActionBar(barId: string, hintId: string, text: string | null): void {
+function setActionBar(
+    barId: string,
+    hintId: string,
+    text: string | null,
+    opts: { scroll?: boolean; expand?: boolean } = {},
+): void {
+    const { scroll = true, expand = true } = opts;
     const bar = document.getElementById(barId) as HTMLElement | null;
     if (!bar) return;
     if (text === null) {
@@ -391,15 +421,25 @@ function setActionBar(barId: string, hintId: string, text: string | null): void 
     const hint = document.getElementById(hintId);
     if (hint) hint.textContent = text;
     const details = bar.closest('details');
-    if (details instanceof HTMLDetailsElement && !details.open) details.open = true;
-    bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    if (expand && details instanceof HTMLDetailsElement && !details.open) details.open = true;
+    if (scroll) bar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 /** 刷新编辑条显隐/提示 */
-function renderEditUI(): void {
+function renderEditUI(opts: { scroll?: boolean; expand?: boolean } = {}): void {
     setActionBar('noteEditBar', 'noteEditHint', editTarget
-        ? `编辑: 小节${editTarget.measureIndex + 1} · 第${editTarget.string}弦 ${editTarget.fret}品`
-        : null);
+        ? t('scoreEdit.editHint', {
+            measure: editTarget.measureIndex + 1,
+            string: editTarget.string,
+            fret: editTarget.fret,
+        })
+        : null, opts);
+}
+
+/** 语言切换就地刷新编辑/插入条文案：不改选择、不滚动、不展开折叠面板、不重绑事件 */
+export function refreshEditUiText(): void {
+    renderEditUI({ scroll: false, expand: false });
+    renderInsertUI({ scroll: false, expand: false });
 }
 
 // ============================================================
@@ -465,7 +505,7 @@ export function handleScoreClick(hit: ScoreClickHit): void {
         scoreStore.selectMeasure(null);
         clearEditTarget();
         clearInsertTarget();
-        setStatus('已取消选中', 'info');
+        setStatus(t('scoreEdit.selectionCleared'), 'info');
         return;
     }
     const measureIndex = beat.voice.bar.index;
@@ -506,7 +546,7 @@ function setEditTargetFromNote(note: model.Note, beat: model.Beat, measureIndex:
 function loadAlphaNoteIntoForm(note: model.Note, beat: model.Beat): void {
     const appString = alphaStringToAppString(note.string);
     if (appString < 1 || appString > 6) {
-        setStatus('不支持的音符类型', 'error');
+        setStatus(t('scoreEdit.unsupportedNote'), 'error');
         return;
     }
 
@@ -515,19 +555,24 @@ function loadAlphaNoteIntoForm(note: model.Note, beat: model.Beat): void {
     const dur = alphaDurationToAppDuration(beat.duration);
     setFormDuration(dur);
 
-    const t = detectTechnique(note, uiStore.bendAmount);
-    setFormTechnique(t.tech, {
-        targetFret: t.targetFret,
-        bendAmount: t.bendAmount,
-        bendRelease: t.bendRelease,
+    const technique = detectTechnique(note, uiStore.bendAmount);
+    setFormTechnique(technique.tech, {
+        targetFret: technique.targetFret,
+        bendAmount: technique.bendAmount,
+        bendRelease: technique.bendRelease,
         tie: note.isTieOrigin || note.isTieDestination,
     });
 
     const arts = detectArticulations(note);
     setFormArticulations(arts);
 
-    const suffix = [t.tech === 'none' ? '' : t.tech, formatArticulationSuffix(arts)].filter(Boolean).join(' ');
-    setStatus(`已载入: 第${appString}弦 ${note.fret}品 ${durationName(dur)}${suffix ? ` (${suffix})` : ''}`, 'info');
+    const suffix = [technique.tech === 'none' ? '' : technique.tech, formatArticulationSuffix(arts)].filter(Boolean).join(' ');
+    setStatus(t('scoreEdit.loaded', {
+        string: appString,
+        fret: note.fret,
+        duration: durationName(dur),
+        suffix: suffix ? ` (${suffix})` : '',
+    }), 'info');
 }
 
 // ============================================================
@@ -550,41 +595,45 @@ let insertTarget: InsertTarget | null = null;
 function armInsertTarget(measureIndex: number, beatOffset: number): void {
     const measure = scoreStore.score.measures[measureIndex];
     if (!measure) {
-        setStatus('小节不存在', 'error');
+        setStatus(t('scoreEdit.measureMissing'), 'error');
         return;
     }
     insertTarget = { measureIndex, beatOffset };
     renderInsertUI();
-    setStatus(`已定位插入点: 小节${measureIndex + 1} · 表单设好后点「✓ 写入此拍」`, 'info');
+    setStatus(t('scoreEdit.insertArmed', { measure: measureIndex + 1 }), 'info');
 }
 
 /** 用表单当前值写入已定位的插入点 */
 export function writeInsertTarget(): void {
-    const t = insertTarget;
-    if (!t) {
-        setStatus('请先在谱面点击空白拍定位插入点', 'info');
+    const target = insertTarget;
+    if (!target) {
+        setStatus(t('scoreEdit.insertFirst'), 'info');
         return;
     }
     const built = buildNotesFromForm(false);
     if (built.notes.length === 0) {
-        setStatus(built.error ?? '表单值无效', 'error');
+        setStatus(built.error ?? t('note.status.invalidForm'), 'error');
         return;
     }
-    const result = scoreStore.insertNotesAt(t.measureIndex, t.beatOffset, built.notes); // 内部 _notify 自动渲染
+    const result = scoreStore.insertNotesAt(target.measureIndex, target.beatOffset, built.notes); // 内部 _notify 自动渲染
     if (!result.ok) {
-        setStatus(result.reason ?? '写入失败', 'error');
+        setStatus(result.reason ?? t('scoreEdit.writeFailed'), 'error');
         return;
     }
     clearInsertTarget();
     scoreStore.setEditCursor(null);
     const stringList = built.notes.map(n => n.string ?? 1).join(',');
-    setStatus(`已写入: 小节${t.measureIndex + 1} · 第${stringList}弦 ${built.notes[0].fret}品`, 'success');
+    setStatus(t('scoreEdit.written', {
+        measure: target.measureIndex + 1,
+        strings: stringList,
+        fret: built.notes[0].fret ?? 0,
+    }), 'success');
 }
 
 /** 取消插入点 */
 export function cancelInsertTarget(): void {
     clearInsertTarget();
-    setStatus('已取消插入', 'info');
+    setStatus(t('scoreEdit.insertCanceled'), 'info');
 }
 
 /** 清除插入点并隐藏插入条 */
@@ -594,8 +643,8 @@ export function clearInsertTarget(): void {
 }
 
 /** 刷新插入条显隐/提示 */
-function renderInsertUI(): void {
+function renderInsertUI(opts: { scroll?: boolean; expand?: boolean } = {}): void {
     setActionBar('noteInsertBar', 'noteInsertHint', insertTarget
-        ? `插入点: 小节${insertTarget.measureIndex + 1}`
-        : null);
+        ? t('scoreEdit.insertHint', { measure: insertTarget.measureIndex + 1 })
+        : null, opts);
 }

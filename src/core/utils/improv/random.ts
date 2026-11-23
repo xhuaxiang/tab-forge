@@ -5,6 +5,8 @@
  * 单测才能固定输入输出。mulberry32 足够小、分布够用，不引入依赖。
  */
 
+import { t } from '../../i18n/index.ts';
+
 /** 创建确定性 RNG；同一 seed 的前 N 个值完全相同 */
 export function createRng(seed: number): () => number {
     let a = seed >>> 0;
@@ -18,7 +20,7 @@ export function createRng(seed: number): () => number {
 
 /** 等概率取一项；空数组抛错（调用方必须保证候选非空） */
 export function pick<T>(rng: () => number, items: readonly T[]): T {
-    if (items.length === 0) throw new Error('pick: 候选为空');
+    if (items.length === 0) throw new Error(t('improv.random.emptyPick'));
     return items[Math.floor(rng() * items.length)];
 }
 
@@ -27,7 +29,7 @@ export function pickWeighted<T>(
     rng: () => number,
     items: readonly { value: T; weight: number }[],
 ): T {
-    if (items.length === 0) throw new Error('pickWeighted: 候选为空');
+    if (items.length === 0) throw new Error(t('improv.random.emptyPickWeighted'));
     const total = items.reduce((sum, item) => sum + Math.max(0, item.weight), 0);
     if (total <= 0) return pick(rng, items).value;
 

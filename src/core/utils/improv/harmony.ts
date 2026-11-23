@@ -23,6 +23,7 @@ import {
     CHORD_INTERVALS,
     SCALE_INTERVALS,
 } from '../../types/improv/index.ts';
+import { t } from '../../i18n/index.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
 import { pitchClassOf, scalePitchClasses } from './pitch.ts';
 
@@ -156,7 +157,9 @@ function segmentsForMeasure(
 export function buildHarmonyPlan(options: ResolvedImprovOptions): HarmonyMeasure[] {
     const capacity = capacityFromTimeSignature(options.timeSignature);
     if (!Number.isFinite(capacity) || capacity <= 0) {
-        throw new Error(`无效拍号: ${options.timeSignature}`);
+        throw new Error(t('improv.common.invalidTimeSignature', {
+            signature: options.timeSignature,
+        }));
     }
 
     const steps: Progression = options.progression.length > 0

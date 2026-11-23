@@ -14,6 +14,7 @@ import type {
     SkeletonSlot,
     StyleProfile,
 } from '../../types/improv/index.ts';
+import { t } from '../../i18n/index.ts';
 import { buildHarmonyPlan, segmentAt, segmentIndexAt } from './harmony.ts';
 import { pickWeighted } from './random.ts';
 import {
@@ -67,7 +68,7 @@ function buildRegister(
         ).length > 0);
     }
     if (midis.length === 0) {
-        throw new Error(`调内没有可演奏的音高（把位 ${fretMin}-${fretMax} 品）`);
+        throw new Error(t('improv.melody.noPlayablePitch', { min: fretMin, max: fretMax }));
     }
     return { midis, low, high, center, playLow: playMin, playHigh: playMax };
 }

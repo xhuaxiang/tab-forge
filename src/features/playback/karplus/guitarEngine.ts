@@ -15,6 +15,7 @@
 
 import { generateStringData, toAudioBuffer, getBodyFilterPreset } from './karplusStrong.ts';
 import { KARPLUS_ARTICULATION, KARPLUS_MIX } from '../../../core/config.ts';
+import { t } from '../../../core/i18n/index.ts';
 import { generateRoomImpulse } from '../../../core/utils/roomImpulse.ts';
 import { highpassHzForString, panForString } from '../../../core/utils/karplusMix.ts';
 import { karplusBufferTiming } from '../../../core/utils/karplusTiming.ts';
@@ -180,7 +181,7 @@ export class GuitarEngine {
 
     playNote(options: NoteOptions = {}): symbol {
         const ctx = this.ctx;
-        if (!ctx || !this.masterGain) throw new Error('请先调用 init()');
+        if (!ctx || !this.masterGain) throw new Error(t('playback.error.initFirst'));
         // 直接调用 playNote（不经 init）时也要恢复被 stopAll 压掉的湿声
         this.ensureReverbWet();
 

@@ -9,6 +9,7 @@
  */
 
 import { getSearchSelectLimit, readSearchSelectValues, writeSearchSelectValues, syncSearchSelectLimit } from '../dom.ts';
+import { t } from '../../core/i18n/index.ts';
 
 function closeAllSelects(): void {
     document.querySelectorAll('.search-select.open').forEach(el => el.classList.remove('open'));
@@ -51,7 +52,7 @@ export function initSearchSelects(): void {
             if (!has) {
                 const nr = document.createElement('div');
                 nr.className = 'no-results';
-                nr.textContent = '无匹配';
+                nr.textContent = t('search.noResults');
                 optionsList.appendChild(nr);
             }
         });
@@ -98,4 +99,11 @@ export function initSearchSelects(): void {
     });
 
     document.addEventListener('click', closeAllSelects);
+}
+
+/** 语言切换后就地更新已存在的「无匹配」占位（不重建下拉、不重绑事件） */
+export function refreshSearchSelectNoResults(): void {
+    document.querySelectorAll<HTMLElement>('.no-results').forEach(el => {
+        el.textContent = t('search.noResults');
+    });
 }

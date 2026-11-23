@@ -21,11 +21,12 @@ import {
     LOCAL_STYLES,
     SCALE_TYPES,
 } from '../../core/types/improv/index.ts';
-import { IMPROV_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import { LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
 import {
-    detectUnsupportedDescription,
+    detectUnsupportedDescriptionItems,
     parseImprovDescription,
 } from '../../core/utils/improv/index.ts';
+import { t } from '../../core/i18n/index.ts';
 import {
     getApiKey,
     saveApiKey,
@@ -35,19 +36,8 @@ import {
     runImprovPipeline,
 } from '../../features/ai/index.ts';
 import { buildImprovSummary } from './improvSummary.ts';
-import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
-
-/** 从 IMPROV_CONFIG 生成即兴选项下拉（小节数/音阶/风格/密度），单一来源 */
-function initImprovConfig(): void {
-    fillNumberSelect(
-        'aiNumMeasures',
-        IMPROV_CONFIG.numMeasures.options,
-        IMPROV_CONFIG.numMeasures.default,
-    );
-    fillSelectOptions('aiScaleType', IMPROV_CONFIG.scaleTypes, IMPROV_CONFIG.scaleTypes[0].value);
-    fillSelectOptions('aiStyle', IMPROV_CONFIG.styles, IMPROV_CONFIG.styles[0].value);
-    fillSelectOptions('aiDensity', IMPROV_CONFIG.densities, IMPROV_CONFIG.densities[1].value);
-}
+import { refreshAiImprovOptions } from './improvRefresh.ts';
+import { setAiSummarySnapshot, setAiSummaryText } from './improvSummaryState.ts';
 
 /** 初始化 API Key 输入框（从存储中加载已保存的 Key） */
 async function initAIKeyInput(): Promise<void> {
@@ -155,10 +145,10 @@ async function handleAIGenerate(): Promise<void> {
 
     if (btn) {
         btn.disabled = true;
-        btn.textContent = '⏳ 生成中...';
+        btn.textContent = t('improv.generating');
     }
-    setStatus('⏳ 正在生成本地底稿...', 'info');
-    if (statusEl) statusEl.textContent = '⏳ 正在生成本地底稿...';
+    setStatus(t('improv.localGenerating'), 'info');
+    if (statusEl) statusEl.textContent = t('improv.localGenerating');
 
     // 确保至少有一个小节
     if (scoreStore.score.measures.length === 0) {
@@ -179,27 +169,25 @@ async function handleAIGenerate(): Promise<void> {
         });
 
         if (result.fatal || !result.notes || !result.local) {
-            const message = result.error ?? '本地生成失败';
-            setStatus(`本地即兴生成失败: ${message}`, 'error');
-            if (statusEl) statusEl.textContent = `❌ ${message}`;
+            const message = result.error ?? t('improv.localFailed');
+            setStatus(t('ai.localDraftFailedWith', { message }), 'error');
+            if (statusEl) statusEl.textContent = t('improv.errorPrefix', { message });
+            // 失败必须清掉旧快照，否则切语言会把错误条覆盖成上次成功摘要
+            setAiSummaryText(null);
             return;
         }
 
         const { local, notes } = result;
         writeGeneratedScore(notes, local.options);
 
-        // 本地不支持项；AI brief 已翻译掉的 CAGED 提示不再重复展示
-        const warnings = detectUnsupportedDescription(extraPrompt);
+        // 本地不支持项；AI brief 已翻译掉的 CAGED 提示不再重复展示。
+        // 按结构化 code 过滤——旧实现匹配中文前缀，文案一变就静默失效。
+        const items = detectUnsupportedDescriptionItems(extraPrompt);
         const translatedCaged = result.brief?.options.fingering !== undefined;
-        const shownWarnings = translatedCaged
-            ? warnings.filter(message => !message.startsWith('D 型 / CAGED'))
-            : warnings;
-        if (result.brief?.unsupported.length) {
-            shownWarnings.push(...result.brief.unsupported);
-        }
-        if (result.messages.length > 0) {
-            shownWarnings.push(...result.messages);
-        }
+        const shownItems = translatedCaged ? items.filter(item => item.code !== 'caged') : items;
+        // AI 原文与 pipeline 消息保留生成时语言，其余部分切语言时重建
+        const aiWarnings = [...(result.brief?.unsupported ?? []), ...result.messages];
+        const shownWarnings = [...shownItems.map(item => t(item.key)), ...aiWarnings];
 
         const summary = buildImprovSummary(
             local, seed, extraPrompt, described, shownWarnings,
@@ -208,34 +196,53 @@ async function handleAIGenerate(): Promise<void> {
         const applied = result.apply?.applied ?? 0;
         const dropped = result.apply?.dropped.length ?? 0;
         const aiText = apiKey
-            ? ` + AI 扩展 ${applied} 处${dropped > 0 ? `（丢弃 ${dropped}）` : ''}`
-            : '（AI 扩展跳过）';
-        const headline = `✅ 本地底稿 ${sounding} 音${aiText}`;
+            ? t('ai.extensionApplied', {
+                applied,
+                note: dropped > 0 ? t('ai.extensionDropped', { count: dropped }) : '',
+            })
+            : t('ai.extensionSkipped');
+        const headline = t('ai.headline', { notes: sounding, aiText });
 
         setStatus(headline, 'success');
+        setAiSummarySnapshot({
+            sounding,
+            hasApiKey: apiKey !== null,
+            applied,
+            dropped,
+            rationale: result.brief?.rationale ?? '',
+            result: local,
+            seed,
+            description: extraPrompt,
+            described,
+            warningKeys: shownItems.map(item => item.key),
+            aiWarnings,
+        });
         if (statusEl) {
             statusEl.textContent = [
                 headline,
-                result.brief?.rationale ? `AI 判断：${result.brief.rationale}` : '',
+                result.brief?.rationale ? t('ai.rationale', { rationale: result.brief.rationale }) : '',
                 summary,
             ].filter(Boolean).join('\n');
         }
     } catch (e) {
-        const msg = e instanceof Error ? e.message : '未知错误';
-        setStatus(`AI 即兴异常: ${msg}`, 'error');
-        if (statusEl) statusEl.textContent = `❌ 异常: ${msg}`;
+        const msg = e instanceof Error ? e.message : t('ai.unknownError');
+        setStatus(t('ai.exceptionWith', { message: msg }), 'error');
+        if (statusEl) {
+            statusEl.textContent = t('ai.exceptionPrefix', { message: msg });
+            setAiSummaryText(statusEl.textContent);
+        }
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '🤖 生成即兴谱';
+            btn.textContent = t('ai.generate');
         }
     }
 }
 
 export function initAIForm(): void {
-    // 初始化 API Key 输入框 + 选项下拉（从 IMPROV_CONFIG 生成）
+    // 初始化 API Key 输入框 + 选项下拉
     initAIKeyInput();
-    initImprovConfig();
+    refreshAiImprovOptions();
 
     // AI 生成按钮
     $('aiGenerateBtn')?.addEventListener('click', handleAIGenerate);

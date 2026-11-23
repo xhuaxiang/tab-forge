@@ -6,9 +6,8 @@
 
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { cursorBeatLabel } from '../../core/utils/measureUtils.ts';
+import { t } from '../../core/i18n/index.ts';
 import type { EditCursor } from '../../core/types/index.ts';
-
-const HINT = '点击谱面定位光标';
 
 /** 更新 #scoreEditHud 文案；无光标时显示操作提示 */
 export function renderEditHud(cursor: EditCursor | null): void {
@@ -16,18 +15,22 @@ export function renderEditHud(cursor: EditCursor | null): void {
     if (!el) return;
 
     if (!cursor) {
-        el.textContent = HINT;
+        el.textContent = t('hud.hint');
         el.classList.remove('active');
         return;
     }
 
     const measure = scoreStore.score.measures[cursor.measureIndex];
     if (!measure) {
-        el.textContent = HINT;
+        el.textContent = t('hud.hint');
         el.classList.remove('active');
         return;
     }
 
-    el.textContent = `小节 ${cursor.measureIndex + 1} · ${cursorBeatLabel(measure, cursor.beatOffset)} · ${cursor.string} 弦`;
+    el.textContent = t('hud.cursor', {
+        measure: cursor.measureIndex + 1,
+        beat: cursorBeatLabel(measure, cursor.beatOffset),
+        string: cursor.string,
+    });
     el.classList.add('active');
 }

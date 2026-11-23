@@ -16,6 +16,7 @@ import type {
     LocalImprovResult,
 } from '../../core/types/improv/index.ts';
 import { IMPROV_AI_CONFIG, LOCAL_IMPROV_CONFIG } from '../../core/config.ts';
+import { t } from '../../core/i18n/index.ts';
 import {
     buildChordChart,
     chordChartFromBars,
@@ -93,7 +94,7 @@ function collectConflicts(
     for (const key of Object.keys(local) as (keyof ImprovBriefOptions)[]) {
         if (ai[key] === undefined) continue;
         if (JSON.stringify(ai[key]) !== JSON.stringify(local[key])) {
-            messages.push(`AI 与本地识别冲突（${key}），按本地明确写法执行`);
+            messages.push(t('ai.pipeline.conflict', { key }));
         }
     }
     return messages;
@@ -219,15 +220,17 @@ export async function runImprovPipeline(
                 apiKey: input.apiKey,
             });
         } catch (error) {
-            messages.push(`需求解析失败（${error instanceof Error ? error.message : String(error)}），按本地关键词生成`);
+            messages.push(t('ai.pipeline.briefFailed', {
+                message: error instanceof Error ? error.message : String(error),
+            }));
             brief = null;
         }
         if (brief?.error) {
-            messages.push(`需求解析失败（${brief.error}），按本地关键词生成`);
+            messages.push(t('ai.pipeline.briefFailed', { message: brief.error }));
             brief = null;
         }
     } else if (!input.apiKey) {
-        messages.push('未配置 API Key，已生成本地底稿（AI 扩展跳过）');
+        messages.push(t('ai.pipeline.noApiKey'));
     }
 
     const merged = mergeImprovOptions(
@@ -246,7 +249,7 @@ export async function runImprovPipeline(
     if (rangeProvenance === 'derived'
         && merged.fretRange !== undefined
         && (localParse.fingering ?? input.base.fingering) !== undefined) {
-        messages.push('AI 建议的把位与本地指型冲突，按指型执行');
+        messages.push(t('ai.pipeline.fretConflict'));
     }
 
     let source = resolveRangeSource(generation);
@@ -256,7 +259,9 @@ export async function runImprovPipeline(
 
     // AI 给的把位不是硬约束：先丢它，再轮到指型/练习窗口
     if (!outcome.result && rangeProvenance === 'ai') {
-        messages.push(`AI 建议的把位不可用（${outcome.error ?? '生成失败'}），已退回本地把位`);
+        messages.push(t('ai.pipeline.fretUnavailable', {
+            message: outcome.error ?? t('ai.pipeline.generationFailed'),
+        }));
         generation = { ...generation, fretRange: undefined };
         rangeProvenance = 'derived';
         source = resolveRangeSource(generation);
@@ -265,7 +270,9 @@ export async function runImprovPipeline(
 
     if (!outcome.result && rangeProvenance !== 'explicit'
         && (source === 'fingering' || source === 'practice')) {
-        messages.push(`指型/练习窗口不可用（${outcome.error ?? '生成失败'}），已退回风格把位`);
+        messages.push(t('ai.pipeline.windowUnavailable', {
+            message: outcome.error ?? t('ai.pipeline.generationFailed'),
+        }));
         generation = {
             ...generation,
             fingering: undefined,
@@ -280,9 +287,12 @@ export async function runImprovPipeline(
     if (!outcome.result
         && (rangeProvenance !== 'explicit' || built.progressionFromAI)
         && (generation.progression !== undefined || generation.chordChart !== undefined)) {
-        messages.push(built.progressionFromAI
-            ? `AI 建议的和声进行不可用（${outcome.error ?? '生成失败'}），已退回 I 级`
-            : `和声进行不可用（${outcome.error ?? '生成失败'}），已退回 I 级`);
+        messages.push(t(
+            built.progressionFromAI
+                ? 'ai.pipeline.progressionAiUnavailable'
+                : 'ai.pipeline.progressionUnavailable',
+            { message: outcome.error ?? t('ai.pipeline.generationFailed') },
+        ));
         generation = {
             ...generation,
             progression: undefined,
@@ -294,7 +304,7 @@ export async function runImprovPipeline(
     if (!outcome.result) {
         if (rangeProvenance === 'explicit') {
             // 尊重用户显式把位：不降级，直接报错
-            messages.push('显式把位范围内无法生成，已中止');
+            messages.push(t('ai.pipeline.explicitRangeFailed'));
         }
         return {
             merged,
@@ -304,7 +314,7 @@ export async function runImprovPipeline(
             patch: null,
             notes: null,
             messages,
-            error: outcome.error ?? '本地生成失败',
+            error: outcome.error ?? t('ai.pipeline.localFailed'),
             fatal: true,
         };
     }
@@ -315,10 +325,12 @@ export async function runImprovPipeline(
     if (requestedFingering !== undefined
         && built.fretRangeProvenance === 'derived'
         && local.options.fretRangeSource !== 'fingering') {
-        messages.push(
-            `指型 ${requestedFingering} 未能换算到可演奏把位（该音阶缺少对应级数或把位越界），`
-            + `已按${local.options.fretRangeSource === 'practice' ? '练习窗口' : '风格把位'}生成`,
-        );
+        messages.push(t(
+            local.options.fretRangeSource === 'practice'
+                ? 'ai.pipeline.fingeringFallbackPractice'
+                : 'ai.pipeline.fingeringFallbackStyle',
+            { fingering: requestedFingering },
+        ));
     }
 
     let notes: Note[] = local.notes;
@@ -334,18 +346,20 @@ export async function runImprovPipeline(
                 apiKey: input.apiKey,
             });
         } catch (error) {
-            messages.push(`表现扩展失败（${error instanceof Error ? error.message : String(error)}），使用本地底稿`);
+            messages.push(t('ai.pipeline.patchFailed', {
+                message: error instanceof Error ? error.message : String(error),
+            }));
             patch = null;
         }
         if (patch?.error) {
-            messages.push(`表现扩展失败（${patch.error}），使用本地底稿`);
+            messages.push(t('ai.pipeline.patchFailed', { message: patch.error }));
         }
         if (patch && patch.warnings.length > 0) {
-            const shown = patch.warnings.slice(0, 3).join('；');
+            const shown = patch.warnings.slice(0, 3).join(t('ai.pipeline.warningSeparator'));
             const more = patch.warnings.length > 3
-                ? ` 等 ${patch.warnings.length} 条`
+                ? t('ai.pipeline.patchMore', { count: patch.warnings.length })
                 : '';
-            messages.push(`表现扩展解析提示：${shown}${more}`);
+            messages.push(t('ai.pipeline.patchWarnings', { shown, more }));
         }
         if (!patch?.error && patch && patch.patches.length > 0) {
             apply = applyPerformancePatches(
@@ -360,9 +374,12 @@ export async function runImprovPipeline(
             );
             notes = apply.notes;
             if (apply.reverted) {
-                messages.push('表现扩展复核未通过，已回退本地底稿');
+                messages.push(t('ai.pipeline.patchRejected'));
             } else if (apply.dropped.length > 0) {
-                messages.push(`表现扩展丢弃 ${apply.dropped.length} 条（${apply.dropped[0].reason}）`);
+                messages.push(t('ai.pipeline.patchDropped', {
+                    count: apply.dropped.length,
+                    reason: apply.dropped[0].reason,
+                }));
             }
         }
     }

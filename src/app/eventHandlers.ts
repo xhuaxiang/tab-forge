@@ -9,7 +9,8 @@ import { exportToAsciiTab } from '../core/utils/tabExport.ts';
 // 未实现文件下载/导入，入口先隐藏（TODO 1.2）
 // import { exportToJson } from '../core/utils/tabExport.ts';
 import { exportToGp, gpExportFileName } from '../features/alphaTab/gpExport.ts';
-import { $, setStatus, downloadBlob } from './dom.ts';
+import { $, setStatusT, downloadBlob } from './dom.ts';
+import { t } from '../core/i18n/index.ts';
 import { scoreStore } from '../core/stores/scoreStore.ts';
 import { initChordGrid } from './input/chordInput.ts';
 import { PLAYBACK_ENGINES, DISPLAY_MODES } from '../core/config.ts';
@@ -54,18 +55,8 @@ export function initEventListeners(): void {
     // DOM 初始化
     // ============================================================
 
-    // 生成 fretSelect 选项
-    const fretOpts = document.getElementById('fretSelect')?.querySelector('.options-list');
-    if (fretOpts) {
-        fretOpts.innerHTML = '';
-        for (let f = 0; f <= 24; f++) {
-            const div = document.createElement('div');
-            div.className = 'option' + (f === 0 ? ' selected' : '');
-            div.dataset.value = String(f);
-            div.innerHTML = `第 ${f} 品 <span class="option-note">${f === 0 ? '空弦' : `${f}品`}</span>`;
-            fretOpts.appendChild(div);
-        }
-    }
+    // 生成 fretSelect 选项（语言切换时由 refreshFretOptions 重建）
+    refreshFretOptions();
 
     // 和弦网格
     initChordGrid();
@@ -100,6 +91,30 @@ export function initEventListeners(): void {
     $('exportTopBtn')?.addEventListener('click', handleExport);
 }
 
+/**
+ * 重建 0–24 品选项：按 `#fretSelect` 当前 data-value 恢复选中。
+ * 事件走列表委托（searchSelect），重建选项不会丢监听。
+ */
+export function refreshFretOptions(): void {
+    const container = document.getElementById('fretSelect');
+    const list = container?.querySelector('.options-list');
+    if (!container || !list) return;
+
+    const current = container.dataset.value || '0';
+    list.textContent = '';
+    for (let f = 0; f <= 24; f++) {
+        const option = document.createElement('div');
+        option.className = 'option' + (String(f) === current ? ' selected' : '');
+        option.dataset.value = String(f);
+        option.append(`${t('fret.option', { fret: f })} `);
+        const note = document.createElement('span');
+        note.className = 'option-note';
+        note.textContent = f === 0 ? t('fret.noteOpen') : t('fret.noteFret', { fret: f });
+        option.appendChild(note);
+        list.appendChild(option);
+    }
+}
+
 // ============================================================
 // 导出 Modal
 // ============================================================
@@ -110,18 +125,18 @@ function handleExport(): void {
     modal.className = 'modal-overlay';
     modal.innerHTML = `
         <div class="modal-content">
-            <h3>📤 导出乐谱</h3>
+            <h3>${t('export.title')}</h3>
             <div class="modal-actions">
                 <!-- 未实现文件下载/导入，先隐藏（TODO 1.2）
                 <button id="exportAsciiBtn">TAB 文本</button>
                 <button id="exportJsonBtn">JSON</button>
                 -->
                 <button id="exportGpBtn">Guitar Pro (.gp)</button>
-                <button id="copyBtn" class="btn-copy">📋 复制</button>
+                <button id="copyBtn" class="btn-copy">${t('export.copy')}</button>
             </div>
             <textarea class="modal-textarea" id="exportOutput" readonly>${ascii}</textarea>
             <div class="modal-footer">
-                <button id="closeExportBtn">关闭</button>
+                <button id="closeExportBtn">${t('common.close')}</button>
             </div>
         </div>`;
     document.body.appendChild(modal);
@@ -144,16 +159,16 @@ function handleExport(): void {
                 gpExportFileName(scoreStore.score),
                 new Blob([buffer], { type: 'application/octet-stream' }),
             );
-            setStatus('已导出 Guitar Pro', 'success');
+            setStatusT('export.status.gpExported', undefined, 'success');
         } catch (e) {
             console.error('[TabForge] Guitar Pro 导出失败', e);
-            setStatus('Guitar Pro 导出失败', 'error');
+            setStatusT('export.status.gpFailed', undefined, 'error');
         }
     });
     modal.querySelector('#copyBtn')?.addEventListener('click', () => {
         navigator.clipboard.writeText(ta.value)
-            .then(() => setStatus('已复制', 'success'))
-            .catch(() => setStatus('复制失败', 'error'));
+            .then(() => setStatusT('export.status.copied', undefined, 'success'))
+            .catch(() => setStatusT('export.status.copyFailed', undefined, 'error'));
     });
     modal.querySelector('#closeExportBtn')?.addEventListener('click', () => document.body.removeChild(modal));
     modal.addEventListener('click', (e) => {

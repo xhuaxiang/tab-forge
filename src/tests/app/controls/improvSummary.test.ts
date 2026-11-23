@@ -5,11 +5,16 @@
  * 换算失败回退风格/练习窗口时必须标注，避免「风格把位 · 指型 Sol」自相矛盾。
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import type { Note } from '../../../core/types/index.ts';
 import type { LocalImprovResult } from '../../../core/types/improv/index.ts';
 import { resolveLocalImprovOptions } from '../../../core/utils/improv/generate.ts';
 import { buildImprovSummary } from '../../../app/controls/improvSummary.ts';
+import { setLocale } from '../../../core/i18n/index.ts';
+
+afterEach(() => setLocale('zh-CN'));
+
+const CJK = /[　-〿㐀-䶿一-鿿豈-﫿＀-￯]/;
 
 function result(options: Parameters<typeof resolveLocalImprovOptions>[0]): LocalImprovResult {
     const notes: Note[] = [{ string: 1, fret: 5, duration: 0.25 }];
@@ -78,5 +83,21 @@ describe('buildImprovSummary — 指型', () => {
         const text = summary(result({ key: 'C', scaleType: 'Major (Ionian)' }));
 
         expect(text).not.toContain('指型');
+    });
+});
+
+describe('buildImprovSummary — en', () => {
+    it('英文摘要结构信息保留且无中文', () => {
+        setLocale('en');
+        const text = summary(result({
+            key: 'C',
+            scaleType: 'Major (Ionian)',
+            fingering: 'La',
+        }));
+
+        expect(text).toContain('fingering La');
+        expect(text).toContain('frets 5-8');
+        expect(text).toContain('seed 7');
+        expect(CJK.test(text)).toBe(false);
     });
 });

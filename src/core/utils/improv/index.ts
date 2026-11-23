@@ -11,6 +11,7 @@ export {
 } from './generate.ts';
 export {
     detectUnsupportedDescription,
+    detectUnsupportedDescriptionItems,
     parseDescriptionChordChart,
     parseDescriptionFretRange,
     parseImprovDescription,

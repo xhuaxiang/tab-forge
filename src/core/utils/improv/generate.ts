@@ -22,6 +22,7 @@ import {
 } from '../../types/improv/index.ts';
 import { FINGERING_PATTERN_SPAN, LOCAL_IMPROV_CONFIG } from '../../config.ts';
 import { capacityFromTimeSignature } from '../measureUtils.ts';
+import { t } from '../../i18n/index.ts';
 import { decorateSlots } from './decorate.ts';
 import { fingeringFretRange } from './fingering.ts';
 import { buildHarmonyPlan, normalizeProgression } from './harmony.ts';
@@ -112,7 +113,7 @@ export function resolveLocalImprovOptions(
     const rawKey = typeof input.key === 'string' ? input.key.trim() : '';
     const parsedKey = parseKey(rawKey) ?? parseKey(config.defaults.key);
     if (parsedKey === null) {
-        throw new Error(`默认调性无法解析: ${config.defaults.key}`);
+        throw new Error(t('improv.generate.defaultKeyInvalid', { key: config.defaults.key }));
     }
 
     const style = input.style !== undefined && LOCAL_STYLES.includes(input.style)
@@ -222,10 +223,11 @@ function assertLockedChordsPlayable(
             });
 
             if (!playable) {
-                throw new Error(
-                    `锁定把位 ${range.min}-${range.max} 品内没有和弦 `
-                    + `${label} 的可演奏音，请放宽把位范围`,
-                );
+                throw new Error(t('improv.generate.lockedRangeNoVoicing', {
+                    min: range.min,
+                    max: range.max,
+                    chord: label,
+                }));
             }
         }
     }
@@ -256,7 +258,9 @@ export function generateLocalImprovisation(
     );
     const phraseErrors = validatePhrasePlan(phrases, options);
     if (phraseErrors.length > 0) {
-        throw new Error(`本地即兴乐句计划无效:\n${phraseErrors.join('\n')}`);
+        throw new Error(t('improv.generate.phrasePlanInvalid', {
+            errors: phraseErrors.join('\n'),
+        }));
     }
 
     // 终止式在节奏层完成：末小节尾部重排成一个长收尾音，旋律与把位仍按
@@ -273,7 +277,9 @@ export function generateLocalImprovisation(
         plan, options, density.minNotesPerMeasure,
     );
     if (planErrors.length > 0) {
-        throw new Error(`本地即兴节奏计划无效:\n${planErrors.join('\n')}`);
+        throw new Error(t('improv.generate.rhythmPlanInvalid', {
+            errors: planErrors.join('\n'),
+        }));
     }
 
     const skeleton = buildSkeleton(
@@ -301,7 +307,9 @@ export function generateLocalImprovisation(
         phrases,
     );
     if (noteErrors.length > 0) {
-        throw new Error(`本地即兴结果未通过校验:\n${noteErrors.join('\n')}`);
+        throw new Error(t('improv.generate.resultInvalid', {
+            errors: noteErrors.join('\n'),
+        }));
     }
 
     return { notes, options, harmony, phrases, maxLeapSemitones };

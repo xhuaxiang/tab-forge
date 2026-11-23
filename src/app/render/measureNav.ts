@@ -7,6 +7,7 @@
  */
 
 import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { t } from '../../core/i18n/index.ts';
 
 let inited = false;
 
@@ -47,10 +48,12 @@ export function refreshMeasureNav(): void {
 
     const label = document.getElementById('navMeasureLabel');
     if (label) {
-        label.title = '目标小节：未选中时添加操作落到末尾小节；点击数字/谱面小节即可选中作为目标';
+        label.title = t('measureNav.labelTitle');
         label.textContent = total > 0
-            ? (sel === null ? `小节 ${eff + 1}/${total} · 默认` : `小节 ${sel + 1}/${total} · 已选`)
-            : '小节 —';
+            ? (sel === null
+                ? t('measureNav.labelDefault', { current: eff + 1, total })
+                : t('measureNav.labelSelected', { current: sel + 1, total }))
+            : t('measureNav.labelEmpty');
     }
 
     const prev = document.getElementById('navMeasurePrev') as HTMLButtonElement | null;

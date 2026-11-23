@@ -3,6 +3,7 @@
  */
 
 import type { NoteDuration } from '../types/note/index.ts';
+import { t, type MessageKey } from '../i18n/index.ts';
 
 /**
  * 时值 → 拍数（以四分音符为 1 拍）。
@@ -19,17 +20,19 @@ export function durationToBeats(d: number): number {
     return d * 4;
 }
 
-/** 时值对应的中文名称（状态栏 / 提示文案用） */
+/** 时值对应的名称（状态栏 / 提示文案用，按当前界面语言） */
 export function durationName(d: number): string {
-    // Record<NoteDuration, ...> 让新增合法时值时 TS 直接报缺项；
-    // 运行时对清单外的值仍然落到 `${d}拍` 兜底（故按 number 索引需断言）。
-    const m: Record<NoteDuration, string> = {
-        1: '全音符',
-        0.5: '二分音符',
-        0.25: '四分音符',
-        0.125: '八分音符',
-        0.0625: '十六分',
-        0.03125: '三十二分',
+    // Record<NoteDuration, MessageKey> 让新增合法时值时 TS 直接报缺项；
+    // 运行时对清单外的值仍然落到「{d}拍」兜底（故按 number 索引需断言）。
+    const m: Record<NoteDuration, MessageKey> = {
+        1: 'duration.whole',
+        0.5: 'duration.half',
+        0.25: 'duration.quarter',
+        0.125: 'duration.eighth',
+        0.0625: 'duration.sixteenth',
+        0.03125: 'duration.thirtySecond',
     };
-    return m[d as NoteDuration] || `${d}拍`;
+    const key = m[d as NoteDuration];
+    // 运行时兜底保持原有 `${d}拍` 语义（undefined/NaN 也要原样出现在文案里）
+    return key ? t(key) : t('duration.beatsFallback', { beats: String(d) });
 }

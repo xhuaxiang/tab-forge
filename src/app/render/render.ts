@@ -52,6 +52,7 @@ export function render(): void {
 export function renderHighlight(): void {
     alphaTabRenderer?.setSelectedMeasure(scoreStore.selectedMeasure ?? -1);
     alphaTabRenderer?.setEditCursor(scoreStore.editCursor);
+    alphaTabRenderer?.refreshEmptyState();
     renderEditHud(scoreStore.editCursor);
     syncMeasureNav();
 }

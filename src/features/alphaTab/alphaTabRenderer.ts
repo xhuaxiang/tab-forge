@@ -20,6 +20,7 @@ import {
 } from '../../core/utils/tabGeometry.ts';
 import { tabScoreToAlphaTabScore } from './scoreAdapter.ts';
 import { handleScoreClick, type TabCellHit } from './scoreEditing.ts';
+import { t } from '../../core/i18n/index.ts';
 
 type AlphaTabModule = typeof import('@coderline/alphatab');
 type AlphaTabBeat = import('@coderline/alphatab').model.Beat;
@@ -517,8 +518,7 @@ export class AlphaTabRenderer {
                 this.container?.querySelectorAll<HTMLElement>('.at-surface').forEach(el => { el.style.display = 'none'; });
                 this.emptyStateEl = document.createElement('div');
                 this.emptyStateEl.className = 'empty-state';
-                this.emptyStateEl.innerHTML = '点击「+ 小节」开始创建吉他六线谱<br>'
-                    + '<span class="hint">提示：数字 = 品位，0 = 空弦，- = 不弹</span>';
+                this.fillEmptyState();
                 this.container?.appendChild(this.emptyStateEl);
             }
             return;
@@ -528,6 +528,22 @@ export class AlphaTabRenderer {
         this.container?.querySelectorAll<HTMLElement>('.at-surface').forEach(el => { el.style.display = ''; });
         const atScore = tabScoreToAlphaTabScore(score);
         this.api.load(atScore);
+    }
+
+    /** 空状态文案（只在空谱时构建；语言切换由 refreshEmptyState 就地更新） */
+    private fillEmptyState(): void {
+        if (!this.emptyStateEl) return;
+        this.emptyStateEl.textContent = '';
+        this.emptyStateEl.append(t('empty.title'), document.createElement('br'));
+        const hint = document.createElement('span');
+        hint.className = 'hint';
+        hint.textContent = t('empty.hint');
+        this.emptyStateEl.appendChild(hint);
+    }
+
+    /** 语言切换后就地刷新空谱提示（非空谱时无操作） */
+    refreshEmptyState(): void {
+        this.fillEmptyState();
     }
 
     dispose(): void {

@@ -10,6 +10,7 @@
 
 import type { Measure, Note } from '../types/index.ts';
 import { groupNotes } from './measureUtils.ts';
+import { t } from '../i18n/index.ts';
 
 /**
  * 把拍平音符按 `chordGroup` 分组成拍位。
@@ -92,9 +93,9 @@ export function buildNoteGroup(
  * @returns 错误描述；合法返回 null
  */
 export function validateNoteGroup(notes: Note[]): string | null {
-    if (notes.length === 0) return '没有音符';
-    if (notes.some(n => n.string === undefined)) return '音符缺少弦号';
+    if (notes.length === 0) return t('core.groupEmpty');
+    if (notes.some(n => n.string === undefined)) return t('core.groupMissingString');
     const strings = notes.map(n => n.string);
-    if (new Set(strings).size !== strings.length) return '同一根弦出现多次';
+    if (new Set(strings).size !== strings.length) return t('core.groupDuplicateString');
     return null;
 }

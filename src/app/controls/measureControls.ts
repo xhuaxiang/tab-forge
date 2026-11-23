@@ -2,32 +2,33 @@
  * measureControls — 小节增删与清空
  */
 
-import { $, setStatus } from '../dom.ts';
+import { $, setStatusT } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
+import { t } from '../../core/i18n/index.ts';
 
 export function initMeasureControls(): void {
     // --- 小节操作 ---
     $('addMeasure')?.addEventListener('click', () => {
         const n = scoreStore.addMeasure();
-        setStatus(`已添加小节 ${n}`, 'success');
+        setStatusT('measure.status.added', { index: n }, 'success');
     });
 
     $('deleteMeasure')?.addEventListener('click', () => {
         if (!scoreStore.deleteLastMeasure()) {
-            setStatus('无小节可删', 'error');
+            setStatusT('measure.status.noneToDelete', undefined, 'error');
             return;
         }
-        setStatus('已删除最后一个小节', 'info');
+        setStatusT('measure.status.deleted', undefined, 'info');
     });
 
     $('clearBtn')?.addEventListener('click', () => {
         if (scoreStore.score.measures.length === 0) {
-            setStatus('已是空状态', 'info');
+            setStatusT('measure.status.alreadyEmpty', undefined, 'info');
             return;
         }
-        if (confirm('确定清空所有小节？')) {
+        if (confirm(t('measure.confirmClear'))) {
             scoreStore.clear();
-                setStatus('已清空', 'info');
+                setStatusT('measure.status.cleared', undefined, 'info');
         }
     });
 }

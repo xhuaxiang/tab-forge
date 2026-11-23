@@ -3,7 +3,7 @@
  */
 
 import { TUNING_PRESETS } from '../../core/types/index.ts';
-import { $, setStatus } from '../dom.ts';
+import { $, setStatusT } from '../dom.ts';
 import { scoreStore } from '../../core/stores/scoreStore.ts';
 import { SCORE_DEFAULTS } from '../../core/config.ts';
 
@@ -18,14 +18,14 @@ export function initScoreControls(): void {
             const inp = $(`tuning${i}`) as HTMLInputElement;
             if (inp) inp.value = preset[`string${i}` as keyof typeof preset];
         }
-        setStatus(`调弦: ${sel.value}`, 'success');
+        setStatusT('settings.status.tuning', { preset: sel.value }, 'success');
     });
 
     for (let i = 1; i <= 6; i++) {
         $(`tuning${i}`)?.addEventListener('change', (e) => {
             const inp = e.target as HTMLInputElement;
             scoreStore.setStringTuning(i, inp.value);
-                setStatus(`第${i}弦 = ${inp.value}`, 'info');
+                setStatusT('settings.status.stringTuning', { string: i, value: inp.value }, 'info');
         });
     }
 
@@ -38,17 +38,17 @@ export function initScoreControls(): void {
         const v = parseInt(bpmInput.value, 10);
         scoreStore.setBpm(isNaN(v) ? SCORE_DEFAULTS.bpm : v);
         bpmInput.value = String(scoreStore.score.bpm);
-        setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
+        setStatusT('settings.status.bpm', { bpm: scoreStore.score.bpm }, 'info');
     });
     bpmInc?.addEventListener('click', () => {
         scoreStore.setBpm(scoreStore.score.bpm + 5);
         bpmInput.value = String(scoreStore.score.bpm);
-        setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
+        setStatusT('settings.status.bpm', { bpm: scoreStore.score.bpm }, 'info');
     });
     bpmDec?.addEventListener('click', () => {
         scoreStore.setBpm(scoreStore.score.bpm - 5);
         bpmInput.value = String(scoreStore.score.bpm);
-        setStatus(`BPM: ${scoreStore.score.bpm}`, 'info');
+        setStatusT('settings.status.bpm', { bpm: scoreStore.score.bpm }, 'info');
     });
 
     // --- 调性 ---
@@ -57,7 +57,7 @@ export function initScoreControls(): void {
         keySelect.value = scoreStore.score.key || 'C';
         keySelect.addEventListener('change', () => {
             scoreStore.setKey(keySelect.value);
-                setStatus(`调性: ${keySelect.value}`, 'info');
+                setStatusT('settings.status.key', { key: keySelect.value }, 'info');
         });
     }
 
@@ -67,7 +67,7 @@ export function initScoreControls(): void {
         timeSigSelect.value = scoreStore.score.timeSignature;
         timeSigSelect.addEventListener('change', () => {
             scoreStore.setTimeSignature(timeSigSelect.value);
-                setStatus(`拍号: ${timeSigSelect.value}`, 'info');
+                setStatusT('settings.status.timeSignature', { signature: timeSigSelect.value }, 'info');
         });
     }
 }

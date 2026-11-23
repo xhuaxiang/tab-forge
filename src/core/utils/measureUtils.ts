@@ -6,6 +6,7 @@
  */
 
 import type { Measure, Note } from '../types/index.ts';
+import { t } from '../i18n/index.ts';
 
 /**
  * 返回从 `start` 开始的拍位组结束下标（不含）。
@@ -115,12 +116,12 @@ export function slotStartOffsets(measure: Measure): number[] {
 export function cursorBeatLabel(measure: Measure, beatOffset: number): string {
     const EPS = 1e-6;
     const starts = slotStartOffsets(measure);
-    if (starts.length === 0) return '空小节';
+    if (starts.length === 0) return t('cursor.emptyMeasure');
 
     const total = measureTotalBeats(measure);
     // 非有限偏移无法落位，统一按小节尾处理（保证读数确定）
-    if (!Number.isFinite(beatOffset)) return '小节尾';
-    if (beatOffset >= total - EPS) return '小节尾';
+    if (!Number.isFinite(beatOffset)) return t('cursor.measureEnd');
+    if (beatOffset >= total - EPS) return t('cursor.measureEnd');
 
     let index = -1;
     for (let i = 0; i < starts.length; i++) {
@@ -131,7 +132,7 @@ export function cursorBeatLabel(measure: Measure, beatOffset: number): string {
         if (starts[i] <= beatOffset + EPS) index = i;
     }
     if (index < 0) index = 0;
-    return `拍位 ${index + 1}`;
+    return t('cursor.slot', { index: index + 1 });
 }
 
 /**

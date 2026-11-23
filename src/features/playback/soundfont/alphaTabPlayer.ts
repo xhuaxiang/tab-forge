@@ -14,6 +14,7 @@
 
 import type { PlaybackCallbacks, PlaybackState } from '../karplus/index.ts';
 import type { TabScore } from '../../../core/types/index.ts';
+import { t } from '../../../core/i18n/index.ts';
 import { tabScoreToAlphaTabScore } from '../../alphaTab/scoreAdapter.ts';
 import { createAlphaTabWorkletOutput } from './alphaTabOutput.ts';
 import soundfontUrl from '@coderline/alphatab/soundfont/sonivox.sf3?url';
@@ -54,7 +55,7 @@ class AlphaTabPlayer {
     }
 
     async play(score: TabScore): Promise<void> {
-        if (this.broken) throw new Error('alphaTab player 不可用（上次初始化失败）');
+        if (this.broken) throw new Error(t('playback.error.playerUnavailable'));
         // 暂停中再次播放 = 继续；绝不能重新 loadMidiFile，否则会从曲首重播
         if (this.state === 'paused') {
             this.resume();
@@ -63,7 +64,7 @@ class AlphaTabPlayer {
         if (this.state === 'playing') return;
 
         await this.ensureInitialized();
-        if (!this.synth || !this.mod) throw new Error('alphaTab player 未初始化');
+        if (!this.synth || !this.mod) throw new Error(t('playback.error.playerNotInitialized'));
 
         const mod = this.mod;
         const atScore = tabScoreToAlphaTabScore(score);
@@ -157,7 +158,7 @@ class AlphaTabPlayer {
         });
 
         const res = await fetch(soundfontUrl);
-        if (!res.ok) throw new Error(`加载 SoundFont 失败: HTTP ${res.status}`);
+        if (!res.ok) throw new Error(t('playback.error.soundfontLoadFailed', { status: res.status }));
         const data = new Uint8Array(await res.arrayBuffer());
         synth.loadSoundFont(data, false);
 

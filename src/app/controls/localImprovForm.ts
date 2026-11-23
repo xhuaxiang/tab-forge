@@ -21,12 +21,7 @@ import {
     LOCAL_STYLES,
     SCALE_TYPES,
 } from '../../core/types/improv/index.ts';
-import type { ImprovSelectOption } from '../../core/config.ts';
-import {
-    IMPROV_CONFIG,
-    LOCAL_IMPROV_CONFIG,
-    LOCAL_PROGRESSIONS,
-} from '../../core/config.ts';
+import { LOCAL_IMPROV_CONFIG, LOCAL_PROGRESSIONS } from '../../core/config.ts';
 import {
     buildChordChart,
     chordChartFromBars,
@@ -36,8 +31,10 @@ import {
     parseImprovDescription,
     progressionEquals,
 } from '../../core/utils/improv/index.ts';
+import { t } from '../../core/i18n/index.ts';
 import { buildImprovSummary } from './improvSummary.ts';
-import { fillNumberSelect, fillSelectOptions } from './improvOptions.ts';
+import { refreshLocalImprovOptions } from './improvRefresh.ts';
+import { clearLocalSummarySnapshot, setLocalSummarySnapshot } from './improvSummaryState.ts';
 
 function readOption<T extends string>(
     id: string,
@@ -48,57 +45,6 @@ function readOption<T extends string>(
     return value !== undefined && (options as readonly string[]).includes(value)
         ? value as T
         : fallback;
-}
-
-/** 用本地值顺序去取 AI 文案表里的 label，避免维护第二份中英文映射 */
-function labelOptions<T extends string>(
-    values: readonly T[],
-    source: readonly ImprovSelectOption[],
-): ImprovSelectOption[] {
-    return values.map(value => {
-        const found = source.find(option => option.value === value);
-        return found ? { value, label: found.label } : { value, label: value };
-    });
-}
-
-function initLocalImprovOptions(): void {
-    const config = LOCAL_IMPROV_CONFIG;
-    fillNumberSelect(
-        'localNumMeasures',
-        config.numMeasures.options,
-        config.numMeasures.default,
-    );
-    fillSelectOptions(
-        'localScaleType',
-        labelOptions(SCALE_TYPES, IMPROV_CONFIG.scaleTypes),
-        config.defaults.scaleType,
-    );
-    fillSelectOptions(
-        'localStyle',
-        labelOptions(LOCAL_STYLES, IMPROV_CONFIG.styles),
-        config.defaults.style,
-    );
-    fillSelectOptions(
-        'localDensity',
-        labelOptions(LOCAL_DENSITIES, IMPROV_CONFIG.densities),
-        config.defaults.density,
-    );
-    fillSelectOptions(
-        'localProgression',
-        LOCAL_PROGRESSIONS.map(option => ({
-            value: option.value,
-            label: option.label,
-        })),
-        LOCAL_PROGRESSIONS[0].value,
-    );
-    fillSelectOptions(
-        'localChordsPerMeasure',
-        config.chordsPerMeasure.options.map(value => ({
-            value: String(value),
-            label: value === 1 ? '1（整小节）' : `${value}（等分）`,
-        })),
-        String(config.chordsPerMeasure.default),
-    );
 }
 
 function readLocalDescription(): string {
@@ -213,9 +159,11 @@ function handleLocalGenerate(): void {
 
     if (button) {
         button.disabled = true;
-        button.textContent = '⏳ 生成中...';
+        button.textContent = t('improv.generating');
     }
 
+    // 新一轮生成开始即丢弃旧快照：失败时切语言不能把错误条覆盖成上次摘要
+    clearLocalSummarySnapshot();
     try {
         const description = readLocalDescription().trim();
         const described = parseImprovDescription(description);
@@ -241,21 +189,22 @@ function handleLocalGenerate(): void {
         const summary = buildImprovSummary(
             result, seed, description, described, warnings,
         );
-        setStatus(`✅ 本地即兴已生成（${result.options.style}）`, 'success');
+        setLocalSummarySnapshot({ result, seed, description, described });
+        setStatus(t('improv.localDone', { style: result.options.style }), 'success');
         if (statusEl) statusEl.textContent = summary;
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        setStatus(`本地即兴生成失败: ${message}`, 'error');
-        if (statusEl) statusEl.textContent = `❌ ${message}`;
+        setStatus(t('improv.localFailedWith', { message }), 'error');
+        if (statusEl) statusEl.textContent = t('improv.errorPrefix', { message });
     } finally {
         if (button) {
             button.disabled = false;
-            button.textContent = '🎸 生成即兴谱';
+            button.textContent = t('improv.generateLocal');
         }
     }
 }
 
 export function initLocalImprovForm(): void {
-    initLocalImprovOptions();
+    refreshLocalImprovOptions();
     $('localImprovBtn')?.addEventListener('click', handleLocalGenerate);
 }

@@ -6,6 +6,7 @@
  */
 
 import { uiStore } from '../../core/stores/uiStore.ts';
+import { t } from '../../core/i18n/index.ts';
 
 // ============================================================
 // 和弦预设
@@ -73,13 +74,13 @@ export function updateStrumButton(): void {
     if (!btn) return;
     const s = uiStore.currentStrum;
     if (s === 'down') {
-        btn.textContent = '⤵ 下扫';
+        btn.textContent = t('chord.strumDown');
         btn.classList.add('active');
     } else if (s === 'up') {
-        btn.textContent = '⤴ 上扫';
+        btn.textContent = t('chord.strumUp');
         btn.classList.add('active');
     } else {
-        btn.textContent = '⤵ 扫弦';
+        btn.textContent = t('chord.strum');
         btn.classList.remove('active');
     }
 }
@@ -98,7 +99,7 @@ export function updateArpeggioButton(): void {
         btn.textContent = '𝆃 ↓';
         btn.classList.add('active');
     } else {
-        btn.textContent = '𝆃 琶音';
+        btn.textContent = t('chord.arpeggio');
         btn.classList.remove('active');
     }
 }

@@ -5,6 +5,10 @@
  * 不依赖业务模块；纯映射类工具放 core/utils，这里不留无 DOM 的逻辑。
  */
 
+import { t, type MessageKey, type MessageParams } from '../core/i18n/index.ts';
+
+export type StatusType = 'info' | 'success' | 'error';
+
 /** 简写 DOM 选择器 */
 export function $(id: string): HTMLElement | null {
     return document.getElementById(id);
@@ -12,11 +16,34 @@ export function $(id: string): HTMLElement | null {
 
 const statusBar = $('statusBar')!;
 
-/** 设置状态栏消息 */
-export function setStatus(msg: string, type: 'info' | 'success' | 'error' = 'info'): void {
+/** 最近一次由 key 设置的状态；普通 setStatus 会清空，切换语言时不再重放 */
+let keyedStatus: { key: MessageKey; params?: MessageParams; type: StatusType } | null = null;
+
+function writeStatus(msg: string, type: StatusType): void {
     statusBar.textContent = msg;
     statusBar.className = 'status-bar';
     if (type) statusBar.classList.add(type);
+}
+
+/** 设置状态栏消息（动态文本；切换语言后不重放，下次事件会覆盖） */
+export function setStatus(msg: string, type: StatusType = 'info'): void {
+    keyedStatus = null;
+    writeStatus(msg, type);
+}
+
+/** 用文案 key 设置状态栏；切换语言时可按 key 重放 */
+export function setStatusT(key: MessageKey, params?: MessageParams, type: StatusType = 'info'): void {
+    keyedStatus = { key, params, type };
+    writeStatus(t(key, params), type);
+}
+
+/** 切换语言后刷新状态栏：keyed 状态按新语言重放，否则回到「就绪」 */
+export function refreshStatus(): void {
+    if (keyedStatus) {
+        writeStatus(t(keyedStatus.key, keyedStatus.params), keyedStatus.type);
+        return;
+    }
+    writeStatus(t('status.ready'), 'info');
 }
 
 /** 以 Blob 触发浏览器下载（临时 <a>，用完即回收 object URL） */
