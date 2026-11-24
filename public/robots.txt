@@ -1,5 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /api/
 
-# TODO: 绑定自定义域名后替换为正式域名
 Sitemap: https://tab-forge.pages.dev/sitemap.xml

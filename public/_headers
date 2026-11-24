@@ -1,9 +1,6 @@
 # Cloudflare Pages 响应头
-# 注意：第一段必须带 host，写成 /* 会把正式域名也 noindex。
-# 如果 Pages 项目名不是 tab-forge，同步改下面这一行。
-
-https://tab-forge.pages.dev/*
-  X-Robots-Tag: noindex
+# 短期直接使用 pages.dev 做 SEO 观察，因此不再对 pages.dev 加 noindex。
+# 以后绑定自定义域名时，若要避免 pages.dev 重复收录，可恢复 host 级 noindex。
 
 /assets/*
   Cache-Control: public, max-age=31536000, immutable

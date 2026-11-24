@@ -3,21 +3,34 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title data-i18n="meta.title">Tab Forge</title>
-        <meta name="description" content="在浏览器里生成吉他六线谱，循环、变速跟练，支持合成器与 SoundFont 两种音色。" data-i18n-content="meta.description" />
-        <!-- TODO: 绑定自定义域名后，把 canonical / og:url 替换为正式域名 -->
+        <title data-i18n="meta.title">Tab Forge - 在线吉他六线谱生成器与即兴练习工具</title>
+        <meta name="description" content="免费在线生成吉他六线谱：选择调性、和弦进行、风格与音阶，一键生成即兴谱，支持循环变速跟练、谱面编辑与两种音色播放。" data-i18n-content="meta.description" />
+        <meta name="robots" content="index,follow" />
+        <!-- 短期直接使用 pages.dev；绑定自定义域名后替换 canonical / og:url 与 robots / sitemap。 -->
         <link rel="canonical" href="https://tab-forge.pages.dev/" />
-        <meta property="og:title" content="Tab Forge - 吉他六线谱即兴练习器" data-i18n-content="meta.ogTitle" />
-        <meta property="og:description" content="浏览器内生成六线谱并循环变速跟练。" data-i18n-content="meta.ogDescription" />
+        <meta property="og:title" content="Tab Forge - 在线吉他六线谱生成器" data-i18n-content="meta.ogTitle" />
+        <meta property="og:description" content="浏览器里生成吉他六线谱，循环变速跟练，支持合成器与 SoundFont 两种音色。" data-i18n-content="meta.ogDescription" />
         <meta property="og:type" content="website" />
         <meta property="og:url" content="https://tab-forge.pages.dev/" />
+        <meta property="og:site_name" content="Tab Forge" />
+        <meta property="og:locale" content="zh_CN" />
+        <meta name="twitter:card" content="summary" />
         <script type="application/ld+json">
         {
             "@context": "https://schema.org",
             "@type": "SoftwareApplication",
             "name": "Tab Forge",
+            "url": "https://tab-forge.pages.dev/",
+            "description": "Online guitar tab generator and improvisation practice tool.",
             "applicationCategory": "MusicApplication",
-            "operatingSystem": "Web"
+            "operatingSystem": "Web",
+            "inLanguage": "zh-CN",
+            "isAccessibleForFree": true,
+            "offers": {
+                "@type": "Offer",
+                "price": "0",
+                "priceCurrency": "CNY"
+            }
         }
         </script>
         <link rel="stylesheet" href="./src/style/index.css" />
@@ -27,8 +40,8 @@
             <!-- Header -->
             <div class="header">
                 <div>
-                    <h1>🎸 Tab Forge</h1>
-                    <span class="subtitle" data-i18n="header.subtitle">吉他六线谱即兴练习工具</span>
+                    <h1 data-i18n="header.title">🎸 Tab Forge 吉他六线谱生成器</h1>
+                    <span class="subtitle" data-i18n="header.subtitle">在线生成、编辑、循环变速跟练六线谱</span>
                 </div>
                 <div class="header-actions">
                     <select id="uiLanguageSelect" class="compact-select" data-i18n-title="header.languageTitle" title="界面语言 / UI language">

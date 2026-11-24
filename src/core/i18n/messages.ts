@@ -10,13 +10,14 @@ import type { MessageValue } from './index.ts';
 
 export const ZH_CN = {
     // ===== 页面元信息 =====
-    'meta.title': 'Tab Forge - 即兴练习工具',
-    'meta.description': '在浏览器里生成吉他六线谱，循环、变速跟练，支持合成器与 SoundFont 两种音色。',
-    'meta.ogTitle': 'Tab Forge - 吉他六线谱即兴练习器',
-    'meta.ogDescription': '浏览器内生成六线谱并循环变速跟练。',
+    'meta.title': 'Tab Forge - 在线吉他六线谱生成器与即兴练习工具',
+    'meta.description': '免费在线生成吉他六线谱：选择调性、和弦进行、风格与音阶，一键生成即兴谱，支持循环变速跟练、谱面编辑与两种音色播放。',
+    'meta.ogTitle': 'Tab Forge - 在线吉他六线谱生成器',
+    'meta.ogDescription': '浏览器里生成吉他六线谱，循环变速跟练，支持合成器与 SoundFont 两种音色。',
 
     // ===== 顶部 =====
-    'header.subtitle': '吉他六线谱即兴练习工具',
+    'header.title': '🎸 Tab Forge 吉他六线谱生成器',
+    'header.subtitle': '在线生成、编辑、循环变速跟练六线谱',
     'header.export': '📤 导出',
     'header.exportTitle': '导出乐谱',
     'header.languageTitle': '界面语言 / UI language',
@@ -662,13 +663,14 @@ export const ZH_CN = {
 
 export const EN: Record<keyof typeof ZH_CN, MessageValue> = {
     // ===== Meta =====
-    'meta.title': 'Tab Forge - Improvisation Practice Tool',
-    'meta.description': 'Generate guitar tablature in your browser, practice on loop at any speed, with synth and SoundFont tones.',
-    'meta.ogTitle': 'Tab Forge - Guitar Tab Improvisation Practice',
-    'meta.ogDescription': 'Generate tablature in your browser and practice on loop at adjustable speed.',
+    'meta.title': 'Tab Forge - Online Guitar Tab Generator & Improv Practice',
+    'meta.description': 'Generate guitar tablature online: pick a key, chord progression, style and scale, then practice on loop at any speed with synth and SoundFont tones.',
+    'meta.ogTitle': 'Tab Forge - Online Guitar Tab Generator',
+    'meta.ogDescription': 'Generate guitar tablature in your browser and practice on loop at adjustable speed.',
 
     // ===== Header =====
-    'header.subtitle': 'Guitar tab improvisation practice tool',
+    'header.title': '🎸 Tab Forge Guitar Tab Generator',
+    'header.subtitle': 'Generate, edit and loop-practice tablature online',
     'header.export': '📤 Export',
     'header.exportTitle': 'Export score',
     'header.languageTitle': 'UI language',
